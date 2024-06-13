@@ -1,0 +1,4 @@
+%{
+  "back_breeze": {:hex, :back_breeze, "0.1.0", "521b898b4d4f8ed8a0fb1c209953f90756db655daed50bdf752d4a981aa51440", [:mix], [{:termite, "~> 0.1.0", [hex: :termite, repo: "hexpm", optional: false]}], "hexpm", "1279598d22dc4d813828294ee6e0c7e74d0eb2fbe81fe349b6ca82a5987855da"},
+  "termite": {:hex, :termite, "0.1.0", "db750aca19a3be61eed91f22e5851b07a1158d949a9e38062a9ab6f7654ab624", [:mix], [], "hexpm", "ff5b009f9e084fb85cc49b6db289bcc86b5d7b85ab593d9aa62cc91895b9ebb8"},
+}
