@@ -32,7 +32,8 @@ defmodule Breeze.MixProject do
   defp deps do
     [
       {:termite, "~> 0.1.0"},
-      {:back_breeze, "~> 0.1.0", only: :dev},
+      {:phoenix_live_view, "~> 1.0.0-rc.0"},
+      {:back_breeze, "~> 0.1.0", only: :dev}
     ]
   end
 end

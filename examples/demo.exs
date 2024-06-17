@@ -3,13 +3,31 @@ defmodule Demo do
 
   def mount(_opts, term) do
     Process.send_after(self(), :tick, 200)
-    {:ok, assign(term, name: "world")}
+    {:ok, assign(term, name: "world", test: "foo")}
   end
 
   def render(assigns) do
-    BackBreeze.Style.bold()
-    |> BackBreeze.Style.foreground_color(:rand.uniform(8))
-    |> BackBreeze.Style.render("hello #{assigns.name}")
+    ~H"""
+    <box style={%{bold: @name == :world, foreground_color: :rand.uniform(8)}}>
+      <.announce a="b" name={@name} another={@name}>
+        <%= @test %>
+      </.announce>
+    </box>
+    """
+  end
+
+  def announce(assigns) do
+    ~H"""
+      Hello <%= @name %>
+      <%= render_slot(@inner_block) %>
+      <.more />
+    """
+  end
+
+  def more(assigns) do
+    ~H"""
+      <.box>More things</.box>
+    """
   end
 
   def handle_info(:tick, term) do
@@ -19,5 +37,6 @@ defmodule Demo do
   end
 end
 
-Breeze.Server.start_link(view: Demo)
-:timer.sleep(5000)
+Demo.render(%{name: "lol", test: "foo"})
+|> IO.inspect
+#:timer.sleep(5000)

@@ -28,6 +28,7 @@ defmodule Breeze.Server do
     reader = Termite.Terminal.reader(terminal)
     state = %{state | terminal: terminal, reader: reader}
     {:ok, state} = state.view.mount(start_opts, state)
+    IO.inspect(state)
     render(state)
     {:noreply, state}
   end
