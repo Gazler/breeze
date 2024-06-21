@@ -2,7 +2,7 @@ defmodule Snake do
   use Breeze.View
 
   def mount(_opts, term) do
-    path = [{7, 5}, {8, 5}, {9, 5}, {10, 5}]
+    path = [{1, 1}, {1, 2}, {1, 3}, {1, 4}]
     size = %{width: 15, height: 10}
     food = random_food(size, path)
 
@@ -15,24 +15,24 @@ defmodule Snake do
   end
 
   def render(assigns) do
-    [draw_screen(assigns.size)] ++ draw_snake(assigns.path) ++ [draw_food(assigns.food)]
-  end
-
-  defp draw_screen(size) do
-    BackBreeze.Style.border()
-    |> BackBreeze.Style.width(size.width * 2)
-    |> BackBreeze.Style.height(size.height)
-    |> BackBreeze.Style.render("")
-  end
-
-  defp draw_snake(path) do
-    Enum.map(path, fn {x, y} ->
-      {x * 2, y + 2, BackBreeze.Style.reverse() |> BackBreeze.Style.render("  ")}
-    end)
-  end
-
-  defp draw_food({x, y}) do
-    {x * 2, y + 2, BackBreeze.Style.foreground_color(2) |> BackBreeze.Style.render("🍏")}
+    ~H"""
+    <box style={style(%{border: :line, width: @size.width * 2, height: @size.height + 1})}>
+      <box style={style(%{foreground_color: 3, position: :absolute, left: 2, top: 0})}>
+        Score: <%= length(@path) - 4 %>
+      </box>
+      <box
+        :for={{x, y} <- @path}
+        style={style(%{background_color: 7, position: :absolute, left: x * 2 - 1, top: y + 1})}
+      >
+        ##
+      </box>
+      <box style={
+        style(%{foreground_color: 2, position: :absolute, left: @food.x * 2 - 1, top: @food.y + 1})
+      }>
+        🍏
+      </box>
+    </box>
+    """
   end
 
   def handle_event(_, %{"key" => "ArrowUp"}, term), do: {:noreply, change_dir(term, :up)}
@@ -60,7 +60,7 @@ defmodule Snake do
         :down -> {cur_x, cur_y + 1}
       end
 
-    wall_collision? = x == 0 || x == size.width + 1 || y == -1 || y == size.height
+    wall_collision? = x == 0 || x == size.width + 1 || y == -1 || y == size.height + 1
     tail_collision? = {x, y} in path
 
     new_path = path ++ [{x, y}]
@@ -68,7 +68,7 @@ defmodule Snake do
     term = assign(term, input_buffer: buffer, direction: direction)
 
     cond do
-      {x, y} == food ->
+      {x, y} == {food.x, food.y} ->
         {:noreply, assign(term, path: new_path, food: random_food(size, new_path))}
 
       wall_collision? || tail_collision? ->
@@ -103,7 +103,7 @@ defmodule Snake do
     x = :rand.uniform(size.width)
     y = :rand.uniform(size.height) - 1
 
-    if {x, y} in path, do: random_food(size, path), else: {x, y}
+    if {x, y} in path, do: random_food(size, path), else: %{x: x, y: y}
   end
 end
 

@@ -60,7 +60,7 @@ defmodule Breeze.Server do
 
         # TODO: synchronous write
         Termite.Terminal.write(state.terminal, output)
-        :timer.sleep(100)
+        :timer.sleep(1000)
         System.halt()
     end
   end
@@ -69,28 +69,8 @@ defmodule Breeze.Server do
     output =
       Termite.Screen.escape_sequence(:reset) <> Termite.Screen.escape_sequence(:screen_clear)
 
-    view_outout =
-      case state.view.render(state.assigns) do
-        out when is_binary(out) -> out
-        out when is_list(out) -> reduce_render(out, "")
-      end
-
+    view_outout = Breeze.Renderer.render_to_string(state.view, state.assigns)
     Termite.Terminal.write(state.terminal, output <> view_outout)
-  end
-
-  defp reduce_render([], acc) do
-    acc
-  end
-
-  defp reduce_render([bin | rest], acc) when is_binary(bin) do
-    reduce_render(rest, acc <> bin)
-  end
-
-  defp reduce_render([{x, y, out} | rest], acc) do
-    output =
-      Termite.Screen.escape_sequence(:cursor_move, [x, y]) <> out
-
-    reduce_render(rest, acc <> output)
   end
 
   defp convert_key("A"), do: "ArrowUp"
