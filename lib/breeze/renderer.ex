@@ -21,7 +21,7 @@ defmodule Breeze.Renderer do
   opening_tag = ignore(string("<")) |> concat(tag) |> optional(attribute) |> ignore(string(">"))
   closing_tag = ignore(string("</")) |> concat(tag) |> ignore(string(">"))
 
-  padding = string("\n") |> repeat(ascii_char([?\s]))
+  padding = string("\n") |> repeat(choice([ascii_char([?\s]), string("\n")]))
 
   defcombinatorp(
     :node,
@@ -60,25 +60,7 @@ defmodule Breeze.Renderer do
   end
 
   defp build_tree([{:attribute, ["style", style]} | rest], _box, children) do
-    %{style: style, attributes: attributes} =
-      style
-      |> Base.decode64!()
-      |> Jason.decode!(keys: :atoms!)
-
-    # TODO: allow strings for these values in backbreeze
-    style =
-      case Map.get(style, :border) do
-        nil -> style
-        border -> %{style | border: String.to_existing_atom(border)}
-      end
-
-    attributes =
-      case Map.get(attributes, :position) do
-        nil -> attributes
-        position -> %{attributes | position: String.to_existing_atom(position)}
-      end
-
-    element = %Breeze.Element{style: style, attributes: attributes}
+    element = string_to_styles(style)
     opts = Map.put(element.attributes, :style, element.style)
     build_tree(rest, Box.new(opts), children)
   end
@@ -95,5 +77,29 @@ defmodule Breeze.Renderer do
 
   defp build_tree([], box, children) do
     %{box | children: Enum.reverse(children)}
+  end
+
+  defp string_to_styles(str) do
+    map =
+      String.split(str, " ")
+      |> Enum.reduce(%{}, fn
+        "border", acc -> Map.put(acc, :border, :line)
+        "bold", acc -> Map.put(acc, :bold, true)
+        "italic", acc -> Map.put(acc, :italic, true)
+        "inverse", acc -> Map.put(acc, :reverse, true)
+        "reverse", acc -> Map.put(acc, :reverse, true)
+        "absolute", acc -> Map.put(acc, :position, :absolute)
+        "left-" <> num, acc -> Map.put(acc, :left, String.to_integer(num))
+        "top-" <> num, acc -> Map.put(acc, :top, String.to_integer(num))
+        "width-" <> num, acc -> Map.put(acc, :width, String.to_integer(num))
+        "height-" <> num, acc -> Map.put(acc, :height, String.to_integer(num))
+        "text-" <> num, acc -> Map.put(acc, :foreground_color, String.to_integer(num))
+        "bg-" <> num, acc -> Map.put(acc, :background_color, String.to_integer(num))
+        _, acc -> acc
+      end)
+
+    style_keys = Map.keys(Map.from_struct(%BackBreeze.Style{}))
+    {style, attributes} = Map.split(map, style_keys)
+    struct(Breeze.Element, %{style: style, attributes: attributes})
   end
 end

@@ -16,21 +16,31 @@ defmodule Snake do
 
   def render(assigns) do
     ~H"""
-    <box style={style(%{border: :line, width: @size.width * 2, height: @size.height + 1})}>
-      <box style={style(%{foreground_color: 3, position: :absolute, left: 2, top: 0})}>
-        Score: <%= length(@path) - 4 %>
+    <.panel width={@size.width * 2} height={@size.height + 1}>
+      <:title>
+        <box style="text-3">Score: <%= length(@path) - 4 %></box>
+      </:title>
+      <box :for={{x, y} <- @path} style={"bg-7 absolute left-#{x * 2 - 1} top-#{y + 1}"}>##</box>
+      <box style={"text-2 absolute text-#{@food.color} left-#{@food.x * 2 - 1} top-#{@food.y + 1}"}>
+        <%= @food.glyph %>
       </box>
-      <box
-        :for={{x, y} <- @path}
-        style={style(%{background_color: 7, position: :absolute, left: x * 2 - 1, top: y + 1})}
-      >
-        ##
+    </.panel>
+    """
+  end
+
+  attr(:width, :integer)
+  attr(:height, :integer)
+
+  slot(:title)
+  slot(:inner_block)
+
+  def panel(assigns) do
+    ~H"""
+    <box style={"border width-#{@width} height-#{@height}"}>
+      <box :if={assigns[:title]} style="absolute left-1 top-0">
+        <%= render_slot(@title) %>
       </box>
-      <box style={
-        style(%{foreground_color: 2, position: :absolute, left: @food.x * 2 - 1, top: @food.y + 1})
-      }>
-        🍏
-      </box>
+      <%= render_slot(@inner_block) %>
     </box>
     """
   end
@@ -102,8 +112,12 @@ defmodule Snake do
   defp random_food(size, path) do
     x = :rand.uniform(size.width)
     y = :rand.uniform(size.height) - 1
+    color = :rand.uniform(16) + 1
+    glyph = Enum.random(["🍇", "🍈", "🍉", "🍍", "🍎", "🍑", "🍒", "🍓"])
 
-    if {x, y} in path, do: random_food(size, path), else: %{x: x, y: y}
+    if {x, y} in path,
+      do: random_food(size, path),
+      else: %{x: x, y: y, color: color, glyph: glyph}
   end
 end
 

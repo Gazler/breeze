@@ -9,20 +9,16 @@ defmodule Demo do
   def render(assigns) do
     ~H"""
     <box>
-      <box style={style(%{bold: true})}>
-      This is a thing
-      </box>
+      <box style="bold">This is a thing</box>
       <.announce :for={x <- [1, 2, 3]} name={@name} index={x} />
-      <box>
-        And I'm after
-      </box>
+      <box>And I'm after</box>
     </box>
     """
   end
 
   def announce(assigns) do
     ~H"""
-    <box style={style(%{background_color: :rand.uniform(8), position: :absolute, left: 5, top: @index})}>
+    <box style={"bg-#{:rand.uniform(8)} absolute left-0 top-#{@index}"}>
       hello <%= @name %> <%= @index %>
     </box>
     """

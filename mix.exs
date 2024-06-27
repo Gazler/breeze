@@ -31,7 +31,6 @@ defmodule Breeze.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:jason, "~> 1.0"},
       {:nimble_parsec, "~> 1.4"},
       {:back_breeze, git: "git@github.com:gazler/back_breeze.git"},
       {:phoenix_live_view, "~> 1.0.0-rc.3"}

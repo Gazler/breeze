@@ -7,13 +7,25 @@ defmodule Breeze.RendererTest do
 
     def render(assigns) do
       ~H"""
-      <box style={style(%{border: :line})}>
-        <box style={style(%{foreground_color: 3, position: :absolute, left: 1, top: 0})}>
-          Title
+      <.panel>
+        <:title>
+          <box style="text-3">Title</box>
+        </:title>
+        <box style="bold">Hello <%= @name %></box>
+      </.panel>
+      """
+    end
+
+    slot(:title)
+    slot(:inner_block)
+
+    defp panel(assigns) do
+      ~H"""
+      <box style="border">
+        <box :if={assigns[:title]} style="absolute left-1 top-0">
+          <%= render_slot(@title) %>
         </box>
-        <box style={style(%{bold: true})}>
-          Hello <%= @name %>
-        </box>
+        <%= render_slot(@inner_block) %>
       </box>
       """
     end
@@ -44,8 +56,12 @@ defmodule Breeze.RendererTest do
                style: BackBreeze.Style.border(),
                children: [
                  %Box{
-                   content: "Title",
-                   style: BackBreeze.Style.foreground_color(3),
+                   children: [
+                     %Box{
+                       content: "Title",
+                       style: BackBreeze.Style.foreground_color(3)
+                     }
+                   ],
                    position: :absolute,
                    left: 1,
                    top: 0
