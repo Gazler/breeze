@@ -42,7 +42,7 @@ defmodule Breeze.RendererTest do
     end
   end
 
-  describe "parse/1" do
+  describe "parse/2" do
     alias BackBreeze.Box
 
     test "converts a string to boxes" do
@@ -50,7 +50,7 @@ defmodule Breeze.RendererTest do
         Phoenix.HTML.Safe.to_iodata(Example.render(%{name: "world"}))
         |> IO.iodata_to_binary()
 
-      boxes = Renderer.parse(data)
+      {_, boxes} = Renderer.parse(data)
 
       assert boxes == %Box{
                style: BackBreeze.Style.border(),

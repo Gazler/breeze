@@ -1,5 +1,13 @@
 defmodule Breeze.Term do
-  defstruct [:view, :terminal, :reader, assigns: %{}]
+  defstruct [
+    :view,
+    :terminal,
+    :reader,
+    assigns: %{},
+    focused: nil,
+    focusables: [],
+    implicit_state: %{}
+  ]
 end
 
 defmodule Breeze.Server do
@@ -28,7 +36,38 @@ defmodule Breeze.Server do
     reader = Termite.Terminal.reader(terminal)
     state = %{state | terminal: terminal, reader: reader}
     {:ok, state} = state.view.mount(start_opts, state)
-    render(state)
+    state = render(state)
+    {:noreply, state}
+  end
+
+  def handle_info({reader, {:data, "\t"}}, %{reader: reader} = state) do
+    index = Enum.find_index(state.focusables, &(&1 == state.focused))
+
+    new_focused =
+      if index do
+        Enum.at(state.focusables, index + 1)
+      else
+        hd(state.focusables)
+      end
+
+    state = %{state | focused: new_focused}
+    state = render(state)
+
+    {:noreply, state}
+  end
+
+  def handle_info({reader, {:data, "\e[Z"}}, %{reader: reader} = state) do
+    index = Enum.find_index(state.focusables, &(&1 == state.focused))
+
+    new_focused =
+      cond do
+        index == 0 -> nil
+        index == nil -> hd(Enum.reverse(state.focusables))
+        true -> Enum.at(state.focusables, index - 1)
+      end
+
+    state = %{state | focused: new_focused}
+    state = render(state)
     {:noreply, state}
   end
 
@@ -40,15 +79,27 @@ defmodule Breeze.Server do
         key
       end
 
+    selected_implicit = Enum.find(state.implicit_state, fn {id, _el} -> id == state.focused end)
+
+    state =
+      if selected_implicit do
+        {id, {mod, selected}} = selected_implicit
+        val = mod.handle_event(:ignore_me, %{"key" => key}, selected)
+        implicit_state = Map.put(state.implicit_state, id, {mod, val})
+        %{state | implicit_state: implicit_state}
+      else
+        state
+      end
+
     {:noreply, state} = state.view.handle_event(:ignore_me, %{"key" => key}, state)
-    render(state)
+    state = render(state)
     {:noreply, state}
   end
 
   def handle_info(message, state) do
     case state.view.handle_info(message, state) do
       {:noreply, state} ->
-        render(state)
+        state = render(state)
         {:noreply, state}
 
       {:stop, state} ->
@@ -69,8 +120,50 @@ defmodule Breeze.Server do
     output =
       Termite.Screen.escape_sequence(:reset) <> Termite.Screen.escape_sequence(:screen_clear)
 
-    view_outout = Breeze.Renderer.render_to_string(state.view, state.assigns)
-    Termite.Terminal.write(state.terminal, output <> view_outout)
+    {acc, %{content: view_output}} =
+      Breeze.Renderer.render(state.view, state.assigns,
+        focused: state.focused,
+        implicit_state: state.implicit_state
+      )
+
+    Termite.Terminal.write(state.terminal, output <> view_output)
+
+    last = map_size(acc.elements)
+
+    {implicits, _, _, _} =
+      acc.elements
+      |> Enum.sort()
+      |> Enum.reduce({%{}, [], nil, nil}, fn {idx, elem}, {acc, current, mod, last_id} ->
+        elem = Map.new(elem) |> Map.delete(:focusable)
+        {implicit, elem} = Map.pop(elem, :implicit)
+        {id, elem} = Map.pop(elem, :id)
+        {implicit_id, elem} = Map.pop(elem, :implicit_id)
+
+        cond do
+          mod && (implicit || idx == last - 1) ->
+            last_state =
+              case state.implicit_state[last_id] do
+                {_mod, last_state} -> last_state
+                _ -> %{}
+              end
+
+            current = if implicit_id, do: [elem | current], else: current
+
+            items = Enum.reverse(current)
+            {Map.put(acc, last_id, {mod, mod.init(items, last_state)}), [], implicit, id}
+
+          !mod && implicit ->
+            {acc, current, implicit, id}
+
+          implicit_id ->
+            {acc, [elem | current], mod, last_id}
+
+          true ->
+            {acc, current, mod, last_id}
+        end
+      end)
+
+    %{state | focusables: acc.focusables, implicit_state: implicits}
   end
 
   defp convert_key("A"), do: "ArrowUp"
