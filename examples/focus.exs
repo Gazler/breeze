@@ -17,14 +17,14 @@ defmodule Breeze.List do
   def handle_event(_, %{"key" => "ArrowDown"}, %{values: values} = state) do
     index = Enum.find_index(values, &(&1 == state.selected))
     value = if index, do: Enum.at(values, index + 1) || hd(values), else: hd(values)
-    %{state | selected: value}
+    {{:change, %{value: value}}, %{state | selected: value}}
   end
 
   def handle_event(_, %{"key" => "ArrowUp"}, %{values: values} = state) do
     index = Enum.find_index(values, &(&1 == state.selected))
     first = hd(Enum.reverse(values))
     value = if index, do: Enum.at(values, index - 1) || first, else: first
-    %{state | selected: value}
+    {{:change, %{value: value}}, %{state | selected: value}}
   end
 
   def handle_event(_, _, state), do: state.selected
@@ -34,14 +34,14 @@ defmodule Focus do
   use Breeze.View
 
   def mount(_opts, term) do
-    {:ok, term}
+    {:ok, assign(term, last_value: "none")}
   end
 
   def render(assigns) do
     ~H"""
     <box id="lol">
       <box style="inline border focus:border-3" focusable id="base">
-        <.list :for={id <- ["l1", "l2", "l3", "l4", "l5"]} id={id}>
+        <.list :for={id <- ["l1", "l2", "l3", "l4", "l5"]} br-change="change" id={id}>
           <:item value="hello">Hello</:item>
           <:item value="world">World</:item>
           <:item value="foo">Foo</:item>
@@ -55,11 +55,13 @@ defmodule Focus do
           <:item value="foo">Foo</:item>
         </.list>
       </box>
+      <box><%= @last_value %></box>
     </box>
     """
   end
 
   attr(:id, :string, required: true)
+  attr(:rest, :global)
 
   slot :item do
     attr(:value, :string, required: true)
@@ -67,7 +69,7 @@ defmodule Focus do
 
   def list(assigns) do
     ~H"""
-    <box focusable style="border focus:border-3" implicit={Breeze.List} id={@id}>
+    <box focusable style="border focus:border-3" implicit={Breeze.List} id={@id} {@rest}>
       <%= for item <- @item do %>
         <box
           value={item.value}
@@ -80,6 +82,10 @@ defmodule Focus do
 
   def handle_info(_, term) do
     {:noreply, term}
+  end
+
+  def handle_event("change", %{value: value}, term) do
+    {:noreply, assign(term, last_value: value)}
   end
 
   def handle_event(_, _, term) do

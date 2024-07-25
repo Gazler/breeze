@@ -6,6 +6,7 @@ defmodule Breeze.Term do
     assigns: %{},
     focused: nil,
     focusables: [],
+    events: %{},
     implicit_state: %{}
   ]
 end
@@ -84,7 +85,15 @@ defmodule Breeze.Server do
     state =
       if selected_implicit do
         {id, {mod, selected}} = selected_implicit
-        val = mod.handle_event(:ignore_me, %{"key" => key}, selected)
+        {{:change, event}, val} = mod.handle_event(:ignore_me, %{"key" => key}, selected)
+        change = get_in(state.events, [id, :change])
+
+        state =
+          if change do
+            {:noreply, state} = state.view.handle_event(change, event, state)
+            state
+          end
+
         implicit_state = Map.put(state.implicit_state, id, {mod, val})
         %{state | implicit_state: implicit_state}
       else
@@ -139,6 +148,8 @@ defmodule Breeze.Server do
         {id, elem} = Map.pop(elem, :id)
         {implicit_id, elem} = Map.pop(elem, :implicit_id)
 
+        # TODO: delete all br elements
+
         cond do
           mod && (implicit || idx == last - 1) ->
             last_state =
@@ -163,7 +174,21 @@ defmodule Breeze.Server do
         end
       end)
 
-    %{state | focusables: acc.focusables, implicit_state: implicits}
+    events =
+      acc.elements
+      |> Enum.sort()
+      |> Enum.reduce(%{}, fn {_idx, elem}, acc ->
+        id = Keyword.get(elem, :id)
+        change = Keyword.get(elem, :"br-change")
+
+        if change do
+          Map.put(acc, id, %{change: change})
+        else
+          acc
+        end
+      end)
+
+    %{state | focusables: acc.focusables, implicit_state: implicits, events: events}
   end
 
   defp convert_key("A"), do: "ArrowUp"

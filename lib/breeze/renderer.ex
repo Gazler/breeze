@@ -11,7 +11,7 @@ defmodule Breeze.Renderer do
 
   attribute =
     ignore(string(" "))
-    |> ascii_string([?a..?z], min: 1)
+    |> ascii_string([?a..?z, ?-], min: 1)
     |> ignore(string("="))
     |> ignore(string(~s(")))
     |> ascii_string([not: ?"], min: 1)
@@ -112,11 +112,6 @@ defmodule Breeze.Renderer do
     build_tree(rest, box, children, style, Keyword.put(flags, :id, box_id), acc, opts)
   end
 
-  defp build_tree([{:attribute, ["value", value]} | rest], box, children, style, flags, acc, opts) do
-    acc = %{acc | flags: Keyword.put(acc.flags, :value, value)}
-    build_tree(rest, box, children, style, Keyword.put(flags, :value, value), acc, opts)
-  end
-
   defp build_tree(
          [{:attribute, ["implicit", mod]} | rest],
          box,
@@ -129,6 +124,12 @@ defmodule Breeze.Renderer do
     mod = String.to_atom(mod)
     acc = %{acc | flags: Keyword.put(acc.flags, :implicit, mod)}
     build_tree(rest, box, children, style, Keyword.put(flags, :implicit, mod), acc, opts)
+  end
+
+  defp build_tree([{:attribute, [flag, value]} | rest], box, children, style, flags, acc, opts) do
+    flag = String.to_atom(flag)
+    acc = %{acc | flags: Keyword.put(acc.flags, flag, value)}
+    build_tree(rest, box, children, style, Keyword.put(flags, flag, value), acc, opts)
   end
 
   defp build_tree([{:attribute_bool, [attr]} | rest], box, children, style, flags, acc, opts) do
