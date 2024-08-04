@@ -189,17 +189,17 @@ defmodule Breeze.Renderer do
 
     implicit_state = Keyword.get(opts, :implicit_state, %{})
     implicit_id = Keyword.get(flags, :implicit_id)
-    value = Keyword.get(flags, :value)
 
-    implicit =
+    {implicit_mod, implicit} =
       case implicit_id && get_in(implicit_state, [implicit_id]) do
-        nil -> nil
-        {_mod, state} -> state
+        nil -> {nil, nil}
+        {mod, state} -> {mod, state}
       end
 
     style_opts =
-      if implicit && implicit[:selected] == value do
-        Keyword.put(style_opts, :selected, true)
+      if implicit do
+        modifiers = implicit_mod.handle_modifiers(flags, implicit)
+        style_opts ++ modifiers
       else
         style_opts
       end

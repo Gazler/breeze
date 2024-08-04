@@ -92,6 +92,8 @@ defmodule Breeze.Server do
           if change do
             {:noreply, state} = state.view.handle_event(change, event, state)
             state
+          else
+            state
           end
 
         implicit_state = Map.put(state.implicit_state, id, {mod, val})

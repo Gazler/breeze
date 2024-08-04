@@ -28,6 +28,14 @@ defmodule Breeze.List do
   end
 
   def handle_event(_, _, state), do: state.selected
+
+  def handle_modifiers(flags, state) do
+    if state.selected == Keyword.get(flags, :value) do
+      [selected: true]
+    else
+      []
+    end
+  end
 end
 
 defmodule Focus do
