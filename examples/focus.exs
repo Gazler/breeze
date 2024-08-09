@@ -27,7 +27,7 @@ defmodule Breeze.List do
     {{:change, %{value: value}}, %{state | selected: value}}
   end
 
-  def handle_event(_, _, state), do: state.selected
+  def handle_event(_, _, state), do: {:noreply, state}
 
   def handle_modifiers(flags, state) do
     if state.selected == Keyword.get(flags, :value) do
@@ -78,12 +78,11 @@ defmodule Focus do
   def list(assigns) do
     ~H"""
     <box focusable style="border focus:border-3" implicit={Breeze.List} id={@id} {@rest}>
-      <%= for item <- @item do %>
         <box
+          :for={item <- @item}
           value={item.value}
           style="selected:bg-24 selected:text-0 focus:selected:text-7 focus:selected:bg-4"
         ><%= render_slot(item, %{}) %></box>
-      <% end %>
     </box>
     """
   end

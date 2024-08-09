@@ -1,4 +1,6 @@
 defmodule Breeze.Term do
+  @moduledoc false
+
   defstruct [
     :view,
     :terminal,
@@ -12,17 +14,76 @@ defmodule Breeze.Term do
 end
 
 defmodule Breeze.Server do
+  @moduledoc """
+  This module powers the GenServer responsible for running the application.
+
+  Consider the following Breeze Application:
+
+  ```
+  defmodule Demo do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, assign(term, counter: 0)}
+
+    def render(assigns) do
+      ~H"<box>Counter: <%= @counter %></box>"
+    end
+
+    def handle_event(_, %{"key" => "ArrowUp"}, term) do
+      {:noreply, assign(term, counter: term.assigns.counter + 1)}
+    end
+
+    def handle_event(_, %{"key" => "ArrowDown"}, term) do
+      {:noreply, assign(term, counter: term.assigns.counter - 1)}
+    end
+
+    def handle_event(_, %{"key" => "q"}, term) do
+      {:stop, term}
+    end
+
+    def handle_event(_, _, term) do
+      {:noreply, term}
+    end
+  end
+  ```
+
+  This can be started directly with:
+
+  ```
+  Breeze.Server.start_link(view: Focus)
+  ```
+
+  Or in a supervision tree:
+
+  ```
+  children = [
+    {Breeze.Server, view: Demo}
+  ]
+  ```
+  """
+
   use GenServer
 
+  @doc """
+  Start the Breeze application.
+
+  Valid options are:
+
+    * `:view` - the view to run. This is required
+    * `:hide_cursor` - hide the cursor on start. Defaults to `false`
+
+  """
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
   end
 
+  @doc false
   def init(opts) do
     view = Keyword.fetch!(opts, :view)
     {:ok, %Breeze.Term{view: view}, {:continue, {:start, opts}}}
   end
 
+  @doc false
   def handle_continue({:start, opts}, state) do
     start_opts = Keyword.get(opts, :start_opts, [])
     terminal = Termite.Terminal.start()
@@ -34,13 +95,14 @@ defmodule Breeze.Server do
         terminal
       end
 
-    reader = Termite.Terminal.reader(terminal)
+    reader = terminal.reader
     state = %{state | terminal: terminal, reader: reader}
     {:ok, state} = state.view.mount(start_opts, state)
     state = render(state)
     {:noreply, state}
   end
 
+  @doc false
   def handle_info({reader, {:data, "\t"}}, %{reader: reader} = state) do
     index = Enum.find_index(state.focusables, &(&1 == state.focused))
 
@@ -82,29 +144,36 @@ defmodule Breeze.Server do
 
     selected_implicit = Enum.find(state.implicit_state, fn {id, _el} -> id == state.focused end)
 
-    state =
+    {view_state, state} =
       if selected_implicit do
         {id, {mod, selected}} = selected_implicit
-        {{:change, event}, val} = mod.handle_event(:ignore_me, %{"key" => key}, selected)
+
+        {event, val} =
+          case mod.handle_event(:ignore_me, %{"key" => key}, selected) do
+            {{:change, event}, val} -> {event, val}
+            {:noreply, val} -> {nil, val}
+          end
+
         change = get_in(state.events, [id, :change])
 
-        state =
-          if change do
-            {:noreply, state} = state.view.handle_event(change, event, state)
-            state
+        {view_state, state} =
+          if event && change do
+            handle_event(change, event, state)
           else
-            state
+            {:noreply, state}
           end
 
         implicit_state = Map.put(state.implicit_state, id, {mod, val})
-        %{state | implicit_state: implicit_state}
+        {view_state, %{state | implicit_state: implicit_state}}
       else
-        state
+        {:noreply, state}
       end
 
-    {:noreply, state} = state.view.handle_event(:ignore_me, %{"key" => key}, state)
-    state = render(state)
-    {:noreply, state}
+    case view_state == :stop || handle_event(:ignore_me, %{"key" => key}, state) do
+      true -> stop(state)
+      {:stop, state} -> stop(state)
+      {:noreply, state} -> {:noreply, render(state)}
+    end
   end
 
   def handle_info(message, state) do
@@ -114,17 +183,19 @@ defmodule Breeze.Server do
         {:noreply, state}
 
       {:stop, state} ->
-        output =
-          Termite.Screen.escape_sequence(:reset) <>
-            Termite.Screen.escape_sequence(:screen_clear) <>
-            Termite.Screen.escape_sequence(:cursor_show) <>
-            Termite.Screen.escape_sequence(:screen_alt_exit)
-
-        # TODO: synchronous write
-        Termite.Terminal.write(state.terminal, output)
-        :timer.sleep(1000)
-        System.halt()
+        stop(state)
     end
+  end
+
+  defp stop(state) do
+    output =
+      Termite.Screen.escape_sequence(:reset) <>
+        Termite.Screen.escape_sequence(:screen_clear) <>
+        Termite.Screen.escape_sequence(:cursor_show) <>
+        Termite.Screen.escape_sequence(:screen_alt_exit)
+
+    Termite.Terminal.write(state.terminal, output)
+    System.halt()
   end
 
   defp render(state) do
@@ -197,4 +268,8 @@ defmodule Breeze.Server do
   defp convert_key("B"), do: "ArrowDown"
   defp convert_key("C"), do: "ArrowRight"
   defp convert_key("D"), do: "ArrowLeft"
+
+  defp handle_event(change, event, state) do
+    state.view.handle_event(change, event, state)
+  end
 end

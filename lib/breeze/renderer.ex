@@ -244,6 +244,13 @@ defmodule Breeze.Renderer do
   defp apply_style("inverse", acc), do: Map.put(acc, :reverse, true)
   defp apply_style("reverse", acc), do: Map.put(acc, :reverse, true)
   defp apply_style("inline", acc), do: Map.put(acc, :display, :inline)
+
+  defp apply_style("overflow-" <> overflow, acc),
+    do: Map.put(acc, :overflow, String.to_existing_atom(overflow))
+
+  defp apply_style("offset-top-" <> num, acc),
+    do: Map.put(acc, :scroll, {String.to_integer(num), 0})
+
   defp apply_style("absolute", acc), do: Map.put(acc, :position, :absolute)
   defp apply_style("left-" <> num, acc), do: Map.put(acc, :left, String.to_integer(num))
   defp apply_style("top-" <> num, acc), do: Map.put(acc, :top, String.to_integer(num))

@@ -1,15 +1,22 @@
 defmodule Breeze.MixProject do
   use Mix.Project
 
+  @version "0.2.0"
+
   def project do
     [
       app: :breeze,
-      version: "0.1.0",
-      description: "Library for writing terminal applications",
+      version: @version,
+      description: "LiveView inspired TUI library for writing terminal applications",
       package: package(),
-      elixir: "~> 1.17-rc",
+      elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      name: "Breeze",
+      source_url: "https://github.com/Gazler/breeze",
+      docs: [
+        source_ref: "v#{@version}"
+      ]
     ]
   end
 
@@ -24,7 +31,7 @@ defmodule Breeze.MixProject do
     [
       files: ~w(lib .formatter.exs mix.exs README.md LICENCE.md),
       licenses: ["MIT"],
-      links: %{}
+      links: %{"GitHub" => "https://github.com/Gazler/breeze"}
     ]
   end
 
@@ -32,8 +39,10 @@ defmodule Breeze.MixProject do
   defp deps do
     [
       {:nimble_parsec, "~> 1.4"},
-      {:back_breeze, git: "git@github.com:gazler/back_breeze.git"},
-      {:phoenix_live_view, "~> 1.0.0-rc.3"}
+      {:termite, "~> 0.2.0"},
+      {:back_breeze, "~> 0.2.0"},
+      {:phoenix_live_view, "~> 1.0.0-rc.3"},
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end
 end
