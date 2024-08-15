@@ -68,7 +68,10 @@ defmodule Breeze.Renderer do
       |> IO.iodata_to_binary()
       |> parse(opts)
 
-    {acc, BackBreeze.Box.render(box)}
+    %{box: box, dimensions: dimensions} =
+      BackBreeze.Box.render_with_dimensions(box)
+
+    {Map.put(acc, :dimensions, dimensions), box}
   end
 
   def parse(data, opts \\ []) do
@@ -189,16 +192,19 @@ defmodule Breeze.Renderer do
 
     implicit_state = Keyword.get(opts, :implicit_state, %{})
     implicit_id = Keyword.get(flags, :implicit_id)
+    id = implicit_id || Keyword.get(flags, :id)
 
     {implicit_mod, implicit} =
-      case implicit_id && get_in(implicit_state, [implicit_id]) do
+      case id && get_in(implicit_state, [id]) do
         nil -> {nil, nil}
         {mod, state} -> {mod, state}
       end
 
+    type = if id == Keyword.get(flags, :id), do: :root, else: :child
+
     style_opts =
       if implicit do
-        modifiers = implicit_mod.handle_modifiers(flags, implicit)
+        modifiers = implicit_mod.handle_modifiers(type, flags, implicit)
         style_opts ++ modifiers
       else
         style_opts
@@ -218,6 +224,12 @@ defmodule Breeze.Renderer do
   end
 
   defp string_to_styles(str, opts) do
+    str =
+      case Keyword.get_values(opts, :style) do
+        [] -> str
+        other -> str <> " " <> Enum.join(other, " ")
+      end
+
     map =
       String.split(str, " ")
       |> Enum.map(&String.split(&1, ":"))
@@ -255,6 +267,7 @@ defmodule Breeze.Renderer do
   defp apply_style("left-" <> num, acc), do: Map.put(acc, :left, String.to_integer(num))
   defp apply_style("top-" <> num, acc), do: Map.put(acc, :top, String.to_integer(num))
   defp apply_style("width-" <> num, acc), do: Map.put(acc, :width, String.to_integer(num))
+  defp apply_style("height-screen", acc), do: Map.put(acc, :height, :screen)
   defp apply_style("height-" <> num, acc), do: Map.put(acc, :height, String.to_integer(num))
 
   defp apply_style("text-" <> num, acc),

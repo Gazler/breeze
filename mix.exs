@@ -40,7 +40,7 @@ defmodule Breeze.MixProject do
     [
       {:nimble_parsec, "~> 1.4"},
       {:termite, "~> 0.2.0"},
-      {:back_breeze, "~> 0.2.0"},
+      {:back_breeze, "~> 0.2.0", path: "../back_breeze"},
       {:phoenix_live_view, "~> 1.0.0-rc.3"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]

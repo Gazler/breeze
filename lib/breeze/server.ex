@@ -8,6 +8,7 @@ defmodule Breeze.Term do
     assigns: %{},
     focused: nil,
     focusables: [],
+    elements: %{},
     events: %{},
     implicit_state: %{}
   ]
@@ -148,8 +149,10 @@ defmodule Breeze.Server do
       if selected_implicit do
         {id, {mod, selected}} = selected_implicit
 
+        element = Map.get(state.elements, id)
+
         {event, val} =
-          case mod.handle_event(:ignore_me, %{"key" => key}, selected) do
+          case mod.handle_event(:ignore_me, %{"key" => key, "element" => element}, selected) do
             {{:change, event}, val} -> {event, val}
             {:noreply, val} -> {nil, val}
           end
@@ -212,9 +215,17 @@ defmodule Breeze.Server do
 
     last = map_size(acc.elements)
 
+    elements = Enum.sort(acc.elements)
+
+    dimensions =
+      Enum.zip(elements, acc.dimensions)
+      |> Enum.reduce(%{}, fn {{_, flags}, dims}, acc ->
+        id = Keyword.get(flags, :id)
+        if id, do: Map.put(acc, id, dims), else: acc
+      end)
+
     {implicits, _, _, _} =
-      acc.elements
-      |> Enum.sort()
+      elements
       |> Enum.reduce({%{}, [], nil, nil}, fn {idx, elem}, {acc, current, mod, last_id} ->
         elem = Map.new(elem) |> Map.delete(:focusable)
         {implicit, elem} = Map.pop(elem, :implicit)
@@ -224,17 +235,24 @@ defmodule Breeze.Server do
         # TODO: delete all br elements
 
         cond do
+          # Handle a single implicit box with no children
+          last == 1 && implicit && id ->
+            {add_implicit_item(acc, state, id, implicit, []), [], implicit, id}
+
           mod && (implicit || idx == last - 1) ->
-            last_state =
-              case state.implicit_state[last_id] do
-                {_mod, last_state} -> last_state
-                _ -> %{}
+            current = if implicit_id, do: [elem | current], else: current
+            items = Enum.reverse(current)
+            acc = add_implicit_item(acc, state, last_id, mod, items)
+
+            # Handle an implicit box with no children as the last item
+            acc =
+              if implicit && id do
+                add_implicit_item(acc, state, id, implicit, [])
+              else
+                acc
               end
 
-            current = if implicit_id, do: [elem | current], else: current
-
-            items = Enum.reverse(current)
-            {Map.put(acc, last_id, {mod, mod.init(items, last_state)}), [], implicit, id}
+            {acc, [], implicit, id}
 
           !mod && implicit ->
             {acc, current, implicit, id}
@@ -261,7 +279,13 @@ defmodule Breeze.Server do
         end
       end)
 
-    %{state | focusables: acc.focusables, implicit_state: implicits, events: events}
+    %{
+      state
+      | elements: dimensions,
+        focusables: acc.focusables,
+        implicit_state: implicits,
+        events: events
+    }
   end
 
   defp convert_key("A"), do: "ArrowUp"
@@ -271,5 +295,15 @@ defmodule Breeze.Server do
 
   defp handle_event(change, event, state) do
     state.view.handle_event(change, event, state)
+  end
+
+  defp add_implicit_item(acc, state, id, mod, items) do
+    last_state =
+      case state.implicit_state[id] do
+        {_mod, last_state} -> last_state
+        _ -> %{}
+      end
+
+    Map.put(acc, id, {mod, mod.init(items, last_state)})
   end
 end
