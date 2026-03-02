@@ -144,7 +144,7 @@ defmodule Breeze.View do
   attr :rest, :global
 
   slot :item do
-    attr(:value, :string, required: true)
+    attr :value, :string, required: true
   end
 
   def list(assigns) do
@@ -239,7 +239,7 @@ defmodule Breeze.View do
 
     quote do
       _ = var!(assigns)
-      unquote(Macro.escape(template))
+      {unquote(Macro.escape(template)), var!(assigns)}
     end
   end
 
@@ -311,11 +311,15 @@ defmodule Breeze.View do
   end
 
   @doc """
-  Merge values into `term.assigns`.
+  Merge values into `term.assigns`, or into a plain assigns map inside a component function.
   """
   @spec assign(map(), Enumerable.t()) :: map()
-  def assign(term, values) do
+  def assign(%{assigns: _} = term, values) do
     %{term | assigns: Map.merge(term.assigns, Map.new(values))}
+  end
+
+  def assign(assigns, values) when is_map(assigns) do
+    Map.merge(assigns, Map.new(values))
   end
 
   def focus(term, value) do
