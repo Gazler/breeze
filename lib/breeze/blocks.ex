@@ -37,7 +37,10 @@ defmodule Breeze.Blocks do
       assigns
       |> assign(
         style:
-          merge_style("border width-24 height-8 overflow-scroll focus:border-3", assigns[:style])
+          merge_style(
+            "border width-24 height-8 overflow-scroll scrollbar-arrows focus:border-3",
+            assigns[:style]
+          )
       )
       |> assign(
         item_style: merge_style("selected:bg-4 selected:text-7 width-24", assigns[:item_style])
@@ -56,6 +59,28 @@ defmodule Breeze.Blocks do
       <box :for={item <- @item} value={item.value} style={@item_style}>
         <%= render_slot(item, %{}) %>
       </box>
+    </box>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :content, :string, required: true
+  attr :width, :integer, required: true
+  attr :style, :string, default: nil
+
+  def markdown(assigns) do
+    assigns =
+      assign(assigns,
+        style:
+          merge_style(
+            "height-full overflow-scroll scrollbar-arrows focus:scrollbar-3",
+            assigns[:style]
+          )
+      )
+
+    ~H"""
+    <box focusable id={@id} implicit={Breeze.Implicit.Scroll} style={@style}>
+      {Breeze.Markdown.render(@content, @width)}
     </box>
     """
   end

@@ -325,4 +325,13 @@ defmodule Breeze.View do
   def focus(term, value) do
     %{term | focused: value}
   end
+
+  @doc """
+  Reset the implicit state for the given element ID, causing it to reinitialise
+  on the next render.
+  """
+  @spec reset(map(), String.t()) :: map()
+  def reset(term, id) do
+    update_in(term.implicit_state, &Map.delete(&1, id))
+  end
 end
