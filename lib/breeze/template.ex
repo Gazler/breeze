@@ -28,6 +28,10 @@ defmodule Breeze.Template do
     %__MODULE__{nodes: nodes, env: Macro.Env.prune_compile_info(env)}
   end
 
+  def render_to_string({%__MODULE__{} = template, comp_assigns}, _assigns) do
+    render(template, comp_assigns)
+  end
+
   def render_to_string(%__MODULE__{} = template, assigns) do
     render(template, assigns)
   end
@@ -57,6 +61,10 @@ defmodule Breeze.Template do
   def render(%__MODULE__{nodes: nodes, env: env}, assigns) do
     ctx = %{assigns: normalize_assigns(assigns), vars: %{}, env: env}
     render_nodes(nodes, ctx)
+  end
+
+  def render_to_tree({%__MODULE__{} = template, comp_assigns}, _assigns) do
+    render_to_tree(template, comp_assigns)
   end
 
   def render_to_tree(%__MODULE__{nodes: nodes, env: env}, assigns) do
@@ -157,8 +165,10 @@ defmodule Breeze.Template do
       |> maybe_put_rest(rest)
       |> Map.merge(build_slots(children, ctx))
 
-    %__MODULE__{nodes: comp_nodes, env: comp_env} = invoke_component(module, fun, assigns)
-    comp_ctx = %{assigns: assigns, vars: %{}, env: comp_env}
+    {%__MODULE__{nodes: comp_nodes, env: comp_env}, comp_assigns} =
+      unwrap_component(invoke_component(module, fun, assigns), assigns)
+
+    comp_ctx = %{assigns: comp_assigns, vars: %{}, env: comp_env}
     nodes_to_tree(comp_nodes, comp_ctx)
   end
 
@@ -229,9 +239,10 @@ defmodule Breeze.Template do
       |> maybe_put_rest(rest)
       |> Map.merge(build_slots(children, ctx))
 
-    module
-    |> invoke_component(fun, assigns)
-    |> render_to_string(assigns)
+    {template, comp_assigns} =
+      unwrap_component(invoke_component(module, fun, assigns), assigns)
+
+    render_to_string(template, comp_assigns)
   end
 
   defp render_element(":" <> _slot_name, _attrs, _children, _ctx), do: ""
@@ -252,6 +263,14 @@ defmodule Breeze.Template do
     else
       apply(module, component, [assigns])
     end
+  end
+
+  defp unwrap_component({%__MODULE__{} = template, comp_assigns}, _caller_assigns) do
+    {template, comp_assigns}
+  end
+
+  defp unwrap_component(%__MODULE__{} = template, caller_assigns) do
+    {template, caller_assigns}
   end
 
   defp build_slots(children, ctx) do

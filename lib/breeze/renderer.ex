@@ -251,6 +251,36 @@ defmodule Breeze.Renderer do
   defp apply_style("reverse", {style, attrs}), do: {Style.reverse(style), attrs}
   defp apply_style("inline", {style, attrs}), do: {style, Map.put(attrs, :display, :inline)}
 
+  defp apply_style("grid", {style, attrs}) do
+    display =
+      case Map.get(attrs, :display) do
+        %BackBreeze.Grid{} = grid -> grid
+        _ -> %BackBreeze.Grid{columns: 1}
+      end
+
+    {style, Map.put(attrs, :display, display)}
+  end
+
+  defp apply_style("grid-cols-" <> num, {style, attrs}) do
+    display =
+      case Map.get(attrs, :display) do
+        %BackBreeze.Grid{} = grid -> grid
+        _ -> %BackBreeze.Grid{}
+      end
+
+    {style, Map.put(attrs, :display, %{display | columns: String.to_integer(num)})}
+  end
+
+  defp apply_style("grid-rows-" <> num, {style, attrs}) do
+    display =
+      case Map.get(attrs, :display) do
+        %BackBreeze.Grid{} = grid -> grid
+        _ -> %BackBreeze.Grid{}
+      end
+
+    {style, Map.put(attrs, :display, %{display | rows: String.to_integer(num)})}
+  end
+
   defp apply_style("overflow-scroll", {style, attrs}),
     do: {Style.overflow(style, :scroll), attrs}
 
@@ -276,6 +306,7 @@ defmodule Breeze.Renderer do
     do: {style, Map.put(attrs, :top, String.to_integer(num))}
 
   defp apply_style("width-auto", {style, attrs}), do: {Style.width(style, :auto), attrs}
+  defp apply_style("width-full", {style, attrs}), do: {Style.width(style, :full), attrs}
   defp apply_style("width-screen", {style, attrs}), do: {Style.width(style, :screen), attrs}
 
   defp apply_style("width-" <> num, {style, attrs}),
@@ -292,6 +323,9 @@ defmodule Breeze.Renderer do
 
   defp apply_style("bg-" <> num, {style, attrs}),
     do: {Style.background_color(style, String.to_integer(num)), attrs}
+
+  defp apply_style("border-rounded", {style, attrs}),
+    do: {Style.border(style, :rounded), attrs}
 
   defp apply_style("border-" <> num, {style, attrs}),
     do: {Style.border_color(style, String.to_integer(num)), attrs}
