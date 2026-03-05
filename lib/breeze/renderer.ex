@@ -324,6 +324,9 @@ defmodule Breeze.Renderer do
   defp apply_style("bg-" <> num, {style, attrs}),
     do: {Style.background_color(style, String.to_integer(num)), attrs}
 
+  defp apply_style("border-rounded", {style, attrs}),
+    do: {Style.border(style, :rounded), attrs}
+
   defp apply_style("border-" <> num, {style, attrs}),
     do: {Style.border_color(style, String.to_integer(num)), attrs}
 
