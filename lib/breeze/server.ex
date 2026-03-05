@@ -99,12 +99,46 @@ defmodule Breeze.Server do
     reader = terminal.reader
     state = %{state | terminal: terminal, reader: reader}
     {:ok, state} = state.view.mount(start_opts, state)
-    state = render(state)
+    terminal = Termite.Screen.clear_screen(state.terminal)
+    state = render(%{state | terminal: terminal})
     {:noreply, state}
   end
 
   @doc false
-  def handle_info({reader, {:data, "\t"}}, %{reader: reader} = state) do
+  def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
+    case process_data(data, state) do
+      {:stop, state} ->
+        stop(state)
+
+      {:noreply, state} ->
+        case drain_keys(state) do
+          {:stop, state} -> stop(state)
+          {:noreply, state} -> {:noreply, render(state)}
+        end
+    end
+  end
+
+  def handle_info({reader, {:signal, :winch}}, %{reader: reader} = state) do
+    state = %{state | terminal: Termite.Terminal.resize(state.terminal)}
+
+    case state.view.handle_info(:resize, state) do
+      {:noreply, state} -> {:noreply, render(state)}
+      {:stop, state} -> stop(state)
+    end
+  end
+
+  def handle_info(message, state) do
+    case state.view.handle_info(message, state) do
+      {:noreply, state} ->
+        state = render(state)
+        {:noreply, state}
+
+      {:stop, state} ->
+        stop(state)
+    end
+  end
+
+  defp process_data("\t", state) do
     index = Enum.find_index(state.focusables, &(&1 == state.focused))
 
     new_focused =
@@ -114,13 +148,10 @@ defmodule Breeze.Server do
         hd(state.focusables)
       end
 
-    state = %{state | focused: new_focused}
-    state = render(state)
-
-    {:noreply, state}
+    {:noreply, %{state | focused: new_focused}}
   end
 
-  def handle_info({reader, {:data, "\e[Z"}}, %{reader: reader} = state) do
+  defp process_data("\e[Z", state) do
     index = Enum.find_index(state.focusables, &(&1 == state.focused))
 
     new_focused =
@@ -130,17 +161,15 @@ defmodule Breeze.Server do
         true -> Enum.at(state.focusables, index - 1)
       end
 
-    state = %{state | focused: new_focused}
-    state = render(state)
-    {:noreply, state}
+    {:noreply, %{state | focused: new_focused}}
   end
 
-  def handle_info({reader, {:data, key}}, %{reader: reader} = state) do
+  defp process_data(raw_key, state) do
     key =
-      if String.starts_with?(key, Termite.Screen.escape_code()) do
-        convert_key(String.trim_leading(key, Termite.Screen.escape_code()))
+      if String.starts_with?(raw_key, Termite.Screen.escape_code()) do
+        convert_key(String.trim_leading(raw_key, Termite.Screen.escape_code()))
       else
-        key
+        raw_key
       end
 
     selected_implicit = Enum.find(state.implicit_state, fn {id, _el} -> id == state.focused end)
@@ -173,20 +202,21 @@ defmodule Breeze.Server do
       end
 
     case view_state == :stop || handle_event(:ignore_me, %{"key" => key}, state) do
-      true -> stop(state)
-      {:stop, state} -> stop(state)
-      {:noreply, state} -> {:noreply, render(state)}
+      true -> {:stop, state}
+      {:stop, state} -> {:stop, state}
+      {:noreply, state} -> {:noreply, state}
     end
   end
 
-  def handle_info(message, state) do
-    case state.view.handle_info(message, state) do
-      {:noreply, state} ->
-        state = render(state)
-        {:noreply, state}
-
-      {:stop, state} ->
-        stop(state)
+  defp drain_keys(state) do
+    receive do
+      {reader, {:data, data}} when reader == state.reader ->
+        case process_data(data, state) do
+          {:stop, state} -> {:stop, state}
+          {:noreply, state} -> drain_keys(state)
+        end
+    after
+      0 -> {:noreply, state}
     end
   end
 
@@ -207,11 +237,11 @@ defmodule Breeze.Server do
         terminal: state.terminal
       )
 
-    terminal =
-      state.terminal
-      |> Termite.Screen.clear_screen()
-      |> Termite.Screen.cursor_position(0, 0)
-      |> Termite.Terminal.write(output)
+    screen_height = state.terminal.size.height
+    output_lines = length(String.split(output, "\n"))
+    trailing = String.duplicate("\n\e[K", max(screen_height - output_lines, 0))
+    output = "\e[K" <> String.replace(output, "\n", "\n\e[K") <> trailing
+    terminal = Termite.Terminal.write(state.terminal, "\e[H" <> output)
 
     last = map_size(acc.elements)
 
@@ -299,6 +329,13 @@ defmodule Breeze.Server do
   defp convert_key("B"), do: "ArrowDown"
   defp convert_key("C"), do: "ArrowRight"
   defp convert_key("D"), do: "ArrowLeft"
+  defp convert_key("H"), do: "Home"
+  defp convert_key("F"), do: "End"
+  defp convert_key("1~"), do: "Home"
+  defp convert_key("4~"), do: "End"
+  defp convert_key("5~"), do: "PageUp"
+  defp convert_key("6~"), do: "PageDown"
+  defp convert_key(key), do: key
 
   defp handle_event(change, event, state) do
     state.view.handle_event(change, event, state)
