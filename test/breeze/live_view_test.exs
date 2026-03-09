@@ -77,7 +77,7 @@ defmodule Breeze.LiveViewTest do
   test "child server keeps its own state across events" do
     {:ok, pid} = ChildServer.start(view: CounterChild, start_opts: [])
 
-    assert %{focused: "button", view: CounterChild} = ChildServer.snapshot(pid)
+    assert %{focused: "button", view: CounterChild} = ChildServer.metadata(pid)
     assert {:noreply, "button"} = ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "+"})
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "button", implicit_state: %{})

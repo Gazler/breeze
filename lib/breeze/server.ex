@@ -231,8 +231,14 @@ defmodule Breeze.Server do
 
     {view_state, implicit_consumed, state} =
       if selected_implicit do
-        {id, {mod, selected}} = selected_implicit
-        dispatch_implicit_event(id, mod, selected, %{"key" => key}, state)
+        {id, {_mod, _selected}} = selected_implicit
+
+        Breeze.RenderState.dispatch_implicit_event(
+          state,
+          id,
+          %{"key" => key},
+          fn state, id, change, event -> route_event(id, change, event, state) end
+        )
       else
         {:noreply, false, state}
       end
@@ -280,51 +286,7 @@ defmodule Breeze.Server do
     state = sync_child_visibility(state, visible_live_ids)
     {state, _live_ids, _visible_live_ids, {acc, _box}} = render_view(state, state.implicit_state)
 
-    last = map_size(acc.elements)
-
-    elements = Enum.sort(acc.elements)
-
-    {implicits, _, _, _, _} =
-      elements
-      |> Enum.reduce({%{}, [], nil, nil, %{}}, fn {idx, elem},
-                                                  {acc, current, mod, last_id, root_attrs} ->
-        elem = Map.new(elem) |> Map.delete(:focusable)
-        {implicit, elem} = Map.pop(elem, :implicit)
-        {id, elem} = Map.pop(elem, :id)
-        {implicit_owner, elem} = Map.pop(elem, :implicit_owner)
-
-        # TODO: delete all br elements
-
-        cond do
-          # Handle a single implicit box with no children
-          last == 1 && implicit && id ->
-            {add_implicit_item(acc, state, id, implicit, [], elem), [], implicit, id, elem}
-
-          mod && (implicit || idx == last - 1) ->
-            current = if implicit_owner, do: [elem | current], else: current
-            items = Enum.reverse(current)
-            acc = add_implicit_item(acc, state, last_id, mod, items, root_attrs)
-
-            # Handle an implicit box with no children as the last item
-            acc =
-              if implicit && id do
-                add_implicit_item(acc, state, id, implicit, [], elem)
-              else
-                acc
-              end
-
-            {acc, [], implicit, id, elem}
-
-          !mod && implicit ->
-            {acc, current, implicit, id, elem}
-
-          implicit_owner ->
-            {acc, [elem | current], mod, last_id, root_attrs}
-
-          true ->
-            {acc, current, mod, last_id, root_attrs}
-        end
-      end)
+    implicits = Breeze.RenderState.build(state, acc).implicit_state
 
     events =
       acc.elements
@@ -369,42 +331,14 @@ defmodule Breeze.Server do
     {state, live_ids, _visible_live_ids, {final_acc, %{content: output}}} =
       render_view(state, implicits)
 
-    dimensions = build_dimensions(final_acc)
-    adjusted_implicits = reconcile_scroll_implicits(implicits, dimensions)
+    dimensions = Breeze.RenderState.build_dimensions(final_acc)
+    adjusted_implicits = Breeze.RenderState.reconcile_implicits(implicits, dimensions)
 
     if attempts > 0 and adjusted_implicits != implicits do
       render_final_view(state, adjusted_implicits, attempts - 1)
     else
       {state, live_ids, final_acc, output, dimensions, adjusted_implicits}
     end
-  end
-
-  defp build_dimensions(final_acc) do
-    final_acc.elements
-    |> Enum.sort()
-    |> Enum.zip(final_acc.dimensions)
-    |> Enum.reduce(%{}, fn {{_, flags}, dims}, acc ->
-      case Keyword.get(flags, :id) do
-        nil -> acc
-        id -> Map.put(acc, id, Breeze.Viewport.from_dimensions(dims))
-      end
-    end)
-  end
-
-  defp reconcile_scroll_implicits(implicit_state, dimensions) do
-    Enum.reduce(implicit_state, %{}, fn
-      {id, {Breeze.Implicit.Scroll, state}}, acc ->
-        next_state =
-          case Map.get(dimensions, id) do
-            nil -> state
-            element -> Breeze.Implicit.Scroll.reconcile(element, state)
-          end
-
-        Map.put(acc, id, {Breeze.Implicit.Scroll, next_state})
-
-      {id, value}, acc ->
-        Map.put(acc, id, value)
-    end)
   end
 
   defp render_view(state, implicit_state) do
@@ -454,89 +388,6 @@ defmodule Breeze.Server do
 
   defp handle_event(change, event, state) do
     state.view.handle_event(change, event, state)
-  end
-
-  defp dispatch_implicit_event(id, mod, implicit, payload, state, visited \\ MapSet.new()) do
-    if MapSet.member?(visited, id) do
-      {:noreply, false, state}
-    else
-      element = Map.get(state.elements, id)
-      payload = Map.put(payload, "element", element)
-
-      case mod.handle_event(:ignore_me, payload, implicit) do
-        {{:change, event}, val} ->
-          change = get_in(state.events, [id, :change])
-          state = put_implicit_state(state, id, mod, val)
-
-          {view_state, state} =
-            if event && change do
-              route_event(id, change, event, state)
-            else
-              {:noreply, state}
-            end
-
-          {view_state, true, state}
-
-        {{:delegate, target_id}, val} ->
-          state = put_implicit_state(state, id, mod, val)
-
-          case Map.get(state.implicit_state, target_id) do
-            {target_mod, target_state} ->
-              dispatch_implicit_event(
-                target_id,
-                target_mod,
-                target_state,
-                payload,
-                state,
-                MapSet.put(visited, id)
-              )
-
-            nil ->
-              {:noreply, false, state}
-          end
-
-        {:noreply, val} ->
-          state = put_implicit_state(state, id, mod, val)
-          {:noreply, false, state}
-      end
-    end
-  end
-
-  defp put_implicit_state(state, id, mod, implicit) do
-    implicit_state = Map.put(state.implicit_state, id, {mod, implicit})
-    %{state | implicit_state: implicit_state}
-  end
-
-  defp add_implicit_item(acc, state, id, mod, items, root_attrs) do
-    last_state =
-      case state.implicit_state[id] do
-        {_mod, last_state} -> last_state
-        _ -> %{}
-      end
-
-    element = Map.get(state.elements, id)
-    last_state = if element, do: Map.put(last_state, :__element__, element), else: last_state
-
-    implicit_state =
-      case Code.ensure_loaded(mod) do
-        {:module, _module} ->
-          cond do
-            function_exported?(mod, :init, 3) ->
-              mod.init(items, root_attrs, last_state)
-
-            function_exported?(mod, :init, 2) ->
-              mod.init(items, last_state)
-
-            true ->
-              raise ArgumentError, "implicit #{inspect(mod)} must implement init/2 or init/3"
-          end
-
-        {:error, reason} ->
-          raise ArgumentError,
-                "implicit #{inspect(mod)} could not be loaded (#{inspect(reason)})"
-      end
-
-    Map.put(acc, id, {mod, implicit_state})
   end
 
   defp render_live_child(attrs, opts, state, implicit_state, collector, token) do
@@ -618,7 +469,7 @@ defmodule Breeze.Server do
   end
 
   defp maybe_take_child_focus(%{focused: nil} = state, id, pid) do
-    case Breeze.ChildServer.snapshot(pid) do
+    case Breeze.ChildServer.metadata(pid) do
       %{focused: nil} -> state
       %{focused: focused} -> %{state | focused: namespace_live_id(id, focused)}
     end
