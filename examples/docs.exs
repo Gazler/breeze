@@ -147,4 +147,6 @@ defmodule Docs do
 end
 
 Breeze.Server.start_link(view: Docs, hide_cursor: true)
-:timer.sleep(100_000)
+
+receive do
+end

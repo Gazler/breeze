@@ -98,6 +98,25 @@ defmodule Breeze.Renderer do
     build_tree(rest, box, children, style, flags, acc, opts)
   end
 
+  defp build_tree([{:live, attrs} | rest], box, children, style, flags, acc, opts) do
+    {acc, child} =
+      case Keyword.get(opts, :live_view) do
+        fun when is_function(fun, 2) ->
+          case fun.(attrs, opts) do
+            {:rendered, prefix, child_acc, child_box} ->
+              {merge_live_acc(acc, namespace_live_acc(child_acc, prefix)), child_box}
+
+            _ ->
+              {acc, %BackBreeze.Box{}}
+          end
+
+        _ ->
+          {acc, %BackBreeze.Box{}}
+      end
+
+    build_tree(rest, box, [child | children], style, flags, acc, opts)
+  end
+
   defp build_tree([{:box, _, nodes} | rest], box, children, style, flags, acc, opts) do
     child_flags =
       if Keyword.get(flags, :implicit) do
@@ -217,6 +236,48 @@ defmodule Breeze.Renderer do
     left = if is_integer(left), do: max(left, 0), else: existing_left
 
     Map.put(attributes, :scroll, {top, left})
+  end
+
+  defp merge_live_acc(acc, child_acc) do
+    child_offset = acc.id + 1
+    child_last_id = max_key(child_acc.elements)
+
+    elements =
+      Enum.reduce(child_acc.elements, acc.elements, fn {id, flags}, elements ->
+        Map.put(elements, child_offset + id, flags)
+      end)
+
+    %{
+      acc
+      | id: child_offset + child_last_id,
+        elements: elements,
+        ids: Enum.reverse(child_acc.ids) ++ acc.ids,
+        focusables: Enum.reverse(child_acc.focusables) ++ acc.focusables
+    }
+  end
+
+  defp namespace_live_acc(acc, prefix) do
+    %{
+      acc
+      | ids: Enum.map(acc.ids, &namespace_id(&1, prefix)),
+        focusables: Enum.map(acc.focusables, &namespace_id(&1, prefix)),
+        elements:
+          Map.new(acc.elements, fn {idx, flags} ->
+            {idx,
+             flags
+             |> Keyword.update(:id, nil, &namespace_id(&1, prefix))
+             |> Keyword.update(:implicit_owner, nil, &namespace_id(&1, prefix))}
+          end)
+    }
+  end
+
+  defp namespace_id(nil, _prefix), do: nil
+  defp namespace_id(id, prefix), do: prefix <> "::" <> id
+
+  defp max_key(elements) do
+    elements
+    |> Map.keys()
+    |> Enum.max(fn -> 0 end)
   end
 
   defp string_to_styles(str, opts) do

@@ -172,6 +172,10 @@ defmodule Breeze.Template do
     nodes_to_tree(comp_nodes, comp_ctx)
   end
 
+  defp element_to_tree("live", attrs, _children, ctx) do
+    [{:live, Map.new(eval_component_attrs(attrs, ctx))}]
+  end
+
   defp element_to_tree(":" <> _slot_name, _attrs, _children, _ctx), do: []
 
   defp element_to_tree(name, attrs, children, ctx) do
@@ -244,6 +248,8 @@ defmodule Breeze.Template do
 
     render_to_string(template, comp_assigns)
   end
+
+  defp render_element("live", _attrs, _children, _ctx), do: ""
 
   defp render_element(":" <> _slot_name, _attrs, _children, _ctx), do: ""
 
