@@ -251,11 +251,11 @@ defmodule RouterExample do
     <box style="width-screen height-screen">
       <box style="bold">Router example</box>
       <box>Each route has its own ticking counter.</box>
-      <box>1 -> home, remounted when revisited</box>
-      <box>2 -> settings, persistence: true, includes a nested router</box>
-      <box>3 -> status, remounted when revisited</box>
-      <box>4 -> metrics, persistence: :preload, already ticking before first visit</box>
-      <box>5 -> logs, persistence: :preload, captures Logger output in the background</box>
+      <box>Global keys: 1 -> home, 2 -> settings, 3 -> status, 4 -> metrics, 5 -> logs</box>
+      <box>Settings uses persistence: true and includes a nested router</box>
+      <box>Status is remounted when revisited</box>
+      <box>Metrics uses persistence: :preload and is already ticking before first visit</box>
+      <box>Logs uses persistence: :preload and captures Logger output in the background</box>
       <box>Inside settings: a -> overview, b -> audit. Press q to quit.</box>
       <box style="height-1">
       </box>
@@ -279,7 +279,6 @@ defmodule RouterExample do
       {:noreply, Breeze.Router.navigate(term, :metrics, label: "Preloaded route", interval: 500)}
 
   def handle_event(_, %{"key" => "5"}, term), do: {:noreply, Breeze.Router.navigate(term, :logs)}
-  def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
   def handle_event(_, _, term), do: {:noreply, term}
 
   def handle_info(:emit_log, term) do
@@ -303,7 +302,54 @@ defmodule RouterExample do
   end
 end
 
-Breeze.Server.start_link(view: RouterExample, hide_cursor: true)
+defmodule RouterExampleBindings do
+  import Breeze.View, only: [focus: 2]
+
+  def home(term) do
+    term
+    |> Breeze.Router.navigate(:home)
+    |> focus("main:home::home")
+  end
+
+  def settings(term) do
+    term
+    |> Breeze.Router.navigate(:settings, section: "team", interval: 350)
+    |> focus("main:persistent:settings::settings")
+  end
+
+  def status(term) do
+    term
+    |> Breeze.Router.navigate(:status, label: "Background jobs healthy", interval: 700)
+    |> focus("main:status::status")
+  end
+
+  def metrics(term) do
+    term
+    |> Breeze.Router.navigate(:metrics, label: "Preloaded route", interval: 500)
+    |> focus("main:persistent:metrics::metrics")
+  end
+
+  def logs(term) do
+    term
+    |> Breeze.Router.navigate(:logs)
+    |> focus("main:persistent:logs::logger")
+  end
+end
+
+global_keybindings = [
+  {"1", fn _event, term -> {:noreply, RouterExampleBindings.home(term)} end},
+  {"2", fn _event, term -> {:noreply, RouterExampleBindings.settings(term)} end},
+  {"3", fn _event, term -> {:noreply, RouterExampleBindings.status(term)} end},
+  {"4", fn _event, term -> {:noreply, RouterExampleBindings.metrics(term)} end},
+  {"5", fn _event, term -> {:noreply, RouterExampleBindings.logs(term)} end},
+  {"q", fn _event, term -> {:stop, term} end}
+]
+
+Breeze.Server.start_link(
+  view: RouterExample,
+  hide_cursor: true,
+  global_keybindings: global_keybindings
+)
 
 receive do
 end

@@ -104,7 +104,6 @@ defmodule Docs do
     {:noreply, term}
   end
 
-  def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
   def handle_event(_, _, term), do: {:noreply, term}
 
   defp fetch_function_doc(module_str, function_str) do
@@ -146,7 +145,11 @@ defmodule Docs do
   end
 end
 
-Breeze.Server.start_link(view: Docs, hide_cursor: true)
+Breeze.Server.start_link(
+  view: Docs,
+  hide_cursor: true,
+  global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+)
 
 receive do
 end

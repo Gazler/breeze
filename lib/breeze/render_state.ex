@@ -148,7 +148,8 @@ defmodule Breeze.RenderState do
                 )
 
               {:noreply, val} ->
-                {:noreply, true, put_implicit_state(term, id, mod, val)}
+                term = put_implicit_state(term, id, mod, val)
+                {:noreply, val != implicit, term}
             end
 
           nil ->

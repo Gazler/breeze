@@ -86,12 +86,15 @@ defmodule AnimatedProgressExample do
     """
   end
 
-  def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
   def handle_event(_, _, term), do: {:noreply, term}
   def handle_info(_, term), do: {:noreply, term}
 end
 
-Breeze.Server.start_link(view: AnimatedProgressExample, hide_cursor: true)
+Breeze.Server.start_link(
+  view: AnimatedProgressExample,
+  hide_cursor: true,
+  global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+)
 
 receive do
 end

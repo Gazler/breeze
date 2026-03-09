@@ -35,5 +35,9 @@ end
 
 # Breeze.Renderer.render(Demo, %{name: "hello"})
 
-Breeze.Server.start_link(view: Demo)
+Breeze.Server.start_link(
+  view: Demo,
+  global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+)
+
 :timer.sleep(5000)

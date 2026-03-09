@@ -83,6 +83,26 @@ defmodule Breeze.LoggerTest do
     assert logger_viewport(box).scroll == {elem(initial_scroll, 0) - 1, 0}
   end
 
+  test "focused logger still receives non-scroll keys" do
+    {:ok, pid} = ChildServer.start(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
+    {:ok, _acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+
+    Logger.info("clear-me-#{System.unique_integer([:positive])}")
+    Logger.flush()
+
+    wait_until(fn ->
+      {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+      box.content =~ "clear-me-"
+    end)
+
+    assert {:noreply, "logger"} = ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "c"})
+
+    wait_until(fn ->
+      {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+      box.content =~ "Press c to clear." and not (box.content =~ "clear-me-")
+    end)
+  end
+
   test "logger autoscrolls while pinned to the bottom" do
     lines =
       for index <- 1..8 do

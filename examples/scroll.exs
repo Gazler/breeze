@@ -45,5 +45,9 @@ defmodule Scroll do
   def handle_event(_, _, term), do: {:noreply, term}
 end
 
-Breeze.Server.start_link(view: Scroll)
+Breeze.Server.start_link(
+  view: Scroll,
+  global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+)
+
 :timer.sleep(100_000)
