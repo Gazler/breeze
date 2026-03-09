@@ -6,6 +6,7 @@ defmodule Breeze.Term do
     :terminal,
     :reader,
     assigns: %{},
+    global_keybindings: [],
     focused: nil,
     focusables: [],
     elements: %{},
@@ -75,6 +76,7 @@ defmodule Breeze.Server do
 
     * `:view` - the view to run. This is required
     * `:hide_cursor` - hide the cursor on start. Defaults to `false`
+    * `:global_keybindings` - app-wide keybindings checked before focused event handling
 
   """
   def start_link(opts) do
@@ -85,7 +87,13 @@ defmodule Breeze.Server do
   def init(opts) do
     view = Keyword.fetch!(opts, :view)
     frame_delay_ms = Keyword.get(opts, :frame_delay_ms, 16)
-    {:ok, %Breeze.Term{view: view, frame_delay_ms: frame_delay_ms}, {:continue, {:start, opts}}}
+
+    {:ok,
+     %Breeze.Term{
+       view: view,
+       frame_delay_ms: frame_delay_ms,
+       global_keybindings: Keyword.get(opts, :global_keybindings, [])
+     }, {:continue, {:start, opts}}}
   end
 
   @doc false
@@ -227,31 +235,58 @@ defmodule Breeze.Server do
   end
 
   defp do_process_key(key, state) do
-    selected_implicit = Enum.find(state.implicit_state, fn {id, _el} -> id == state.focused end)
+    event = %{"key" => key}
 
-    {view_state, implicit_consumed, state} =
-      if selected_implicit do
-        {id, {_mod, _selected}} = selected_implicit
-
-        Breeze.RenderState.dispatch_implicit_event(
-          state,
-          id,
-          %{"key" => key},
-          fn state, id, change, event -> route_event(id, change, event, state) end
-        )
-      else
-        {:noreply, false, state}
-      end
-
-    cond do
-      view_state == :stop ->
+    case dispatch_global_keybindings(event, state) do
+      {:stop, state} ->
         {:stop, state}
 
-      implicit_consumed ->
+      {:noreply, state} ->
         {:noreply, state}
 
-      true ->
-        case route_event(state.focused, :ignore_me, %{"key" => key}, state) do
+      :continue ->
+        selected_implicit =
+          Enum.find(state.implicit_state, fn {id, _el} -> id == state.focused end)
+
+        {view_state, implicit_consumed, state} =
+          if selected_implicit do
+            {id, {_mod, _selected}} = selected_implicit
+
+            Breeze.RenderState.dispatch_implicit_event(
+              state,
+              id,
+              event,
+              fn state, id, change, event -> route_event(id, change, event, state) end
+            )
+          else
+            {:noreply, false, state}
+          end
+
+        cond do
+          view_state == :stop ->
+            {:stop, state}
+
+          implicit_consumed ->
+            {:noreply, state}
+
+          true ->
+            case route_event(state.focused, :ignore_me, event, state) do
+              {:stop, state} -> {:stop, state}
+              {:noreply, state} -> {:noreply, state}
+            end
+        end
+    end
+  end
+
+  @doc false
+  def dispatch_global_keybindings(event, state) do
+    case Enum.find(state.global_keybindings, fn {key, _fun} -> key == event["key"] end) do
+      nil ->
+        :continue
+
+      {_key, fun} when is_function(fun, 2) ->
+        case fun.(event, state) do
+          :continue -> :continue
           {:stop, state} -> {:stop, state}
           {:noreply, state} -> {:noreply, state}
         end
@@ -273,10 +308,13 @@ defmodule Breeze.Server do
   defp stop(state) do
     Enum.each(state.children, fn {_id, child} -> GenServer.stop(child.pid, :normal) end)
 
-    state.terminal
-    |> Termite.Screen.clear_screen()
-    |> Termite.Screen.show_cursor()
-    |> Termite.Screen.exit_alt_screen()
+    terminal =
+      state.terminal
+      |> Termite.Screen.clear_screen()
+      |> Termite.Screen.show_cursor()
+      |> Termite.Screen.exit_alt_screen()
+
+    Termite.Terminal.write(terminal, "\r")
 
     System.halt()
   end

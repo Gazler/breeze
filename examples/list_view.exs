@@ -26,13 +26,15 @@ defmodule ListViewDemo do
   end
 
   def handle_event("change", %{value: value}, term), do: {:noreply, assign(term, selected: value)}
-  def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
   def handle_event(_, _, term), do: {:noreply, term}
 
   def handle_info(_, term), do: {:noreply, term}
 end
 
-Breeze.Server.start_link(view: ListViewDemo)
+Breeze.Server.start_link(
+  view: ListViewDemo,
+  global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+)
 
 receive do
 end

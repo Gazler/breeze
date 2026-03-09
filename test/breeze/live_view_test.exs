@@ -3,6 +3,7 @@ defmodule Breeze.LiveViewTest do
 
   alias Breeze.ChildServer
   alias Breeze.Renderer
+  alias Breeze.Server
   alias Breeze.Template
 
   defmodule CounterChild do
@@ -116,5 +117,20 @@ defmodule Breeze.LiveViewTest do
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: nil, implicit_state: %{})
     assert box.content =~ "Frame: 1"
+  end
+
+  test "global keybindings are dispatched before focused event handling" do
+    event = %{"key" => "q"}
+
+    term = %Breeze.Term{
+      view: CounterChild,
+      global_keybindings: [
+        {"q", fn _event, term -> {:noreply, Breeze.View.assign(term, handled?: true)} end}
+      ],
+      assigns: %{}
+    }
+
+    assert {:noreply, %Breeze.Term{assigns: %{handled?: true}}} =
+             Server.dispatch_global_keybindings(event, term)
   end
 end

@@ -119,7 +119,11 @@ defmodule Snake do
   end
 end
 
-Breeze.Server.start_link(view: Snake, hide_cursor: true)
+Breeze.Server.start_link(
+  view: Snake,
+  hide_cursor: true,
+  global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+)
 
 receive do
 end

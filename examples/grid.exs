@@ -16,11 +16,13 @@ defmodule Demo do
     """
   end
 
-  def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
   def handle_event(_, _, term), do: {:noreply, term}
 end
 
-Breeze.Server.start_link(view: Demo)
+Breeze.Server.start_link(
+  view: Demo,
+  global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+)
 
 receive do
 end

@@ -104,5 +104,10 @@ defmodule Focus do
   end
 end
 
-Breeze.Server.start_link(view: Focus, hide_cursor: false)
+Breeze.Server.start_link(
+  view: Focus,
+  hide_cursor: false,
+  global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+)
+
 :timer.sleep(100_000)
