@@ -55,6 +55,47 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule TabsWidthExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <.tabs id="tabs" selected="overview" style="width-6">
+        <:tab value="overview" label="Overview">
+          <box>body</box>
+        </:tab>
+        <:tab value="details" label="Details">
+          <box>more</box>
+        </:tab>
+      </.tabs>
+      """
+    end
+  end
+
+  defmodule ParentImplicit do
+    def init(_children, last_state), do: %{offset_x: last_state[:offset_x] || 0}
+    def handle_event(_, _, state), do: {:noreply, state}
+    def handle_modifiers(:root, _flags, state), do: [scroll_x: state.offset_x]
+    def handle_modifiers(:child, _flags, _state), do: []
+  end
+
+  defmodule NestedImplicitExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box id="parent" implicit={ParentImplicit}>
+        <box id="child" implicit={ScrollImplicit} style="border width-6 height-2 overflow-hidden">
+          <box>AAAAAA</box>
+          <box>BBBBBB</box>
+          <box>CCCCCC</box>
+        </box>
+      </box>
+      """
+    end
+  end
+
   describe "render_to_string/2" do
     test "converts the boxes to terminal output" do
       assert Renderer.render_to_string(Example, %{name: "world"}) ==
@@ -74,6 +115,31 @@ defmodule Breeze.RendererTest do
         )
 
       assert box.scroll == {1, 2}
+    end
+
+    test "preserves explicit tabs width when labels overflow" do
+      {state, _box} = Renderer.render(TabsWidthExample, %{})
+
+      assert hd(state.dimensions).width == 6
+      assert hd(state.dimensions).viewport_width == 6
+    end
+
+    test "applies nested implicit root modifiers using the nested implicit state" do
+      {_state, box} =
+        Renderer.render(NestedImplicitExample, %{},
+          implicit_state: %{
+            "parent" => {ParentImplicit, %{offset_x: 0}},
+            "child" => {ScrollImplicit, %{offset_y: 1}}
+          }
+        )
+
+      assert box.content ==
+               """
+               ┌──────┐
+               │BBBB  │
+               │CCCC  │
+               └──────┘\
+               """
     end
   end
 end
