@@ -1,0 +1,117 @@
+defmodule Breeze.Implicit.Tabs do
+  @moduledoc false
+
+  def init(children, last_state), do: init(children, %{}, last_state)
+
+  def init(children, root_attrs, last_state) do
+    tab_items = Enum.filter(children, &Map.has_key?(&1, :value))
+    values = Enum.map(tab_items, & &1.value)
+
+    widths =
+      Enum.map(tab_items, fn item ->
+        label = Map.get(item, :"tab-label", "")
+        String.length(label) + 2
+      end)
+
+    selected_index =
+      case Map.get(last_state, :selected) do
+        nil ->
+          case Map.get(root_attrs, :"tab-selected") do
+            nil -> 0
+            initial -> Enum.find_index(values, &(&1 == initial)) || 0
+          end
+
+        selected ->
+          Enum.find_index(values, &(&1 == selected)) || 0
+      end
+
+    selected_index = min(selected_index, max(length(values) - 1, 0))
+    selected = Enum.at(values, selected_index)
+    offset_x = Map.get(last_state, :offset_x, 0)
+
+    viewport_width =
+      case Map.get(last_state, :__element__) do
+        nil -> Map.get(last_state, :viewport_width)
+        el -> el.viewport_width
+      end
+
+    %{
+      values: values,
+      widths: widths,
+      selected: selected,
+      selected_index: selected_index,
+      offset_x: offset_x,
+      viewport_width: viewport_width,
+      delegate_target: Map.get(root_attrs, :"tab-delegate")
+    }
+  end
+
+  def handle_event(_, %{"key" => key}, %{values: []} = state) when key in ["ArrowRight", "l"] do
+    {:noreply, state}
+  end
+
+  def handle_event(_, %{"key" => key}, state) when key in ["ArrowRight", "l"] do
+    count = length(state.values)
+    next = rem(state.selected_index + 1, count)
+    next_state = %{state | selected_index: next, selected: Enum.at(state.values, next)}
+    emit_change(%{next_state | offset_x: compute_offset_x(next_state)})
+  end
+
+  def handle_event(_, %{"key" => key}, %{values: []} = state) when key in ["ArrowLeft", "h"] do
+    {:noreply, state}
+  end
+
+  def handle_event(_, %{"key" => key}, state) when key in ["ArrowLeft", "h"] do
+    count = length(state.values)
+    prev = rem(state.selected_index - 1 + count, count)
+    prev_state = %{state | selected_index: prev, selected: Enum.at(state.values, prev)}
+    emit_change(%{prev_state | offset_x: compute_offset_x(prev_state)})
+  end
+
+  def handle_event(_, %{"key" => key}, %{delegate_target: target} = state)
+      when key in ["ArrowDown", "ArrowUp", "j", "k", "PageDown", "PageUp", "Home", "End"] and
+             is_binary(target) do
+    {{:delegate, target}, state}
+  end
+
+  def handle_event(_, _, state), do: {:noreply, state}
+
+  def handle_modifiers(:root, _flags, _state), do: []
+
+  def handle_modifiers(:child, flags, state) do
+    cond do
+      Keyword.has_key?(flags, :"tab-bar") -> [scroll_x: state.offset_x]
+      state.selected == Keyword.get(flags, :value) -> [selected: true]
+      true -> []
+    end
+  end
+
+  defp compute_offset_x(%{
+         widths: widths,
+         selected_index: selected_index,
+         offset_x: current_offset,
+         viewport_width: viewport_width
+       }) do
+    if is_nil(viewport_width) or viewport_width <= 0 do
+      current_offset
+    else
+      cumulative = widths |> Enum.take(selected_index) |> Enum.sum()
+      tab_width = Enum.at(widths, selected_index, 0)
+
+      cond do
+        cumulative < current_offset ->
+          cumulative
+
+        cumulative + tab_width > current_offset + viewport_width ->
+          cumulative + tab_width - viewport_width
+
+        true ->
+          current_offset
+      end
+    end
+  end
+
+  defp emit_change(state) do
+    {{:change, %{value: state.selected, index: state.selected_index}}, state}
+  end
+end

@@ -123,10 +123,10 @@ defmodule Breeze.Renderer do
 
   defp build_tree([{:box, _, nodes} | rest], box, children, style, flags, acc, opts) do
     child_flags =
-      if Keyword.get(flags, :implicit) do
-        [implicit_id: Keyword.fetch!(flags, :id)]
-      else
-        []
+      cond do
+        Keyword.get(flags, :implicit) -> [implicit_owner: Keyword.fetch!(flags, :id)]
+        implicit_owner = Keyword.get(flags, :implicit_owner) -> [implicit_owner: implicit_owner]
+        true -> []
       end
 
     acc = %{
@@ -144,7 +144,8 @@ defmodule Breeze.Renderer do
     %{focusables: focusables} = acc
 
     focused =
-      (Keyword.get(flags, :id) || Keyword.get(flags, :implicit_id)) == Keyword.get(opts, :focused)
+      (Keyword.get(flags, :id) || Keyword.get(flags, :implicit_owner)) ==
+        Keyword.get(opts, :focused)
 
     flags = if focused, do: Keyword.put(flags, :focused, focused), else: flags
 
@@ -156,8 +157,15 @@ defmodule Breeze.Renderer do
       end
 
     implicit_state = Keyword.get(opts, :implicit_state, %{})
-    implicit_id = Keyword.get(flags, :implicit_id)
-    id = implicit_id || Keyword.get(flags, :id)
+    implicit_owner = Keyword.get(flags, :implicit_owner)
+    root_id = Keyword.get(flags, :id)
+
+    id =
+      cond do
+        Keyword.get(flags, :implicit) && root_id -> root_id
+        implicit_owner -> implicit_owner
+        true -> root_id
+      end
 
     {implicit_mod, implicit} =
       case id && get_in(implicit_state, [id]) do
@@ -165,7 +173,7 @@ defmodule Breeze.Renderer do
         {mod, state} -> {mod, state}
       end
 
-    type = if id == Keyword.get(flags, :id), do: :root, else: :child
+    type = if id == root_id, do: :root, else: :child
 
     {style_flags, style_modifiers, scroll_modifier} =
       if implicit do
@@ -379,7 +387,7 @@ defmodule Breeze.Renderer do
 
   defp apply_style("height-auto", {style, attrs}), do: {Style.height(style, :auto), attrs}
   defp apply_style("height-screen", {style, attrs}), do: {Style.height(style, :screen), attrs}
-  defp apply_style("height-full", {style, attrs}), do: {Style.height(style, :screen), attrs}
+  defp apply_style("height-full", {style, attrs}), do: {Style.height(style, :full), attrs}
 
   defp apply_style("height-" <> num, {style, attrs}),
     do: {Style.height(style, String.to_integer(num)), attrs}
@@ -389,6 +397,9 @@ defmodule Breeze.Renderer do
 
   defp apply_style("bg-" <> num, {style, attrs}),
     do: {Style.background_color(style, String.to_integer(num)), attrs}
+
+  defp apply_style("scrollbar-none", {style, attrs}),
+    do: {Style.scrollbar(style, false), attrs}
 
   defp apply_style("scrollbar-arrows", {style, attrs}),
     do: {Style.scrollbar(style, %{arrows: true}), attrs}

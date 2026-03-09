@@ -56,9 +56,7 @@ defmodule Breeze.Blocks do
       style={@style}
       {@rest}
     >
-      <box :for={item <- @item} value={item.value} style={@item_style}>
-        <%= render_slot(item, %{}) %>
-      </box>
+      <box :for={item <- @item} value={item.value} style={@item_style}>{render_slot(item, %{})}</box>
     </box>
     """
   end
@@ -79,8 +77,69 @@ defmodule Breeze.Blocks do
       )
 
     ~H"""
-    <box focusable id={@id} implicit={Breeze.Implicit.Scroll} style={@style}>
-      {Breeze.Markdown.render(@content, @width)}
+    <.scroll id={@id} style={@style}>{Breeze.Markdown.render(@content, @width)}</.scroll>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :style, :string, default: nil
+  attr :rest, :global
+
+  slot :inner_block, required: true
+
+  def scroll(assigns) do
+    assigns =
+      assign(assigns,
+        style:
+          merge_style(
+            "height-full overflow-scroll scrollbar-arrows focus:scrollbar-3",
+            assigns[:style]
+          )
+      )
+
+    ~H"""
+    <box focusable id={@id} implicit={Breeze.Implicit.Scroll} style={@style} {@rest}>
+      {render_slot(@inner_block)}
+    </box>
+    """
+  end
+
+  def tabs(assigns) do
+    active =
+      Enum.find(assigns.tab, List.first(assigns.tab), &(&1.value == assigns[:selected]))
+
+    assigns =
+      assigns
+      |> assign(active: active)
+      |> assign(style: merge_style("border overflow-hidden focus:border-3", assigns[:style]))
+      |> assign(
+        item_style:
+          merge_style(
+            "selected:bold selected:text-4 focus:selected:bg-4 focus:selected:text-7 overflow-scroll",
+            assigns[:item_style]
+          )
+      )
+
+    ~H"""
+    <box
+      id={@id}
+      implicit={Breeze.Implicit.Tabs}
+      focusable
+      tab-delegate={if @active do
+      "#{@id}-panel-#{@active.value}"
+    end}
+      tab-selected={@active.value}
+      style={@style}
+      {@rest}
+    >
+      <box style="inline" tab-bar="true">
+        <box :for={t <- @tab} value={t.value} tab-label={t.label} style={@item_style}>
+          {" #{t.label} "}
+        </box>
+      </box>
+      <box>
+      </box>
+      {render_slot(@active)}
     </box>
     """
   end

@@ -16,18 +16,15 @@ defmodule Breeze.LoggerCollector do
   end
 
   def subscribe(pid \\ self()) do
-    {:ok, _collector} = ensure_started()
-    GenServer.call(@name, {:subscribe, pid})
+    call({:subscribe, pid})
   end
 
   def clear do
-    {:ok, _collector} = ensure_started()
-    GenServer.call(@name, :clear)
+    call(:clear)
   end
 
   def entries do
-    {:ok, _collector} = ensure_started()
-    GenServer.call(@name, :entries)
+    call(:entries)
   end
 
   @impl true
@@ -144,5 +141,14 @@ defmodule Breeze.LoggerCollector do
 
   defp restore_default_handler_level(level) do
     :logger.set_handler_config(@default_handler_id, :level, level)
+  end
+
+  defp call(message) do
+    {:ok, _collector} = ensure_started()
+    GenServer.call(@name, message)
+  catch
+    :exit, {:noproc, _} ->
+      {:ok, _collector} = ensure_started()
+      GenServer.call(@name, message)
   end
 end
