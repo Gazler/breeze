@@ -52,7 +52,7 @@ defmodule Breeze.RouterTest do
     def render(assigns) do
       ~H"""
       <box>
-        <.router routes={@router} id="inner" />
+        <.router routes={@router} id="inner"/>
       </box>
       """
     end
@@ -187,7 +187,7 @@ defmodule Breeze.RouterTest do
     def render(assigns) do
       ~H"""
       <box id="parent" focusable style="focus:border-4">
-        <.router routes={@router} id="inner" />
+        <.router routes={@router} id="inner"/>
       </box>
       """
     end

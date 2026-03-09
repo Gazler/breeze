@@ -1,3 +1,5 @@
+require Logger
+
 defmodule RouterHome do
   use Breeze.View
 
@@ -223,15 +225,20 @@ defmodule RouterExample do
   import Breeze.Router
 
   def mount(_opts, term) do
+    send(self(), :emit_log)
+
     term =
-      Breeze.Router.init(
-        term,
+      assign(term, log_index: 0)
+      |> Breeze.Router.init(
         [
           home: {RouterHome, [message: "Home screen", interval: 900]},
           settings: {RouterSettings, [section: "general", interval: 350], persistence: true},
           status: {RouterStatus, [label: "All systems nominal", interval: 700]},
           metrics:
-            {RouterMetrics, [label: "Preloaded route", interval: 500], persistence: :preload}
+            {RouterMetrics, [label: "Preloaded route", interval: 500], persistence: :preload},
+          logs:
+            {Breeze.Logger, [title: "Application logs", max_lines: 120, height: 10],
+             persistence: :preload}
         ],
         current: :home
       )
@@ -248,6 +255,7 @@ defmodule RouterExample do
       <box>2 -> settings, persistence: true, includes a nested router</box>
       <box>3 -> status, remounted when revisited</box>
       <box>4 -> metrics, persistence: :preload, already ticking before first visit</box>
+      <box>5 -> logs, persistence: :preload, captures Logger output in the background</box>
       <box>Inside settings: a -> overview, b -> audit. Press q to quit.</box>
       <box style="height-1">
       </box>
@@ -270,9 +278,29 @@ defmodule RouterExample do
     do:
       {:noreply, Breeze.Router.navigate(term, :metrics, label: "Preloaded route", interval: 500)}
 
+  def handle_event(_, %{"key" => "5"}, term), do: {:noreply, Breeze.Router.navigate(term, :logs)}
   def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
   def handle_event(_, _, term), do: {:noreply, term}
+
+  def handle_info(:emit_log, term) do
+    route = Breeze.Router.current(term.assigns.router)
+    {log_fun, level, next_index} = next_demo_log(term.assigns.log_index)
+    log_fun.("router demo #{level} route=#{route}")
+    Process.send_after(self(), :emit_log, 500)
+    {:noreply, assign(term, log_index: next_index)}
+  end
+
   def handle_info(_, term), do: {:noreply, term}
+
+  defp next_demo_log(index) do
+    case rem(index, 5) do
+      0 -> {&Logger.debug/1, :debug, index + 1}
+      1 -> {&Logger.info/1, :info, index + 1}
+      2 -> {&Logger.notice/1, :notice, index + 1}
+      3 -> {&Logger.warning/1, :warning, index + 1}
+      _ -> {&Logger.error/1, :error, index + 1}
+    end
+  end
 end
 
 Breeze.Server.start_link(view: RouterExample, hide_cursor: true)

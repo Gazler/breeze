@@ -342,8 +342,8 @@ defmodule Breeze.Server do
 
     focused = state.focused
 
-    {state, live_ids, _visible_live_ids, {final_acc, %{content: output}}} =
-      render_view(%{state | focused: focused}, implicits)
+    {state, live_ids, _final_acc, output, dimensions, implicits} =
+      render_final_view(%{state | focused: focused}, implicits)
 
     {state, live_ids} = prune_children(state, live_ids)
     implicits = prune_implicit_state(implicits, live_ids, state.children)
@@ -354,20 +354,6 @@ defmodule Breeze.Server do
     output = "\e[K" <> String.replace(output, "\n", "\n\e[K") <> trailing
     terminal = Termite.Terminal.write(state.terminal, "\e[H" <> output)
 
-    final_elements = Enum.sort(final_acc.elements)
-
-    dimensions =
-      Enum.zip(final_elements, final_acc.dimensions)
-      |> Enum.reduce(%{}, fn {{_, flags}, dims}, acc ->
-        id = Keyword.get(flags, :id)
-
-        if id do
-          Map.put(acc, id, Breeze.Viewport.from_dimensions(dims))
-        else
-          acc
-        end
-      end)
-
     %{
       state
       | terminal: terminal,
@@ -377,6 +363,48 @@ defmodule Breeze.Server do
         implicit_state: implicits,
         events: events
     }
+  end
+
+  defp render_final_view(state, implicits, attempts \\ 2) do
+    {state, live_ids, _visible_live_ids, {final_acc, %{content: output}}} =
+      render_view(state, implicits)
+
+    dimensions = build_dimensions(final_acc)
+    adjusted_implicits = reconcile_scroll_implicits(implicits, dimensions)
+
+    if attempts > 0 and adjusted_implicits != implicits do
+      render_final_view(state, adjusted_implicits, attempts - 1)
+    else
+      {state, live_ids, final_acc, output, dimensions, adjusted_implicits}
+    end
+  end
+
+  defp build_dimensions(final_acc) do
+    final_acc.elements
+    |> Enum.sort()
+    |> Enum.zip(final_acc.dimensions)
+    |> Enum.reduce(%{}, fn {{_, flags}, dims}, acc ->
+      case Keyword.get(flags, :id) do
+        nil -> acc
+        id -> Map.put(acc, id, Breeze.Viewport.from_dimensions(dims))
+      end
+    end)
+  end
+
+  defp reconcile_scroll_implicits(implicit_state, dimensions) do
+    Enum.reduce(implicit_state, %{}, fn
+      {id, {Breeze.Implicit.Scroll, state}}, acc ->
+        next_state =
+          case Map.get(dimensions, id) do
+            nil -> state
+            element -> Breeze.Implicit.Scroll.reconcile(element, state)
+          end
+
+        Map.put(acc, id, {Breeze.Implicit.Scroll, next_state})
+
+      {id, value}, acc ->
+        Map.put(acc, id, value)
+    end)
   end
 
   defp render_view(state, implicit_state) do
@@ -540,7 +568,14 @@ defmodule Breeze.Server do
               terminal: state.terminal,
               live_prefix: full_id,
               live_view: fn child_attrs, child_opts ->
-                render_live_child(child_attrs, child_opts, state, implicit_state, collector, token)
+                render_live_child(
+                  child_attrs,
+                  child_opts,
+                  state,
+                  implicit_state,
+                  collector,
+                  token
+                )
               end
             )
 
