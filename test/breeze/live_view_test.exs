@@ -41,6 +41,29 @@ defmodule Breeze.LiveViewTest do
     end
   end
 
+  defmodule AnimatedChild do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      send(self(), :tick)
+      {:ok, assign(term, frame: 0)}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box id="panel">Frame: {@frame}</box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def handle_info(:tick, term) do
+      {:noreply, assign(term, frame: term.assigns.frame + 1)}
+    end
+
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   test "render_to_tree preserves typed live attrs" do
     [{:box, _, [{:live, attrs}]}] =
       ParentLiveExample.render(%{start_opts: [seed: 1]})
@@ -77,5 +100,21 @@ defmodule Breeze.LiveViewTest do
     assert acc.ids == ["child::panel", "child::button"]
     assert acc.focusables == ["child::button"]
     assert box.content =~ "Count: 1"
+  end
+
+  test "child server emits invalidation on async state changes" do
+    parent = self()
+
+    {:ok, pid} =
+      ChildServer.start(
+        view: AnimatedChild,
+        start_opts: [],
+        invalidate: fn -> send(parent, :invalidate) end
+      )
+
+    assert_receive :invalidate
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: nil, implicit_state: %{})
+    assert box.content =~ "Frame: 1"
   end
 end

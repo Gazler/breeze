@@ -11,7 +11,9 @@ defmodule Breeze.Term do
     elements: %{},
     events: %{},
     implicit_state: %{},
-    children: %{}
+    children: %{},
+    frame_delay_ms: 16,
+    render_timer: nil
   ]
 end
 
@@ -82,7 +84,8 @@ defmodule Breeze.Server do
   @doc false
   def init(opts) do
     view = Keyword.fetch!(opts, :view)
-    {:ok, %Breeze.Term{view: view}, {:continue, {:start, opts}}}
+    frame_delay_ms = Keyword.get(opts, :frame_delay_ms, 16)
+    {:ok, %Breeze.Term{view: view, frame_delay_ms: frame_delay_ms}, {:continue, {:start, opts}}}
   end
 
   @doc false
@@ -142,6 +145,14 @@ defmodule Breeze.Server do
       end
 
     {:noreply, %{state | children: children, focused: focused}}
+  end
+
+  def handle_info(:render_frame, state) do
+    {:noreply, render(%{state | render_timer: nil})}
+  end
+
+  def handle_info({:child_invalidated, _id}, state) do
+    {:noreply, schedule_render(state)}
   end
 
   def handle_info(message, state) do
@@ -548,7 +559,18 @@ defmodule Breeze.Server do
   defp start_child!(attrs, terminal) do
     view = fetch_live_attr!(attrs, :view)
     start_opts = fetch_live_attr(attrs, :start_opts, [])
-    {:ok, pid} = Breeze.ChildServer.start(view: view, start_opts: start_opts, terminal: terminal)
+    parent = self()
+    child_id = fetch_live_attr!(attrs, :id)
+    invalidate = fn -> send(parent, {:child_invalidated, child_id}) end
+
+    {:ok, pid} =
+      Breeze.ChildServer.start(
+        view: view,
+        start_opts: start_opts,
+        terminal: terminal,
+        invalidate: invalidate
+      )
+
     ref = Process.monitor(pid)
     %{pid: pid, ref: ref, view: view}
   end
@@ -699,4 +721,11 @@ defmodule Breeze.Server do
   defp put_process_list(key, value) do
     Process.put(key, [value | List.wrap(Process.get(key))])
   end
+
+  defp schedule_render(%{render_timer: nil, frame_delay_ms: delay} = state) do
+    timer = Process.send_after(self(), :render_frame, delay)
+    %{state | render_timer: timer}
+  end
+
+  defp schedule_render(state), do: state
 end
