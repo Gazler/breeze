@@ -52,6 +52,8 @@ defmodule Breeze.View do
   * `focusable` - if the element should be added to the focus tree. These are added in
   the order they appear, and can be toggled using tab/shift-tab. The `focus` style
   state can be used to style these. E.g. style="border focus:border-3"
+  * `default-focus` - marks the preferred focus target when a view or focus scope becomes active
+  * `focus-scope` - defines a focus region. Set `focus-scope="trap"` to keep tab traversal inside it
   * `style` - the style for the box. This is covered in the [Style](`m:Breeze.View#module-style`) section.
   * `implicit` - this is a module that will be used for implicit state. This is covered
    in the [Implicits](`m:Breeze.View#module-implicits`) section.
@@ -201,6 +203,11 @@ defmodule Breeze.View do
 
   Return values can include style flags (for example `selected: true`) and structured
   scroll modifiers (`scroll_y`, `scroll_x`, or `scroll: {top, left}`).
+
+  Root implicit modifiers can also influence focus handling:
+
+  * `default_focus: true` - mark the root element as the preferred focus target
+  * `focus_scope: :trap` - constrain tab/shift-tab navigation to this implicit subtree
 
   ```
   def handle_modifiers(:child, attributes, state) do

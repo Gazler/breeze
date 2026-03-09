@@ -62,6 +62,57 @@ defmodule Breeze.Blocks do
   end
 
   attr :id, :string, required: true
+  attr :selected, :string, default: nil
+  attr :style, :string, default: nil
+  attr :item_style, :string, default: nil
+  attr :rest, :global
+
+  slot :tab do
+    attr :value, :string, required: true
+    attr :label, :string, required: true
+  end
+
+  def tabs(assigns) do
+    active =
+      Enum.find(assigns.tab, List.first(assigns.tab), &(&1.value == assigns[:selected]))
+
+    assigns =
+      assigns
+      |> assign(active: active)
+      |> assign(style: merge_style("border overflow-hidden focus:border-3", assigns[:style]))
+      |> assign(
+        item_style:
+          merge_style(
+            "selected:bold selected:text-4 focus:selected:bg-4 focus:selected:text-7 overflow-scroll",
+            assigns[:item_style]
+          )
+      )
+
+    ~H"""
+    <box
+      id={@id}
+      implicit={Breeze.Implicit.Tabs}
+      focusable
+      tab-delegate={if @active do
+      "#{@id}-panel-#{@active.value}"
+    end}
+      tab-selected={@active.value}
+      style={@style}
+      {@rest}
+    >
+      <box style="inline" tab-bar="true">
+        <box :for={t <- @tab} value={t.value} tab-label={t.label} style={@item_style}>
+          {" #{t.label} "}
+        </box>
+      </box>
+      <box>
+      </box>
+      {render_slot(@active)}
+    </box>
+    """
+  end
+
+  attr :id, :string, required: true
   attr :content, :string, required: true
   attr :width, :integer, required: true
   attr :style, :string, default: nil
@@ -104,42 +155,67 @@ defmodule Breeze.Blocks do
     """
   end
 
-  def tabs(assigns) do
-    active =
-      Enum.find(assigns.tab, List.first(assigns.tab), &(&1.value == assigns[:selected]))
+  attr :width, :integer, required: true
+  attr :height, :integer, required: true
+  attr :style, :string, default: nil
+  attr :title_style, :string, default: nil
+  attr :rest, :global
 
+  slot :title
+  slot :inner_block
+
+  def panel(assigns) do
     assigns =
       assigns
-      |> assign(active: active)
-      |> assign(style: merge_style("border overflow-hidden focus:border-3", assigns[:style]))
       |> assign(
-        item_style:
-          merge_style(
-            "selected:bold selected:text-4 focus:selected:bg-4 focus:selected:text-7 overflow-scroll",
-            assigns[:item_style]
-          )
+        style: merge_style("border-rounded border-7 bg-0", assigns[:style]),
+        title_style: merge_style("bold bg-0", assigns[:title_style])
+      )
+
+    ~H"""
+    <box style={"#{@style} width-#{@width} height-#{@height}"} {@rest}>
+      {render_slot(@inner_block)}
+      <box :if={assigns[:title]} style={"absolute left-2 top-0 #{@title_style}"}>
+        {render_slot(@title)}
+      </box>
+    </box>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :width, :integer, required: true
+  attr :height, :integer, required: true
+  attr :style, :string, default: nil
+  attr :rest, :global
+
+  slot :title
+  slot :inner_block
+
+  def modal(assigns) do
+    assigns =
+      assigns
+      |> assign(
+        frame_width: assigns.width + 2,
+        frame_height: assigns.height + 2,
+        style: merge_style("bg-0", assigns[:style])
       )
 
     ~H"""
     <box
-      id={@id}
-      implicit={Breeze.Implicit.Tabs}
       focusable
-      tab-delegate={if @active do
-      "#{@id}-panel-#{@active.value}"
-    end}
-      tab-selected={@active.value}
-      style={@style}
+      default-focus
+      id={@id}
+      focus-scope="trap"
+      implicit={Breeze.Implicit.Modal}
+      width={@width}
+      height={@height}
+      style={"width-#{@frame_width} height-#{@frame_height}"}
       {@rest}
     >
-      <box style="inline" tab-bar="true">
-        <box :for={t <- @tab} value={t.value} tab-label={t.label} style={@item_style}>
-          {" #{t.label} "}
-        </box>
-      </box>
-      <box>
-      </box>
-      {render_slot(@active)}
+      <.panel width={@width} height={@height} style={@style}>
+        <:title :if={assigns[:title]}>{render_slot(@title)}</:title>
+        {render_slot(@inner_block)}
+      </.panel>
     </box>
     """
   end

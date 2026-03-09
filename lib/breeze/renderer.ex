@@ -79,17 +79,9 @@ defmodule Breeze.Renderer do
   end
 
   defp build_tree([{:attribute_bool, [attr]} | rest], box, children, style, flags, acc, opts) do
-    {flags, acc} =
-      case attr do
-        "focusable" ->
-          {Keyword.put(flags, :focusable, true),
-           %{acc | flags: Keyword.put(acc.flags, :focusable, true)}}
-
-        _ ->
-          {flags, acc}
-      end
-
-    build_tree(rest, box, children, style, flags, acc, opts)
+    attr = String.to_atom(attr)
+    acc = %{acc | flags: Keyword.put(acc.flags, attr, true)}
+    build_tree(rest, box, children, style, Keyword.put(flags, attr, true), acc, opts)
   end
 
   defp build_tree([content | rest], box, children, style, flags, acc, opts)
@@ -123,11 +115,9 @@ defmodule Breeze.Renderer do
 
   defp build_tree([{:box, _, nodes} | rest], box, children, style, flags, acc, opts) do
     child_flags =
-      cond do
-        Keyword.get(flags, :implicit) -> [implicit_owner: Keyword.fetch!(flags, :id)]
-        implicit_owner = Keyword.get(flags, :implicit_owner) -> [implicit_owner: implicit_owner]
-        true -> []
-      end
+      []
+      |> inherit_implicit_owner(flags)
+      |> inherit_focus_scope_path(flags)
 
     acc = %{
       acc
@@ -278,9 +268,40 @@ defmodule Breeze.Renderer do
             {idx,
              flags
              |> Keyword.update(:id, nil, &namespace_id(&1, prefix))
-             |> Keyword.update(:implicit_owner, nil, &namespace_id(&1, prefix))}
+             |> Keyword.update(:implicit_owner, nil, &namespace_id(&1, prefix))
+             |> Keyword.update(:"focus-scope-path", [], fn scope_path ->
+               Enum.map(scope_path, &namespace_id(&1, prefix))
+             end)}
           end)
     }
+  end
+
+  defp inherit_implicit_owner(child_flags, flags) do
+    cond do
+      Keyword.get(flags, :implicit) ->
+        Keyword.put(child_flags, :implicit_owner, Keyword.fetch!(flags, :id))
+
+      implicit_owner = Keyword.get(flags, :implicit_owner) ->
+        Keyword.put(child_flags, :implicit_owner, implicit_owner)
+
+      true ->
+        child_flags
+    end
+  end
+
+  defp inherit_focus_scope_path(child_flags, flags) do
+    scope_path = Keyword.get(flags, :"focus-scope-path", [])
+
+    scope_path =
+      if Keyword.get(flags, :"focus-scope") && Keyword.get(flags, :id) do
+        scope_path ++ [Keyword.fetch!(flags, :id)]
+      else
+        scope_path
+      end
+
+    if scope_path == [],
+      do: child_flags,
+      else: Keyword.put(child_flags, :"focus-scope-path", scope_path)
   end
 
   defp namespace_id(nil, _prefix), do: nil

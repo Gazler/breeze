@@ -8,7 +8,10 @@ defmodule Breeze.Term do
     assigns: %{},
     global_keybindings: [],
     focused: nil,
+    allow_unfocused?: false,
     focusables: [],
+    focus_meta: %{},
+    focus_memory: %{},
     elements: %{},
     events: %{},
     implicit_state: %{},
@@ -175,29 +178,37 @@ defmodule Breeze.Server do
   end
 
   defp process_data("\t", state) do
-    index = Enum.find_index(state.focusables, &(&1 == state.focused))
-
-    new_focused =
-      if index do
-        Enum.at(state.focusables, index + 1)
-      else
-        hd(state.focusables)
-      end
-
-    {:noreply, %{state | focused: new_focused}}
-  end
-
-  defp process_data("\e[Z", state) do
-    index = Enum.find_index(state.focusables, &(&1 == state.focused))
+    focusables = Breeze.Focus.active_focusables(state.focusables, state.focus_meta)
+    index = Enum.find_index(focusables, &(&1 == state.focused))
+    trapped_scope = Breeze.Focus.trapped_scope?(state.focusables, state.focus_meta)
 
     new_focused =
       cond do
-        index == 0 -> nil
-        index == nil -> hd(Enum.reverse(state.focusables))
-        true -> Enum.at(state.focusables, index - 1)
+        focusables == [] -> nil
+        trapped_scope && is_integer(index) -> Enum.at(focusables, index + 1) || hd(focusables)
+        is_integer(index) -> Enum.at(focusables, index + 1)
+        true -> hd(focusables)
       end
 
-    {:noreply, %{state | focused: new_focused}}
+    {:noreply, put_focus(state, new_focused)}
+  end
+
+  defp process_data("\e[Z", state) do
+    focusables = Breeze.Focus.active_focusables(state.focusables, state.focus_meta)
+    index = Enum.find_index(focusables, &(&1 == state.focused))
+    trapped_scope = Breeze.Focus.trapped_scope?(state.focusables, state.focus_meta)
+
+    new_focused =
+      cond do
+        focusables == [] -> nil
+        trapped_scope && index == 0 -> List.last(focusables)
+        trapped_scope && is_integer(index) -> Enum.at(focusables, index - 1)
+        index == 0 -> nil
+        index == nil -> List.last(focusables)
+        true -> Enum.at(focusables, index - 1)
+      end
+
+    {:noreply, put_focus(state, new_focused)}
   end
 
   defp process_data("\e", state) do
@@ -217,6 +228,8 @@ defmodule Breeze.Server do
       5 -> do_process_key("Escape", state)
     end
   end
+
+  defp process_data("\r", state), do: do_process_key("Enter", state)
 
   defp process_data(raw_key, state) do
     key =
@@ -246,7 +259,12 @@ defmodule Breeze.Server do
 
       :continue ->
         selected_implicit =
-          Enum.find(state.implicit_state, fn {id, _el} -> id == state.focused end)
+          state
+          |> implicit_event_target()
+          |> then(fn
+            nil -> nil
+            id -> Enum.find(state.implicit_state, fn {implicit_id, _el} -> implicit_id == id end)
+          end)
 
         {view_state, implicit_consumed, state} =
           if selected_implicit do
@@ -274,6 +292,30 @@ defmodule Breeze.Server do
               {:stop, state} -> {:stop, state}
               {:noreply, state} -> {:noreply, state}
             end
+        end
+    end
+  end
+
+  defp implicit_event_target(%{focused: nil}), do: nil
+
+  defp implicit_event_target(state) do
+    find_implicit_owner(state.focused, state.focus_meta, state.implicit_state)
+  end
+
+  defp find_implicit_owner(nil, _focus_meta, _implicit_state), do: nil
+
+  defp find_implicit_owner(id, focus_meta, implicit_state) do
+    cond do
+      Map.has_key?(implicit_state, id) ->
+        id
+
+      true ->
+        case Map.get(focus_meta, id) do
+          %{implicit_owner: owner} when is_binary(owner) ->
+            find_implicit_owner(owner, focus_meta, implicit_state)
+
+          _ ->
+            nil
         end
     end
   end
@@ -325,6 +367,10 @@ defmodule Breeze.Server do
     {state, _live_ids, _visible_live_ids, {acc, _box}} = render_view(state, state.implicit_state)
 
     implicits = Breeze.RenderState.build(state, acc).implicit_state
+    focus_meta = Breeze.Focus.build_meta(acc.elements, implicits)
+
+    focus_memory =
+      Breeze.Focus.remember_focus(state.focus_memory, state.focused, state.focus_meta)
 
     events =
       acc.elements
@@ -340,7 +386,12 @@ defmodule Breeze.Server do
         end
       end)
 
-    focused = state.focused
+    focused =
+      if state.allow_unfocused? and is_nil(state.focused) do
+        nil
+      else
+        Breeze.Focus.normalize_focus(state.focused, acc.focusables, focus_meta, focus_memory)
+      end
 
     {state, live_ids, _final_acc, output, dimensions, implicits} =
       render_final_view(%{state | focused: focused}, implicits)
@@ -359,7 +410,10 @@ defmodule Breeze.Server do
       | terminal: terminal,
         elements: dimensions,
         focusables: acc.focusables,
+        focus_meta: focus_meta,
+        focus_memory: focus_memory,
         focused: focused,
+        allow_unfocused?: is_nil(focused) and state.allow_unfocused?,
         implicit_state: implicits,
         events: events
     }
@@ -480,7 +534,6 @@ defmodule Breeze.Server do
       else
         child = start_child!(attrs, state.terminal)
         state = %{state | children: Map.put(state.children, id, child)}
-        state = maybe_take_child_focus(state, id, child.pid)
         {state, true}
       end
     end)
@@ -505,15 +558,6 @@ defmodule Breeze.Server do
     ref = Process.monitor(pid)
     %{pid: pid, ref: ref, view: view, persistent: persistent, visible: false}
   end
-
-  defp maybe_take_child_focus(%{focused: nil} = state, id, pid) do
-    case Breeze.ChildServer.metadata(pid) do
-      %{focused: nil} -> state
-      %{focused: focused} -> %{state | focused: namespace_live_id(id, focused)}
-    end
-  end
-
-  defp maybe_take_child_focus(state, _id, _pid), do: state
 
   defp prune_children(state, live_ids) do
     live_ids = MapSet.new(live_ids)
@@ -588,7 +632,7 @@ defmodule Breeze.Server do
   defp update_child_focus(state, _child_id, nil), do: state
 
   defp update_child_focus(state, child_id, focused),
-    do: %{state | focused: namespace_live_id(child_id, focused)}
+    do: put_focus(state, namespace_live_id(child_id, focused))
 
   defp clear_child_focus(%{focused: focused} = state, child_id) do
     if strip_live_prefix(focused, child_id) do
@@ -596,6 +640,10 @@ defmodule Breeze.Server do
     else
       state
     end
+  end
+
+  defp put_focus(state, focused) do
+    %{state | focused: focused, allow_unfocused?: is_nil(focused)}
   end
 
   defp child_implicit_state(implicit_state, live_id) do
