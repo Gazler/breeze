@@ -38,8 +38,8 @@ defmodule Breeze.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:termite, "~> 0.4.0"},
-      {:back_breeze, github: "gazler/back_breeze"},
+      {:termite, github: "Gazler/termite", override: true},
+      {:back_breeze, github: "Gazler/back_breeze"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end

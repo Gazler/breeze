@@ -314,6 +314,7 @@ defmodule Breeze.Renderer do
 
   defp apply_style("height-auto", {style, attrs}), do: {Style.height(style, :auto), attrs}
   defp apply_style("height-screen", {style, attrs}), do: {Style.height(style, :screen), attrs}
+  defp apply_style("height-full", {style, attrs}), do: {Style.height(style, :screen), attrs}
 
   defp apply_style("height-" <> num, {style, attrs}),
     do: {Style.height(style, String.to_integer(num)), attrs}
@@ -323,6 +324,9 @@ defmodule Breeze.Renderer do
 
   defp apply_style("bg-" <> num, {style, attrs}),
     do: {Style.background_color(style, String.to_integer(num)), attrs}
+
+  defp apply_style("scrollbar-arrows", {style, attrs}),
+    do: {Style.scrollbar(style, %{arrows: true}), attrs}
 
   defp apply_style("border-rounded", {style, attrs}),
     do: {Style.border(style, :rounded), attrs}
