@@ -276,7 +276,9 @@ defmodule Breeze.Server do
   end
 
   defp render(state) do
-    {state, _live_ids, {acc, _box}} = render_view(state, state.implicit_state)
+    {state, _live_ids, visible_live_ids, {_acc, _box}} = render_view(state, state.implicit_state)
+    state = sync_child_visibility(state, visible_live_ids)
+    {state, _live_ids, _visible_live_ids, {acc, _box}} = render_view(state, state.implicit_state)
 
     last = map_size(acc.elements)
 
@@ -340,11 +342,11 @@ defmodule Breeze.Server do
 
     focused = state.focused
 
-    {state, live_ids, {final_acc, %{content: output}}} =
+    {state, live_ids, _visible_live_ids, {final_acc, %{content: output}}} =
       render_view(%{state | focused: focused}, implicits)
 
     {state, live_ids} = prune_children(state, live_ids)
-    implicits = prune_implicit_state(implicits, live_ids)
+    implicits = prune_implicit_state(implicits, live_ids, state.children)
 
     screen_height = state.terminal.size.height
     output_lines = length(String.split(output, "\n"))
@@ -378,30 +380,25 @@ defmodule Breeze.Server do
   end
 
   defp render_view(state, implicit_state) do
-    Process.put(:breeze_live_requested, [])
-    Process.put(:breeze_live_missing, [])
+    collector = self()
+    token = make_ref()
 
     result =
       Breeze.Renderer.render(state.view, state.assigns,
         focused: state.focused,
         implicit_state: implicit_state,
         terminal: state.terminal,
-        live_view: fn attrs, opts -> render_live_child(attrs, opts, state, implicit_state) end
+        live_view: fn attrs, opts ->
+          render_live_child(attrs, opts, state, implicit_state, collector, token)
+        end
       )
 
-    live_ids =
-      Process.delete(:breeze_live_requested)
-      |> List.wrap()
-      |> Enum.reverse()
-
-    missing =
-      Process.delete(:breeze_live_missing)
-      |> List.wrap()
-      |> Enum.reverse()
+    %{requested: live_ids, visible: visible_live_ids, missing: missing} =
+      collect_render_tracking(token, %{requested: [], visible: [], missing: []})
 
     case ensure_children(state, missing) do
       {state, true} -> render_view(state, implicit_state)
-      {state, false} -> {state, live_ids, result}
+      {state, false} -> {state, live_ids, visible_live_ids, result}
     end
   end
 
@@ -514,32 +511,41 @@ defmodule Breeze.Server do
     Map.put(acc, id, {mod, implicit_state})
   end
 
-  defp render_live_child(attrs, opts, state, implicit_state) do
+  defp render_live_child(attrs, opts, state, implicit_state, collector, token) do
     id = fetch_live_attr!(attrs, :id)
     full_id = live_id(Keyword.get(opts, :live_prefix), id)
-    put_process_list(:breeze_live_requested, full_id)
+    preload_only = fetch_live_attr(attrs, :preload_only, false)
+    send(collector, {:breeze_live_track, token, :requested, full_id})
+
+    if !preload_only do
+      send(collector, {:breeze_live_track, token, :visible, full_id})
+    end
 
     case Map.get(state.children, full_id) do
       nil ->
-        put_process_list(:breeze_live_missing, {full_id, attrs})
-        :missing
+        send(collector, {:breeze_live_track, token, :missing, {full_id, attrs}})
+        if preload_only, do: :preloaded, else: :missing
 
       %{pid: pid} ->
-        local_focused = strip_live_prefix(state.focused, full_id)
-        local_implicit_state = child_implicit_state(implicit_state, full_id)
+        if preload_only do
+          :preloaded
+        else
+          local_focused = strip_live_prefix(state.focused, full_id)
+          local_implicit_state = child_implicit_state(implicit_state, full_id)
 
-        {:ok, child_acc, child_box} =
-          Breeze.ChildServer.render(pid,
-            focused: local_focused,
-            implicit_state: local_implicit_state,
-            terminal: state.terminal,
-            live_prefix: full_id,
-            live_view: fn child_attrs, child_opts ->
-              render_live_child(child_attrs, child_opts, state, implicit_state)
-            end
-          )
+          {:ok, child_acc, child_box} =
+            Breeze.ChildServer.render(pid,
+              focused: local_focused,
+              implicit_state: local_implicit_state,
+              terminal: state.terminal,
+              live_prefix: full_id,
+              live_view: fn child_attrs, child_opts ->
+                render_live_child(child_attrs, child_opts, state, implicit_state, collector, token)
+              end
+            )
 
-        {:rendered, full_id, child_acc, child_box}
+          {:rendered, id, child_acc, child_box}
+        end
     end
   end
 
@@ -559,6 +565,7 @@ defmodule Breeze.Server do
   defp start_child!(attrs, terminal) do
     view = fetch_live_attr!(attrs, :view)
     start_opts = fetch_live_attr(attrs, :start_opts, [])
+    persistent = fetch_live_attr(attrs, :persistent, false)
     parent = self()
     child_id = fetch_live_attr!(attrs, :id)
     invalidate = fn -> send(parent, {:child_invalidated, child_id}) end
@@ -572,7 +579,7 @@ defmodule Breeze.Server do
       )
 
     ref = Process.monitor(pid)
-    %{pid: pid, ref: ref, view: view}
+    %{pid: pid, ref: ref, view: view, persistent: persistent, visible: false}
   end
 
   defp maybe_take_child_focus(%{focused: nil} = state, id, pid) do
@@ -588,7 +595,9 @@ defmodule Breeze.Server do
     live_ids = MapSet.new(live_ids)
 
     {keep, drop} =
-      Enum.split_with(state.children, fn {id, _child} -> MapSet.member?(live_ids, id) end)
+      Enum.split_with(state.children, fn {id, child} ->
+        MapSet.member?(live_ids, id) or child.persistent
+      end)
 
     Enum.each(drop, fn {_id, child} ->
       Process.demonitor(child.ref, [:flush])
@@ -606,15 +615,15 @@ defmodule Breeze.Server do
     {%{state | children: children, focused: focused}, MapSet.to_list(live_ids)}
   end
 
-  defp prune_implicit_state(implicit_state, live_ids) do
+  defp prune_implicit_state(implicit_state, live_ids, children) do
     Enum.reduce(implicit_state, %{}, fn {id, value}, acc ->
-      if keep_implicit_id?(id, live_ids), do: Map.put(acc, id, value), else: acc
+      if keep_implicit_id?(id, live_ids, children), do: Map.put(acc, id, value), else: acc
     end)
   end
 
-  defp keep_implicit_id?(id, live_ids) do
+  defp keep_implicit_id?(id, live_ids, children) do
     not String.contains?(id, "::") or
-      Enum.any?(live_ids, fn live_id ->
+      Enum.any?(live_ids ++ Map.keys(children), fn live_id ->
         String.starts_with?(id, live_id <> "::")
       end)
   end
@@ -718,9 +727,64 @@ defmodule Breeze.Server do
     Map.get(attrs, key) || Map.get(attrs, Atom.to_string(key), default)
   end
 
-  defp put_process_list(key, value) do
-    Process.put(key, [value | List.wrap(Process.get(key))])
+  defp collect_render_tracking(token, acc) do
+    receive do
+      {:breeze_live_track, ^token, :requested, id} ->
+        collect_render_tracking(token, %{acc | requested: acc.requested ++ [id]})
+
+      {:breeze_live_track, ^token, :visible, id} ->
+        collect_render_tracking(token, %{acc | visible: acc.visible ++ [id]})
+
+      {:breeze_live_track, ^token, :missing, item} ->
+        collect_render_tracking(token, %{acc | missing: acc.missing ++ [item]})
+    after
+      0 -> acc
+    end
   end
+
+  defp sync_child_visibility(state, visible_live_ids) do
+    visible_live_ids = MapSet.new(visible_live_ids)
+
+    children =
+      Enum.reduce(state.children, %{}, fn {id, child}, acc ->
+        visible? = MapSet.member?(visible_live_ids, id)
+
+        case maybe_update_child_visibility(child, visible?) do
+          {:keep, child} -> Map.put(acc, id, child)
+          :drop -> acc
+        end
+      end)
+
+    %{state | children: children}
+  end
+
+  defp maybe_update_child_visibility(child, visible?) do
+    child =
+      cond do
+        child.visible == visible? ->
+          child
+
+        child.persistent ->
+          case notify_child_visibility(child.pid, visible?) do
+            {:noreply, _focused} -> %{child | visible: visible?}
+            {:stop, _focused} -> :drop
+          end
+
+        true ->
+          %{child | visible: visible?}
+      end
+
+    case child do
+      :drop -> :drop
+      child -> {:keep, child}
+    end
+  end
+
+  defp notify_child_visibility(pid, true),
+    do: Breeze.ChildServer.dispatch_info(pid, {:route_visibility, :visible})
+
+  defp notify_child_visibility(pid, false),
+    do: Breeze.ChildServer.dispatch_info(pid, {:route_visibility, :hidden})
 
   defp schedule_render(%{render_timer: nil, frame_delay_ms: delay} = state) do
     timer = Process.send_after(self(), :render_frame, delay)

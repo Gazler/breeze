@@ -65,14 +65,16 @@ defmodule AnimatedProgressExample do
           start_opts={[label: "Slow", width: 20, interval: 140]}
         >
         </live>
-        <box style="width-2"></box>
+        <box style="width-2">
+        </box>
         <live
           id="progress_medium"
           view={AnimatedProgressBar}
           start_opts={[label: "Medium", width: 16, interval: 85]}
         >
         </live>
-        <box style="width-2"></box>
+        <box style="width-2">
+        </box>
         <live
           id="progress_fast"
           view={AnimatedProgressBar}

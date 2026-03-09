@@ -106,15 +106,19 @@ defmodule Breeze.Renderer do
             {:rendered, prefix, child_acc, child_box} ->
               {merge_live_acc(acc, namespace_live_acc(child_acc, prefix)), child_box}
 
+            :preloaded ->
+              {acc, nil}
+
             _ ->
-              {acc, %BackBreeze.Box{}}
+              {acc, nil}
           end
 
         _ ->
-          {acc, %BackBreeze.Box{}}
+          {acc, nil}
       end
 
-    build_tree(rest, box, [child | children], style, flags, acc, opts)
+    children = if child, do: [child | children], else: children
+    build_tree(rest, box, children, style, flags, acc, opts)
   end
 
   defp build_tree([{:box, _, nodes} | rest], box, children, style, flags, acc, opts) do
