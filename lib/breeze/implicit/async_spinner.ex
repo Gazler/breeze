@@ -1,0 +1,18 @@
+defmodule Breeze.Implicit.AsyncSpinner do
+  @moduledoc false
+
+  @frames ["|", "/", "-", "\\"]
+
+  def init(_items, _root_attrs, last_state),
+    do: {:ok, last_state, rerender_every: 120, active_when_pending: true}
+
+  def handle_modifiers(:root, _flags, _state), do: []
+  def handle_modifiers(:child, _flags, _state), do: []
+
+  def animate(:root, box, _flags, _state, %{frame: frame, pending?: pending?}) do
+    content = if pending?, do: Enum.at(@frames, rem(frame, length(@frames))), else: "·"
+    %{box | content: content}
+  end
+
+  def animate(:child, box, _flags, _state, _ctx), do: box
+end

@@ -166,6 +166,9 @@ defmodule Breeze.View do
   It receives all child element attributes and the previous state. The `init/3` form
   also receives root attributes for the implicit container.
 
+  `init` can either return the implicit state directly, or `{:ok, state, options}`.
+  The options form is used for renderer-driven animation behavior such as periodic rerenders.
+
   ```
   defmodule MyAppList do
 
@@ -174,6 +177,16 @@ defmodule Breeze.View do
     end
   end
   ```
+
+  ```
+  def init(_children, _root_attrs, last_state) do
+    {:ok, last_state, rerender_every: 500}
+  end
+  ```
+
+  If `rerender_every` is set, Breeze will periodically call `animate/5` when it is
+  implemented. The final argument includes timing context such as `:now`,
+  `:frame`, `:last_render_at`, `:last_interaction_at`, `:pending?`, and `:focused?`.
 
   There is also a `handle_event/3` callback. This is similar to the callback for a view, but
   returns different values. Here we handle key events and return a `:change` event along
@@ -197,7 +210,11 @@ defmodule Breeze.View do
   def handle_event(_, _, state), do: {:noreply, state}
   ```
 
-  There is one final handler which is called when implicit elements are rendered.
+  There are two final handlers used during rendering.
+
+  `animate/5` can transform the rendered `BackBreeze.Box` for lightweight
+  renderer-driven animation and other presentation changes.
+
   `handle_modifiers/3` receives `:root` or `:child` as the first argument and can be
   used to tell the renderer things about the state.
 
@@ -330,7 +347,7 @@ defmodule Breeze.View do
   end
 
   def focus(term, value) do
-    %{term | focused: value}
+    %{term | focused: value, allow_unfocused?: is_nil(value)}
   end
 
   @doc """

@@ -4,7 +4,7 @@ defmodule Breeze.RenderState do
   alias Breeze.Viewport
 
   def build(term, acc) do
-    {implicits, _current, _mod, _last_id, _root_attrs} =
+    {implicits, implicit_meta, _current, _mod, _last_id, _root_attrs} =
       acc.elements
       |> Enum.sort()
       |> Enum.reduce(initial_implicit_build_state(), fn item, state ->
@@ -27,6 +27,8 @@ defmodule Breeze.RenderState do
       | elements: elements,
         focusables: acc.focusables,
         implicit_state: implicits,
+        implicit_meta: implicit_meta,
+        rendered_boxes: Map.get(acc, :boxes, %{}),
         events: events
     }
   end
@@ -65,24 +67,27 @@ defmodule Breeze.RenderState do
     end)
   end
 
-  defp initial_implicit_build_state, do: {%{}, [], nil, nil, %{}}
+  defp initial_implicit_build_state, do: {%{}, %{}, [], nil, nil, %{}}
 
   defp reduce_implicit_item({idx, elem}, state, term, total) do
-    {implicit_acc, current, mod, last_id, root_attrs} = state
+    {implicit_acc, implicit_meta, current, mod, last_id, root_attrs} = state
     {implicit, id, implicit_owner, elem} = normalize_implicit_element(elem)
 
     cond do
       total == 1 && implicit && id ->
-        {add_implicit_item(implicit_acc, term, id, implicit, [], elem), [], implicit, id, elem}
+        {implicit_acc, implicit_meta} =
+          add_implicit_item(implicit_acc, implicit_meta, term, id, implicit, [], elem)
+
+        {implicit_acc, implicit_meta, [], implicit, id, elem}
 
       mod && (implicit || idx == total - 1) ->
         flush_open_implicit(state, implicit, id, implicit_owner, elem, term)
 
       !mod && implicit ->
-        {implicit_acc, current, implicit, id, elem}
+        {implicit_acc, implicit_meta, current, implicit, id, elem}
 
       implicit_owner ->
-        {implicit_acc, [elem | current], mod, last_id, root_attrs}
+        {implicit_acc, implicit_meta, [elem | current], mod, last_id, root_attrs}
 
       true ->
         state
@@ -98,20 +103,22 @@ defmodule Breeze.RenderState do
   end
 
   defp flush_open_implicit(state, implicit, id, implicit_owner, elem, term) do
-    {implicit_acc, current, mod, last_id, root_attrs} = state
+    {implicit_acc, implicit_meta, current, mod, last_id, root_attrs} = state
 
     current = if implicit_owner, do: [elem | current], else: current
     items = Enum.reverse(current)
-    implicit_acc = add_implicit_item(implicit_acc, term, last_id, mod, items, root_attrs)
 
-    implicit_acc =
+    {implicit_acc, implicit_meta} =
+      add_implicit_item(implicit_acc, implicit_meta, term, last_id, mod, items, root_attrs)
+
+    {implicit_acc, implicit_meta} =
       if implicit && id do
-        add_implicit_item(implicit_acc, term, id, implicit, [], elem)
+        add_implicit_item(implicit_acc, implicit_meta, term, id, implicit, [], elem)
       else
-        implicit_acc
+        {implicit_acc, implicit_meta}
       end
 
-    {implicit_acc, [], implicit, id, elem}
+    {implicit_acc, implicit_meta, [], implicit, id, elem}
   end
 
   defp do_dispatch_implicit_event(term, id, payload, route_change_fun, visited) do
@@ -153,12 +160,24 @@ defmodule Breeze.RenderState do
             end
 
           nil ->
-            {:noreply, false, term}
+            case get_in(term.focus_meta, [id, :implicit_owner]) do
+              owner_id when is_binary(owner_id) ->
+                do_dispatch_implicit_event(
+                  term,
+                  owner_id,
+                  payload,
+                  route_change_fun,
+                  MapSet.put(visited, id)
+                )
+
+              _ ->
+                {:noreply, false, term}
+            end
         end
     end
   end
 
-  defp add_implicit_item(acc, term, id, mod, items, root_attrs) do
+  defp add_implicit_item(acc, meta_acc, term, id, mod, items, root_attrs) do
     screen_width = if term.terminal, do: term.terminal.size.width, else: 0
     screen_height = if term.terminal, do: term.terminal.size.height, else: 0
 
@@ -179,15 +198,15 @@ defmodule Breeze.RenderState do
         element -> Map.put(last_state, :__element__, element)
       end
 
-    implicit_state =
+    {implicit_state, implicit_meta} =
       case Code.ensure_loaded(mod) do
         {:module, _module} ->
           cond do
             function_exported?(mod, :init, 3) ->
-              mod.init(items, root_attrs, last_state)
+              normalize_init_result(mod.init(items, root_attrs, last_state))
 
             function_exported?(mod, :init, 2) ->
-              mod.init(items, last_state)
+              normalize_init_result(mod.init(items, last_state))
 
             true ->
               raise ArgumentError, "implicit #{inspect(mod)} must implement init/2 or init/3"
@@ -198,6 +217,17 @@ defmodule Breeze.RenderState do
                 "implicit #{inspect(mod)} could not be loaded (#{inspect(reason)})"
       end
 
-    Map.put(acc, id, {mod, implicit_state})
+    {
+      Map.put(acc, id, {mod, implicit_state}),
+      Map.put(meta_acc, id, implicit_meta)
+    }
+  end
+
+  defp normalize_init_result({:ok, implicit_state, implicit_meta}) when is_list(implicit_meta) do
+    {implicit_state, Map.new(implicit_meta)}
+  end
+
+  defp normalize_init_result(implicit_state) do
+    {implicit_state, %{}}
   end
 end
