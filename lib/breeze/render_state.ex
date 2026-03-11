@@ -159,6 +159,14 @@ defmodule Breeze.RenderState do
   end
 
   defp add_implicit_item(acc, term, id, mod, items, root_attrs) do
+    screen_width = if term.terminal, do: term.terminal.size.width, else: 0
+    screen_height = if term.terminal, do: term.terminal.size.height, else: 0
+
+    root_attrs =
+      root_attrs
+      |> Map.put(:"screen-width", screen_width)
+      |> Map.put(:"screen-height", screen_height)
+
     last_state =
       case term.implicit_state[id] do
         {_mod, last_state} -> last_state

@@ -41,16 +41,55 @@ defmodule Breeze.ChildServer do
   end
 
   def handle_call({:render, opts}, _from, term) do
+    explicit_focus? = Keyword.has_key?(opts, :focused)
     term = maybe_put_terminal(term, Keyword.get(opts, :terminal))
     term = %{term | focused: Keyword.get(opts, :focused, term.focused)}
     implicit_state = Keyword.get(opts, :implicit_state, %{}) |> Map.merge(term.implicit_state)
     opts = Keyword.put(opts, :implicit_state, implicit_state)
 
-    {term, acc, box} =
+    {term, _acc, _box} =
       render_with_reconciled_implicits(term, opts, fn current_term, current_opts ->
         {acc, box} = Breeze.Renderer.render(current_term.view, current_term.assigns, current_opts)
-        {Breeze.RenderState.build(current_term, acc), acc, box}
+        current_term = Breeze.RenderState.build(current_term, acc)
+        focus_meta = Breeze.Focus.build_meta(acc.elements, current_term.implicit_state)
+
+        focus_memory =
+          Breeze.Focus.remember_focus(
+            current_term.focus_memory,
+            current_term.focused,
+            current_term.focus_meta
+          )
+
+        focused =
+          if explicit_focus? do
+            current_term.focused
+          else
+            Breeze.Focus.normalize_focus(
+              current_term.focused,
+              acc.focusables,
+              focus_meta,
+              focus_memory
+            )
+          end
+
+        current_term = %{
+          current_term
+          | focus_meta: focus_meta,
+            focus_memory: focus_memory,
+            focused: focused
+        }
+
+        {current_term, acc, box}
       end)
+
+    final_opts =
+      opts
+      |> Keyword.put(:focused, term.focused)
+      |> Keyword.put(:implicit_state, term.implicit_state)
+
+    {acc, box} = Breeze.Renderer.render(term.view, term.assigns, final_opts)
+    term = Breeze.RenderState.build(term, acc)
+    term = %{term | focus_meta: Breeze.Focus.build_meta(acc.elements, term.implicit_state)}
 
     {:reply, {:ok, acc, box}, term}
   end

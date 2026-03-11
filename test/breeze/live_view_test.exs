@@ -65,6 +65,21 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule FocusedChild do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <box id="button" focusable style="focus:inverse">Focusable</box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   test "render_to_tree preserves typed live attrs" do
     [{:box, _, [{:live, attrs}]}] =
       ParentLiveExample.render(%{start_opts: [seed: 1]})
@@ -101,6 +116,14 @@ defmodule Breeze.LiveViewTest do
     assert acc.ids == ["child::panel", "child::button"]
     assert acc.focusables == ["child::button"]
     assert box.content =~ "Count: 1"
+  end
+
+  test "unfocused live children do not render their own local focus ring" do
+    {:ok, pid} = ChildServer.start(view: FocusedChild, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: nil, implicit_state: %{})
+
+    refute box.content =~ "\e[7m"
   end
 
   test "child server emits invalidation on async state changes" do
