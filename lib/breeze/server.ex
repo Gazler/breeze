@@ -5,6 +5,8 @@ defmodule Breeze.Term do
     :view,
     :terminal,
     :reader,
+    last_render_at: nil,
+    last_interaction_at: nil,
     assigns: %{},
     global_keybindings: [],
     focused: nil,
@@ -15,6 +17,9 @@ defmodule Breeze.Term do
     elements: %{},
     events: %{},
     implicit_state: %{},
+    implicit_meta: %{},
+    rendered_contents: %{},
+    rendered_boxes: %{},
     children: %{},
     frame_delay_ms: 16,
     render_timer: nil
@@ -23,54 +28,36 @@ end
 
 defmodule Breeze.Server do
   @moduledoc """
-  This module powers the GenServer responsible for running the application.
-
-  Consider the following Breeze Application:
-
-  ```
-  defmodule Demo do
-    use Breeze.View
-
-    def mount(_opts, term), do: {:ok, assign(term, counter: 0)}
-
-    def render(assigns) do
-      ~H"<box>Counter: <%= @counter %></box>"
-    end
-
-    def handle_event(_, %{"key" => "ArrowUp"}, term) do
-      {:noreply, assign(term, counter: term.assigns.counter + 1)}
-    end
-
-    def handle_event(_, %{"key" => "ArrowDown"}, term) do
-      {:noreply, assign(term, counter: term.assigns.counter - 1)}
-    end
-
-    def handle_event(_, %{"key" => "q"}, term) do
-      {:stop, term}
-    end
-
-    def handle_event(_, _, term) do
-      {:noreply, term}
-    end
-  end
-  ```
-
-  This can be started directly with:
-
-  ```
-  Breeze.Server.start_link(view: Focus)
-  ```
-
-  Or in a supervision tree:
-
-  ```
-  children = [
-    {Breeze.Server, view: Demo}
-  ]
-  ```
+  Public server entrypoint for Breeze applications.
   """
 
   use GenServer
+
+  defstruct [
+    :terminal,
+    :reader,
+    :view_pid,
+    :focused,
+    :base_output,
+    :pending_ref,
+    :pending_started_at,
+    :last_render_at,
+    :last_interaction_at,
+    decorations: [],
+    children: %{},
+    animation_timer: nil,
+    next_tick_at: nil,
+    hide_cursor?: true,
+    busy_delay_ms: 120,
+    frame_delay_ms: 80
+  ]
+
+  @type option ::
+          {:view, module()}
+          | {:start_opts, keyword()}
+          | {:hide_cursor, boolean()}
+          | {:global_keybindings, list()}
+          | {:frame_delay_ms, pos_integer()}
 
   @doc """
   Start the Breeze application.
@@ -82,242 +69,9 @@ defmodule Breeze.Server do
     * `:global_keybindings` - app-wide keybindings checked before focused event handling
 
   """
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
-  end
-
-  @doc false
-  def init(opts) do
-    view = Keyword.fetch!(opts, :view)
-    frame_delay_ms = Keyword.get(opts, :frame_delay_ms, 16)
-
-    {:ok,
-     %Breeze.Term{
-       view: view,
-       frame_delay_ms: frame_delay_ms,
-       global_keybindings: Keyword.get(opts, :global_keybindings, [])
-     }, {:continue, {:start, opts}}}
-  end
-
-  @doc false
-  def handle_continue({:start, opts}, state) do
-    start_opts = Keyword.get(opts, :start_opts, [])
-    terminal = Termite.Terminal.start()
-
-    terminal =
-      if Keyword.get(opts, :hide_cursor) do
-        Termite.Screen.hide_cursor(terminal)
-      else
-        terminal
-      end
-
-    reader = terminal.reader
-    state = %{state | terminal: terminal, reader: reader}
-    {:ok, state} = state.view.mount(start_opts, state)
-    terminal = Termite.Screen.clear_screen(state.terminal)
-    state = render(%{state | terminal: terminal})
-    {:noreply, state}
-  end
-
-  @doc false
-  def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
-    case process_data(data, state) do
-      {:stop, state} ->
-        stop(state)
-
-      {:noreply, state} ->
-        case drain_keys(state) do
-          {:stop, state} -> stop(state)
-          {:noreply, state} -> {:noreply, render(state)}
-        end
-    end
-  end
-
-  def handle_info({reader, {:signal, :winch}}, %{reader: reader} = state) do
-    state = %{state | terminal: Termite.Terminal.resize(state.terminal)}
-    state = notify_children(state, :resize, state.terminal)
-
-    case state.view.handle_info(:resize, state) do
-      {:noreply, state} -> {:noreply, render(state)}
-      {:stop, state} -> stop(state)
-    end
-  end
-
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
-    children =
-      state.children
-      |> Enum.reject(fn {_id, child} -> child.ref == ref end)
-      |> Map.new()
-
-    focused =
-      case split_child_id(state.focused, children) do
-        {_, _} -> nil
-        nil -> state.focused
-      end
-
-    {:noreply, %{state | children: children, focused: focused}}
-  end
-
-  def handle_info(:render_frame, state) do
-    {:noreply, render(%{state | render_timer: nil})}
-  end
-
-  def handle_info({:child_invalidated, _id}, state) do
-    {:noreply, schedule_render(state)}
-  end
-
-  def handle_info(message, state) do
-    case state.view.handle_info(message, state) do
-      {:noreply, state} ->
-        state = render(state)
-        {:noreply, state}
-
-      {:stop, state} ->
-        stop(state)
-    end
-  end
-
-  defp process_data("\t", state) do
-    focusables = Breeze.Focus.active_focusables(state.focusables, state.focus_meta)
-    index = Enum.find_index(focusables, &(&1 == state.focused))
-    trapped_scope = Breeze.Focus.trapped_scope?(state.focusables, state.focus_meta)
-
-    new_focused =
-      cond do
-        focusables == [] -> nil
-        trapped_scope && is_integer(index) -> Enum.at(focusables, index + 1) || hd(focusables)
-        is_integer(index) -> Enum.at(focusables, index + 1)
-        true -> hd(focusables)
-      end
-
-    {:noreply, put_focus(state, new_focused)}
-  end
-
-  defp process_data("\e[Z", state) do
-    focusables = Breeze.Focus.active_focusables(state.focusables, state.focus_meta)
-    index = Enum.find_index(focusables, &(&1 == state.focused))
-    trapped_scope = Breeze.Focus.trapped_scope?(state.focusables, state.focus_meta)
-
-    new_focused =
-      cond do
-        focusables == [] -> nil
-        trapped_scope && index == 0 -> List.last(focusables)
-        trapped_scope && is_integer(index) -> Enum.at(focusables, index - 1)
-        index == 0 -> nil
-        index == nil -> List.last(focusables)
-        true -> Enum.at(focusables, index - 1)
-      end
-
-    {:noreply, put_focus(state, new_focused)}
-  end
-
-  defp process_data("\e", state) do
-    receive do
-      {reader, {:data, data}} when reader == state.reader ->
-        process_data("\e" <> data, state)
-    after
-      5 -> do_process_key("Escape", state)
-    end
-  end
-
-  defp process_data("\eO", state) do
-    receive do
-      {reader, {:data, data}} when reader == state.reader ->
-        do_process_key(convert_key_o(data), state)
-    after
-      5 -> do_process_key("Escape", state)
-    end
-  end
-
-  defp process_data("\r", state), do: do_process_key("Enter", state)
-
-  defp process_data(raw_key, state) do
-    key =
-      cond do
-        String.starts_with?(raw_key, "\eO") ->
-          convert_key_o(String.trim_leading(raw_key, "\eO"))
-
-        String.starts_with?(raw_key, Termite.Screen.escape_code()) ->
-          convert_key(String.trim_leading(raw_key, Termite.Screen.escape_code()))
-
-        true ->
-          raw_key
-      end
-
-    do_process_key(key, state)
-  end
-
-  defp do_process_key(key, state) do
-    event = %{"key" => key}
-
-    case dispatch_global_keybindings(event, state) do
-      {:stop, state} ->
-        {:stop, state}
-
-      {:noreply, state} ->
-        {:noreply, state}
-
-      :continue ->
-        selected_implicit =
-          state
-          |> implicit_event_target()
-          |> then(fn
-            nil -> nil
-            id -> Enum.find(state.implicit_state, fn {implicit_id, _el} -> implicit_id == id end)
-          end)
-
-        {view_state, implicit_consumed, state} =
-          if selected_implicit do
-            {id, {_mod, _selected}} = selected_implicit
-
-            Breeze.RenderState.dispatch_implicit_event(
-              state,
-              id,
-              event,
-              fn state, id, change, event -> route_event(id, change, event, state) end
-            )
-          else
-            {:noreply, false, state}
-          end
-
-        cond do
-          view_state == :stop ->
-            {:stop, state}
-
-          implicit_consumed ->
-            {:noreply, state}
-
-          true ->
-            case route_event(state.focused, :ignore_me, event, state) do
-              {:stop, state} -> {:stop, state}
-              {:noreply, state} -> {:noreply, state}
-            end
-        end
-    end
-  end
-
-  defp implicit_event_target(%{focused: nil}), do: nil
-
-  defp implicit_event_target(state) do
-    find_implicit_owner(state.focused, state.focus_meta, state.implicit_state)
-  end
-
-  defp find_implicit_owner(nil, _focus_meta, _implicit_state), do: nil
-
-  defp find_implicit_owner(id, focus_meta, implicit_state) do
-    cond do
-      Map.has_key?(implicit_state, id) ->
-        id
-
-      true ->
-        case Map.get(focus_meta, id) do
-          %{implicit_owner: owner} when is_binary(owner) ->
-            find_implicit_owner(owner, focus_meta, implicit_state)
-
-          _ ->
-            nil
-        end
-    end
   end
 
   @doc false
@@ -335,20 +89,406 @@ defmodule Breeze.Server do
     end
   end
 
-  defp drain_keys(state) do
-    receive do
-      {reader, {:data, data}} when reader == state.reader ->
-        case process_data(data, state) do
-          {:stop, state} -> {:stop, state}
-          {:noreply, state} -> drain_keys(state)
-        end
-    after
-      0 -> {:noreply, state}
+  @impl true
+  def init(opts) do
+    view = Keyword.fetch!(opts, :view)
+    start_opts = Keyword.get(opts, :start_opts, [])
+    hide_cursor? = Keyword.get(opts, :hide_cursor, true)
+    frame_delay_ms = Keyword.get(opts, :frame_delay_ms, 80)
+
+    terminal = Termite.Terminal.start()
+    terminal = if hide_cursor?, do: Termite.Screen.hide_cursor(terminal), else: terminal
+    terminal = Termite.Screen.clear_screen(terminal)
+
+    session = self()
+
+    {:ok, view_pid} =
+      Breeze.ChildServer.start(
+        view: view,
+        start_opts: start_opts,
+        terminal: terminal,
+        global_keybindings: Keyword.get(opts, :global_keybindings, []),
+        invalidate: fn -> send(session, :child_invalidated) end
+      )
+
+    Process.monitor(view_pid)
+
+    focused =
+      case Breeze.ChildServer.metadata(view_pid) do
+        %{focused: focused} -> focused
+        _ -> nil
+      end
+
+    state = %__MODULE__{
+      terminal: terminal,
+      reader: terminal.reader,
+      view_pid: view_pid,
+      focused: focused,
+      hide_cursor?: hide_cursor?,
+      busy_delay_ms: Keyword.get(opts, :busy_delay_ms, 120),
+      frame_delay_ms: frame_delay_ms,
+      base_output: "",
+      pending_started_at: nil,
+      last_render_at: System.monotonic_time(:millisecond),
+      last_interaction_at: nil
+    }
+
+    {:ok, render_base(state)}
+  end
+
+  @impl true
+  def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
+    {:key, key} = decode_input(data)
+    {:noreply, handle_key(key, state)}
+  end
+
+  def handle_info({reader, {:signal, :winch}}, %{reader: reader} = state) do
+    terminal = Termite.Terminal.resize(state.terminal)
+    state = %{state | terminal: terminal}
+
+    case Breeze.ChildServer.dispatch_info(state.view_pid, :resize, terminal) do
+      {:stop, _focused} ->
+        stop(state)
+
+      {:noreply, focused} ->
+        {:noreply, maybe_render_base(%{state | focused: focused})}
     end
   end
 
+  def handle_info(:child_invalidated, state) do
+    {:noreply, maybe_render_base(state)}
+  end
+
+  def handle_info({:child_invalidated, _id}, state) do
+    {:noreply, maybe_render_base(state)}
+  end
+
+  def handle_info(:animation_tick, %{decorations: []} = state) do
+    {:noreply, %{state | animation_timer: nil, next_tick_at: nil}}
+  end
+
+  def handle_info(:animation_tick, state) do
+    state =
+      state
+      |> Map.put(:animation_timer, nil)
+      |> Map.put(:next_tick_at, nil)
+      |> advance_decorations()
+      |> render_frame()
+      |> schedule_animation()
+
+    {:noreply, state}
+  end
+
+  def handle_info({:event_reply, ref, reply}, %{pending_ref: ref} = state) do
+    case reply do
+      {:stop, _focused} ->
+        stop(state)
+
+      {:stop, _focused, _consumed} ->
+        stop(state)
+
+      {:noreply, focused} ->
+        state =
+          state
+          |> Map.put(:pending_ref, nil)
+          |> Map.put(:pending_started_at, nil)
+          |> Map.put(:focused, focused)
+          |> maybe_render_base()
+
+        {:noreply, state}
+
+      {:noreply, focused, _consumed} ->
+        state =
+          state
+          |> Map.put(:pending_ref, nil)
+          |> Map.put(:pending_started_at, nil)
+          |> Map.put(:focused, focused)
+          |> maybe_render_base()
+
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:event_reply, _ref, _reply}, state), do: {:noreply, state}
+
+  def handle_info(message, state) do
+    case message do
+      {:DOWN, _, :process, pid, _reason} when pid == state.view_pid ->
+        stop(state)
+
+      {:DOWN, ref, :process, _pid, _reason} ->
+        children =
+          state.children
+          |> Enum.reject(fn {_id, child} -> child.ref == ref end)
+          |> Map.new()
+
+        {:noreply, %{state | children: children}}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  defp handle_key("q", state), do: stop(state)
+
+  defp handle_key(_key, %{pending_ref: ref} = state) when not is_nil(ref), do: state
+
+  defp handle_key(key, state) when key in ["\t", "ShiftTab"] do
+    ref = make_ref()
+    session = self()
+
+    Task.start(fn ->
+      reply = Breeze.ChildServer.dispatch_input(state.view_pid, key)
+      send(session, {:event_reply, ref, reply})
+    end)
+
+    state
+    |> Map.put(:pending_ref, ref)
+    |> Map.put(:pending_started_at, System.monotonic_time(:millisecond))
+    |> Map.put(:last_interaction_at, System.monotonic_time(:millisecond))
+    |> render_frame()
+    |> schedule_animation()
+  end
+
+  defp handle_key(key, state) do
+    ref = make_ref()
+    session = self()
+
+    Task.start(fn ->
+      reply = dispatch_input_hierarchy(state, key)
+
+      send(session, {:event_reply, ref, reply})
+    end)
+
+    state
+    |> Map.put(:pending_ref, ref)
+    |> Map.put(:pending_started_at, System.monotonic_time(:millisecond))
+    |> Map.put(:last_interaction_at, System.monotonic_time(:millisecond))
+    |> render_frame()
+    |> schedule_animation()
+  end
+
+  defp render_base(state, attempts \\ 1)
+
+  defp render_base(state, attempts) do
+    token = make_ref()
+    collector = self()
+
+    {:ok, _acc, box, decorations} =
+      Breeze.ChildServer.render_snapshot(state.view_pid,
+        implicit_state: %{},
+        terminal: state.terminal,
+        live_view: fn attrs, opts -> render_live_child(attrs, opts, state, collector, token) end
+      )
+
+    focused =
+      case Breeze.ChildServer.metadata(state.view_pid) do
+        %{focused: focused} -> focused
+        _ -> state.focused
+      end
+
+    %{missing: missing, decorations: child_decorations} = collect_render_tracking(token)
+    {state, started?} = ensure_children(state, missing)
+
+    if started? do
+      render_base(state, attempts)
+    else
+      cond do
+        attempts > 0 and focused != state.focused ->
+          render_base(%{state | focused: focused}, attempts - 1)
+
+        true ->
+          decorations = decorations ++ child_decorations
+
+          state
+          |> Map.put(:base_output, box.content)
+          |> Map.put(:decorations, initialize_decorations(decorations))
+          |> Map.put(:focused, focused)
+          |> Map.put(:last_render_at, System.monotonic_time(:millisecond))
+          |> render_frame()
+          |> schedule_animation()
+      end
+    end
+  end
+
+  defp maybe_render_base(%{view_pid: pid} = state) do
+    if Process.alive?(pid), do: render_base(state), else: state
+  end
+
+  defp render_live_child(attrs, opts, state, collector, token) do
+    id = fetch_live_attr!(attrs, :id)
+    full_id = live_id(Keyword.get(opts, :live_prefix), id)
+    preload_only = fetch_live_attr(attrs, :preload_only, false)
+
+    case Map.get(state.children, full_id) do
+      nil ->
+        send(collector, {:breeze_live_track, token, :missing, {full_id, attrs}})
+        if preload_only, do: :preloaded, else: :missing
+
+      %{pid: pid} ->
+        if preload_only do
+          :preloaded
+        else
+          local_focused = strip_live_prefix(state.focused, full_id)
+
+          {:ok, child_acc, child_box, child_decorations} =
+            Breeze.ChildServer.render_snapshot(pid,
+              focused: local_focused,
+              implicit_state: %{},
+              terminal: state.terminal,
+              live_prefix: full_id,
+              live_view: fn child_attrs, child_opts ->
+                render_live_child(child_attrs, child_opts, state, collector, token)
+              end
+            )
+
+          Enum.each(child_decorations, fn decoration ->
+            send(
+              collector,
+              {:breeze_live_track, token, :decoration, namespace_decoration(decoration, full_id)}
+            )
+          end)
+
+          {:rendered, id, child_acc, child_box}
+        end
+    end
+  end
+
+  defp render_frame(state) do
+    output = apply_decorations(state.base_output, state.decorations, state)
+    screen_height = state.terminal.size.height
+    output_lines = length(String.split(output, "\n"))
+    trailing = String.duplicate("\n\e[K", max(screen_height - output_lines, 0))
+    output = "\e[K" <> String.replace(output, "\n", "\n\e[K") <> trailing
+    terminal = Termite.Terminal.write(state.terminal, "\e[H" <> output)
+    %{state | terminal: terminal}
+  end
+
+  defp initialize_decorations(decorations) do
+    Enum.map(decorations, fn decoration ->
+      decoration
+      |> Map.put_new(:frame_index, 0)
+      |> Map.put_new(:every_ms, 500)
+    end)
+  end
+
+  defp advance_decorations(state) do
+    Map.update!(state, :decorations, fn decorations ->
+      Enum.map(decorations, fn decoration ->
+        if decoration_active?(decoration, state) do
+          Map.update(decoration, :frame_index, 1, &(&1 + 1))
+        else
+          decoration
+        end
+      end)
+    end)
+  end
+
+  defp apply_decorations(output, decorations, state) do
+    Enum.reduce(decorations, output, fn decoration, acc ->
+      if decoration_active?(decoration, state) do
+        ctx = %{
+          phase: :async,
+          frame: decoration.frame_index,
+          now: System.monotonic_time(:millisecond),
+          pending?: pending_active?(state),
+          focused?: decoration.id == state.focused,
+          last_render_at: state.last_render_at,
+          last_interaction_at: state.last_interaction_at
+        }
+
+        animated_box =
+          decoration.mod.animate(:root, decoration.box, decoration.flags, decoration.state, ctx)
+
+        # TODO: Replace async decoration content by box coordinates instead of substring matching.
+        String.replace(acc, decoration.box.content, animated_box.content, global: false)
+      else
+        acc
+      end
+    end)
+  end
+
+  defp schedule_animation(%{decorations: []} = state), do: state
+
+  defp schedule_animation(%{animation_timer: nil} = state) do
+    case next_tick_delay(state) do
+      nil ->
+        %{state | next_tick_at: nil}
+
+      delay ->
+        timer = Process.send_after(self(), :animation_tick, delay)
+
+        %{
+          state
+          | animation_timer: timer,
+            next_tick_at: System.monotonic_time(:millisecond) + delay
+        }
+    end
+  end
+
+  defp schedule_animation(state), do: state
+
+  defp next_tick_delay(state) do
+    state.decorations
+    |> Enum.map(&decoration_delay(&1, state))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.min(fn -> nil end)
+  end
+
+  defp namespace_decoration(decoration, full_id) do
+    Map.update(decoration, :owner_id, full_id, &namespace_live_id(&1, full_id))
+  end
+
+  defp namespace_live_id(nil, _full_id), do: nil
+  defp namespace_live_id(id, full_id), do: full_id <> "::" <> id
+
+  defp decoration_active?(decoration, state) do
+    cond do
+      decoration[:active_when_pending] -> pending_active?(state)
+      decoration[:active_when_focused] -> decoration[:owner_id] == state.focused
+      true -> true
+    end
+  end
+
+  defp pending_active?(%{pending_ref: nil}), do: false
+
+  defp pending_active?(%{pending_started_at: started_at, busy_delay_ms: delay})
+       when is_integer(started_at) do
+    System.monotonic_time(:millisecond) - started_at >= delay
+  end
+
+  defp pending_active?(_state), do: false
+
+  defp decoration_delay(decoration, state) do
+    cond do
+      decoration[:active_when_pending] && is_nil(state.pending_ref) ->
+        nil
+
+      decoration[:active_when_pending] && pending_active?(state) ->
+        Map.get(decoration, :every_ms, state.frame_delay_ms)
+
+      decoration[:active_when_pending] ->
+        remaining_busy_delay(state)
+
+      decoration_active?(decoration, state) ->
+        Map.get(decoration, :every_ms, state.frame_delay_ms)
+
+      true ->
+        nil
+    end
+  end
+
+  defp remaining_busy_delay(%{pending_started_at: started_at, busy_delay_ms: delay})
+       when is_integer(started_at) do
+    max(delay - (System.monotonic_time(:millisecond) - started_at), 0)
+  end
+
+  defp remaining_busy_delay(_state), do: nil
+
   defp stop(state) do
-    Enum.each(state.children, fn {_id, child} -> GenServer.stop(child.pid, :normal) end)
+    if Process.alive?(state.view_pid) do
+      Process.exit(state.view_pid, :normal)
+    end
 
     terminal =
       state.terminal
@@ -357,103 +497,26 @@ defmodule Breeze.Server do
       |> Termite.Screen.exit_alt_screen()
 
     Termite.Terminal.write(terminal, "\r")
-
     System.halt()
   end
 
-  defp render(state) do
-    {state, _live_ids, visible_live_ids, {_acc, _box}} = render_view(state, state.implicit_state)
-    state = sync_child_visibility(state, visible_live_ids)
-    {state, _live_ids, _visible_live_ids, {acc, _box}} = render_view(state, state.implicit_state)
+  defp decode_input("\e"), do: {:key, "Escape"}
+  defp decode_input("\r"), do: {:key, "Enter"}
 
-    implicits = Breeze.RenderState.build(state, acc).implicit_state
-    focus_meta = Breeze.Focus.build_meta(acc.elements, implicits)
+  defp decode_input(raw_key) do
+    key =
+      cond do
+        String.starts_with?(raw_key, "\eO") ->
+          convert_key_o(String.trim_leading(raw_key, "\eO"))
 
-    focus_memory =
-      Breeze.Focus.remember_focus(state.focus_memory, state.focused, state.focus_meta)
+        String.starts_with?(raw_key, Termite.Screen.escape_code()) ->
+          convert_key(String.trim_leading(raw_key, Termite.Screen.escape_code()))
 
-    events =
-      acc.elements
-      |> Enum.sort()
-      |> Enum.reduce(%{}, fn {_idx, elem}, acc ->
-        id = Keyword.get(elem, :id)
-        change = Keyword.get(elem, :"br-change")
-
-        if change do
-          Map.put(acc, id, %{change: change})
-        else
-          acc
-        end
-      end)
-
-    focused =
-      if state.allow_unfocused? and is_nil(state.focused) do
-        nil
-      else
-        Breeze.Focus.normalize_focus(state.focused, acc.focusables, focus_meta, focus_memory)
+        true ->
+          raw_key
       end
 
-    {state, live_ids, _final_acc, output, dimensions, implicits} =
-      render_final_view(%{state | focused: focused}, implicits)
-
-    {state, live_ids} = prune_children(state, live_ids)
-    implicits = prune_implicit_state(implicits, live_ids, state.children)
-
-    screen_height = state.terminal.size.height
-    output_lines = length(String.split(output, "\n"))
-    trailing = String.duplicate("\n\e[K", max(screen_height - output_lines, 0))
-    output = "\e[K" <> String.replace(output, "\n", "\n\e[K") <> trailing
-    terminal = Termite.Terminal.write(state.terminal, "\e[H" <> output)
-
-    %{
-      state
-      | terminal: terminal,
-        elements: dimensions,
-        focusables: acc.focusables,
-        focus_meta: focus_meta,
-        focus_memory: focus_memory,
-        focused: focused,
-        allow_unfocused?: is_nil(focused) and state.allow_unfocused?,
-        implicit_state: implicits,
-        events: events
-    }
-  end
-
-  defp render_final_view(state, implicits, attempts \\ 2) do
-    {state, live_ids, _visible_live_ids, {final_acc, %{content: output}}} =
-      render_view(state, implicits)
-
-    dimensions = Breeze.RenderState.build_dimensions(final_acc)
-    adjusted_implicits = Breeze.RenderState.reconcile_implicits(implicits, dimensions)
-
-    if attempts > 0 and adjusted_implicits != implicits do
-      render_final_view(state, adjusted_implicits, attempts - 1)
-    else
-      {state, live_ids, final_acc, output, dimensions, adjusted_implicits}
-    end
-  end
-
-  defp render_view(state, implicit_state) do
-    collector = self()
-    token = make_ref()
-
-    result =
-      Breeze.Renderer.render(state.view, state.assigns,
-        focused: state.focused,
-        implicit_state: implicit_state,
-        terminal: state.terminal,
-        live_view: fn attrs, opts ->
-          render_live_child(attrs, opts, state, implicit_state, collector, token)
-        end
-      )
-
-    %{requested: live_ids, visible: visible_live_ids, missing: missing} =
-      collect_render_tracking(token, %{requested: [], visible: [], missing: []})
-
-    case ensure_children(state, missing) do
-      {state, true} -> render_view(state, implicit_state)
-      {state, false} -> {state, live_ids, visible_live_ids, result}
-    end
+    {:key, key}
   end
 
   defp convert_key_o("P"), do: "F1"
@@ -470,6 +533,7 @@ defmodule Breeze.Server do
   defp convert_key("B"), do: "ArrowDown"
   defp convert_key("C"), do: "ArrowRight"
   defp convert_key("D"), do: "ArrowLeft"
+  defp convert_key("Z"), do: "ShiftTab"
   defp convert_key("H"), do: "Home"
   defp convert_key("F"), do: "End"
   defp convert_key("1~"), do: "Home"
@@ -478,63 +542,13 @@ defmodule Breeze.Server do
   defp convert_key("6~"), do: "PageDown"
   defp convert_key(key), do: key
 
-  defp handle_event(change, event, state) do
-    state.view.handle_event(change, event, state)
-  end
-
-  defp render_live_child(attrs, opts, state, implicit_state, collector, token) do
-    id = fetch_live_attr!(attrs, :id)
-    full_id = live_id(Keyword.get(opts, :live_prefix), id)
-    preload_only = fetch_live_attr(attrs, :preload_only, false)
-    send(collector, {:breeze_live_track, token, :requested, full_id})
-
-    if !preload_only do
-      send(collector, {:breeze_live_track, token, :visible, full_id})
-    end
-
-    case Map.get(state.children, full_id) do
-      nil ->
-        send(collector, {:breeze_live_track, token, :missing, {full_id, attrs}})
-        if preload_only, do: :preloaded, else: :missing
-
-      %{pid: pid} ->
-        if preload_only do
-          :preloaded
-        else
-          local_focused = strip_live_prefix(state.focused, full_id)
-          local_implicit_state = child_implicit_state(implicit_state, full_id)
-
-          {:ok, child_acc, child_box} =
-            Breeze.ChildServer.render(pid,
-              focused: local_focused,
-              implicit_state: local_implicit_state,
-              terminal: state.terminal,
-              live_prefix: full_id,
-              live_view: fn child_attrs, child_opts ->
-                render_live_child(
-                  child_attrs,
-                  child_opts,
-                  state,
-                  implicit_state,
-                  collector,
-                  token
-                )
-              end
-            )
-
-          {:rendered, id, child_acc, child_box}
-        end
-    end
-  end
-
   defp ensure_children(state, missing) do
     Enum.reduce(missing, {state, false}, fn {id, attrs}, {state, started?} ->
       if Map.has_key?(state.children, id) do
         {state, started?}
       else
         child = start_child!(attrs, state.terminal)
-        state = %{state | children: Map.put(state.children, id, child)}
-        {state, true}
+        {%{state | children: Map.put(state.children, id, child)}, true}
       end
     end)
   end
@@ -556,121 +570,64 @@ defmodule Breeze.Server do
       )
 
     ref = Process.monitor(pid)
-    %{pid: pid, ref: ref, view: view, persistent: persistent, visible: false}
+    %{pid: pid, ref: ref, view: view, persistent: persistent}
   end
 
-  defp prune_children(state, live_ids) do
-    live_ids = MapSet.new(live_ids)
+  defp collect_render_tracking(token) do
+    receive do
+      {:breeze_live_track, ^token, :missing, item} ->
+        acc = collect_render_tracking(token)
+        %{acc | missing: [item | acc.missing]}
 
-    {keep, drop} =
-      Enum.split_with(state.children, fn {id, child} ->
-        MapSet.member?(live_ids, id) or child.persistent
-      end)
-
-    Enum.each(drop, fn {_id, child} ->
-      Process.demonitor(child.ref, [:flush])
-      GenServer.stop(child.pid, :normal)
-    end)
-
-    children = Map.new(keep)
-
-    focused =
-      case split_child_id(state.focused, children) do
-        {_, _} -> state.focused
-        nil -> if(child_focus_id?(state.focused), do: nil, else: state.focused)
-      end
-
-    {%{state | children: children, focused: focused}, MapSet.to_list(live_ids)}
-  end
-
-  defp prune_implicit_state(implicit_state, live_ids, children) do
-    Enum.reduce(implicit_state, %{}, fn {id, value}, acc ->
-      if keep_implicit_id?(id, live_ids, children), do: Map.put(acc, id, value), else: acc
-    end)
-  end
-
-  defp keep_implicit_id?(id, live_ids, children) do
-    not String.contains?(id, "::") or
-      Enum.any?(live_ids ++ Map.keys(children), fn live_id ->
-        String.starts_with?(id, live_id <> "::")
-      end)
-  end
-
-  defp notify_children(state, message, terminal) do
-    Enum.reduce(state.children, state, fn {id, child}, state ->
-      case Breeze.ChildServer.dispatch_info(child.pid, message, terminal) do
-        {:noreply, focused} -> update_child_focus(state, id, focused)
-        {:stop, _focused} -> %{state | children: Map.delete(state.children, id)}
-      end
-    end)
-  end
-
-  defp route_event(id, change, event, state) do
-    case split_child_id(id, state.children) do
-      {child_id, local_id} ->
-        dispatch_child_event(state, child_id, local_id, change, event)
-
-      nil ->
-        handle_event(change, event, state)
+      {:breeze_live_track, ^token, :decoration, decoration} ->
+        acc = collect_render_tracking(token)
+        %{acc | decorations: [decoration | acc.decorations]}
+    after
+      0 -> %{missing: [], decorations: []}
     end
   end
 
-  defp dispatch_child_event(state, child_id, local_id, change, event) do
-    %{pid: pid} = Map.fetch!(state.children, child_id)
-    event = Map.put(event, "target", local_id)
-
-    case Breeze.ChildServer.dispatch_event(pid, change, event) do
-      {:noreply, focused} ->
-        {:noreply, update_child_focus(state, child_id, focused)}
-
-      {:stop, _focused} ->
-        state = %{state | children: Map.delete(state.children, child_id)}
-        {:noreply, clear_child_focus(state, child_id)}
-    end
-  end
-
-  defp update_child_focus(state, _child_id, nil), do: state
-
-  defp update_child_focus(state, child_id, focused),
-    do: put_focus(state, namespace_live_id(child_id, focused))
-
-  defp clear_child_focus(%{focused: focused} = state, child_id) do
-    if strip_live_prefix(focused, child_id) do
-      %{state | focused: nil}
-    else
+  defp dispatch_input_hierarchy(state, key) do
+    child_reply =
       state
-    end
+      |> focused_child_chain()
+      |> Enum.reduce_while(nil, fn {child_id, %{pid: pid}}, _acc ->
+        reply = Breeze.ChildServer.dispatch_input(pid, key) |> namespace_child_reply(child_id)
+
+        case reply do
+          {:noreply, _focused, true} -> {:halt, reply}
+          {:stop, _focused, _consumed} -> {:halt, reply}
+          _ -> {:cont, nil}
+        end
+      end)
+
+    child_reply || Breeze.ChildServer.dispatch_input(state.view_pid, key)
   end
 
-  defp put_focus(state, focused) do
-    %{state | focused: focused, allow_unfocused?: is_nil(focused)}
-  end
+  defp focused_child_chain(%{focused: nil}), do: []
 
-  defp child_implicit_state(implicit_state, live_id) do
-    prefix = live_id <> "::"
-
-    Enum.reduce(implicit_state, %{}, fn {id, value}, acc ->
-      case String.starts_with?(id, prefix) do
-        true -> Map.put(acc, String.replace_prefix(id, prefix, ""), value)
-        false -> acc
-      end
-    end)
-  end
-
-  defp split_child_id(nil, _children), do: nil
-
-  defp split_child_id(id, children) do
+  defp focused_child_chain(%{focused: focused, children: children}) do
     children
-    |> Map.keys()
-    |> Enum.sort_by(&String.length/1, :desc)
-    |> Enum.find_value(fn child_id ->
-      prefix = child_id <> "::"
-
-      if String.starts_with?(id, prefix) do
-        {child_id, String.replace_prefix(id, prefix, "")}
-      end
+    |> Enum.filter(fn {id, _child} ->
+      focused == id or String.starts_with?(focused, id <> "::")
     end)
+    |> Enum.sort_by(fn {id, _child} -> String.length(id) end, :desc)
   end
+
+  defp namespace_child_reply({:stop, focused}, child_id),
+    do: {:stop, namespace_child_focus(focused, child_id)}
+
+  defp namespace_child_reply({:stop, focused, consumed}, child_id),
+    do: {:stop, namespace_child_focus(focused, child_id), consumed}
+
+  defp namespace_child_reply({:noreply, focused}, child_id),
+    do: {:noreply, namespace_child_focus(focused, child_id)}
+
+  defp namespace_child_reply({:noreply, focused, consumed}, child_id),
+    do: {:noreply, namespace_child_focus(focused, child_id), consumed}
+
+  defp namespace_child_focus(nil, _child_id), do: nil
+  defp namespace_child_focus(focused, child_id), do: child_id <> "::" <> focused
 
   defp strip_live_prefix(nil, _live_id), do: nil
 
@@ -682,14 +639,8 @@ defmodule Breeze.Server do
     end
   end
 
-  defp namespace_live_id(_live_id, nil), do: nil
-  defp namespace_live_id(live_id, id), do: live_id <> "::" <> id
-
   defp live_id(nil, id), do: id
   defp live_id(prefix, id), do: prefix <> "::" <> id
-
-  defp child_focus_id?(id) when is_binary(id), do: String.contains?(id, "::")
-  defp child_focus_id?(_id), do: false
 
   defp fetch_live_attr!(attrs, key) do
     Map.get(attrs, key) || Map.fetch!(attrs, Atom.to_string(key))
@@ -698,70 +649,4 @@ defmodule Breeze.Server do
   defp fetch_live_attr(attrs, key, default) do
     Map.get(attrs, key) || Map.get(attrs, Atom.to_string(key), default)
   end
-
-  defp collect_render_tracking(token, acc) do
-    receive do
-      {:breeze_live_track, ^token, :requested, id} ->
-        collect_render_tracking(token, %{acc | requested: acc.requested ++ [id]})
-
-      {:breeze_live_track, ^token, :visible, id} ->
-        collect_render_tracking(token, %{acc | visible: acc.visible ++ [id]})
-
-      {:breeze_live_track, ^token, :missing, item} ->
-        collect_render_tracking(token, %{acc | missing: acc.missing ++ [item]})
-    after
-      0 -> acc
-    end
-  end
-
-  defp sync_child_visibility(state, visible_live_ids) do
-    visible_live_ids = MapSet.new(visible_live_ids)
-
-    children =
-      Enum.reduce(state.children, %{}, fn {id, child}, acc ->
-        visible? = MapSet.member?(visible_live_ids, id)
-
-        case maybe_update_child_visibility(child, visible?) do
-          {:keep, child} -> Map.put(acc, id, child)
-          :drop -> acc
-        end
-      end)
-
-    %{state | children: children}
-  end
-
-  defp maybe_update_child_visibility(child, visible?) do
-    child =
-      cond do
-        child.visible == visible? ->
-          child
-
-        child.persistent ->
-          case notify_child_visibility(child.pid, visible?) do
-            {:noreply, _focused} -> %{child | visible: visible?}
-            {:stop, _focused} -> :drop
-          end
-
-        true ->
-          %{child | visible: visible?}
-      end
-
-    case child do
-      :drop -> :drop
-      child -> {:keep, child}
-    end
-  end
-
-  defp notify_child_visibility(pid, true),
-    do: Breeze.ChildServer.dispatch_info(pid, {:route_visibility, :visible})
-
-  defp notify_child_visibility(pid, false),
-    do: Breeze.ChildServer.dispatch_info(pid, {:route_visibility, :hidden})
-
-  defp schedule_render(%{render_timer: nil, frame_delay_ms: delay} = state) do
-    timer = Process.send_after(self(), :render_frame, delay)
-    %{state | render_timer: timer}
-  end
-
-  defp schedule_render(state), do: state
 end

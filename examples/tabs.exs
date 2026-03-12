@@ -27,34 +27,34 @@ defmodule TabsExample do
         style={"width-#{@tabs_width} height-#{@tabs_height} border-rounded focus:border-4"}
       >
         <:tab value="overview" label="Overview">
-          <.panel label="Overview" value="overview" height={@panel_height}/>
+          <.tab_panel label="Overview" value="overview" height={@panel_height}/>
         </:tab>
         <:tab value="requests" label="Requests">
-          <.panel label="Requests" value="requests" height={@panel_height}/>
+          <.tab_panel label="Requests" value="requests" height={@panel_height}/>
         </:tab>
         <:tab value="responses" label="Responses">
-          <.panel label="Responses" value="responses" height={@panel_height}/>
+          <.tab_panel label="Responses" value="responses" height={@panel_height}/>
         </:tab>
         <:tab value="headers" label="Headers">
-          <.panel label="Headers" value="headers" height={@panel_height}/>
+          <.tab_panel label="Headers" value="headers" height={@panel_height}/>
         </:tab>
         <:tab value="cookies" label="Cookies">
-          <.panel label="Cookies" value="cookies" height={@panel_height}/>
+          <.tab_panel label="Cookies" value="cookies" height={@panel_height}/>
         </:tab>
         <:tab value="timeline" label="Timeline">
-          <.panel label="Timeline" value="timeline" height={@panel_height}/>
+          <.tab_panel label="Timeline" value="timeline" height={@panel_height}/>
         </:tab>
         <:tab value="inspector" label="Inspector">
-          <.panel label="Inspector" value="inspector" height={@panel_height}/>
+          <.tab_panel label="Inspector" value="inspector" height={@panel_height}/>
         </:tab>
         <:tab value="settings" label="Settings">
-          <.panel label="Settings" value="settings" height={@panel_height}/>
+          <.tab_panel label="Settings" value="settings" height={@panel_height}/>
         </:tab>
         <:tab value="shortcuts" label="Shortcuts">
-          <.panel label="Shortcuts" value="shortcuts" height={@panel_height}/>
+          <.tab_panel label="Shortcuts" value="shortcuts" height={@panel_height}/>
         </:tab>
         <:tab value="advanced" label="Advanced">
-          <.panel label="Advanced" value="advanced" height={@panel_height}/>
+          <.tab_panel label="Advanced" value="advanced" height={@panel_height}/>
         </:tab>
       </.tabs>
     </box>
@@ -65,7 +65,7 @@ defmodule TabsExample do
   attr :label, :string, required: true
   attr :value, :string, required: true
 
-  def panel(assigns) do
+  def tab_panel(assigns) do
     assigns = assign(assigns, lines: panel_lines(assigns.label))
 
     ~H"""

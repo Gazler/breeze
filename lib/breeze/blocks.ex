@@ -202,8 +202,6 @@ defmodule Breeze.Blocks do
 
     ~H"""
     <box
-      focusable
-      default-focus
       id={@id}
       focus-scope="trap"
       implicit={Breeze.Implicit.Modal}

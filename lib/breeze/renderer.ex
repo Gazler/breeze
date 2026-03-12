@@ -30,7 +30,7 @@ defmodule Breeze.Renderer do
         [],
         "",
         [],
-        %{focusables: [], id: 0, elements: %{}, ids: [], flags: []},
+        %{focusables: [], id: 0, elements: %{}, boxes: %{}, ids: [], flags: []},
         opts
       )
 
@@ -165,6 +165,13 @@ defmodule Breeze.Renderer do
 
     type = if id == root_id, do: :root, else: :child
 
+    box =
+      if implicit && function_exported?(implicit_mod, :animate, 5) do
+        implicit_mod.animate(type, box, flags, implicit, animation_ctx(opts, id, focused))
+      else
+        box
+      end
+
     {style_flags, style_modifiers, scroll_modifier} =
       if implicit do
         modifiers = implicit_mod.handle_modifiers(type, flags, implicit)
@@ -187,7 +194,14 @@ defmodule Breeze.Renderer do
 
     children = Enum.reverse(children)
     content = box.content
-    acc = %{acc | focusables: focusables}
+
+    acc =
+      if root_id do
+        %{acc | focusables: focusables, boxes: Map.put(acc.boxes, root_id, box)}
+      else
+        %{acc | focusables: focusables}
+      end
+
     {acc, %{Box.new(opts) | children: children, content: content}}
   end
 
@@ -253,27 +267,18 @@ defmodule Breeze.Renderer do
       acc
       | id: child_offset + child_last_id,
         elements: elements,
+        boxes: Map.merge(Map.get(acc, :boxes, %{}), Map.get(child_acc, :boxes, %{})),
         ids: Enum.reverse(child_acc.ids) ++ acc.ids,
         focusables: Enum.reverse(child_acc.focusables) ++ acc.focusables
     }
   end
 
   defp namespace_live_acc(acc, prefix) do
-    %{
-      acc
-      | ids: Enum.map(acc.ids, &namespace_id(&1, prefix)),
-        focusables: Enum.map(acc.focusables, &namespace_id(&1, prefix)),
-        elements:
-          Map.new(acc.elements, fn {idx, flags} ->
-            {idx,
-             flags
-             |> Keyword.update(:id, nil, &namespace_id(&1, prefix))
-             |> Keyword.update(:implicit_owner, nil, &namespace_id(&1, prefix))
-             |> Keyword.update(:"focus-scope-path", [], fn scope_path ->
-               Enum.map(scope_path, &namespace_id(&1, prefix))
-             end)}
-          end)
-    }
+    acc
+    |> Map.put(:ids, namespace_ids(acc.ids, prefix))
+    |> Map.put(:focusables, namespace_ids(acc.focusables, prefix))
+    |> Map.put(:boxes, namespace_box_map(Map.get(acc, :boxes, %{}), prefix))
+    |> Map.put(:elements, namespace_elements(acc.elements, prefix))
   end
 
   defp inherit_implicit_owner(child_flags, flags) do
@@ -306,6 +311,38 @@ defmodule Breeze.Renderer do
 
   defp namespace_id(nil, _prefix), do: nil
   defp namespace_id(id, prefix), do: prefix <> "::" <> id
+
+  defp namespace_ids(ids, prefix), do: Enum.map(ids, &namespace_id(&1, prefix))
+
+  defp namespace_box_map(boxes, prefix) do
+    Map.new(boxes, fn {id, box} -> {namespace_id(id, prefix), box} end)
+  end
+
+  defp namespace_elements(elements, prefix) do
+    Map.new(elements, fn {idx, flags} ->
+      {idx, namespace_element_flags(flags, prefix)}
+    end)
+  end
+
+  defp namespace_element_flags(flags, prefix) do
+    flags
+    |> Keyword.update(:id, nil, &namespace_id(&1, prefix))
+    |> Keyword.update(:implicit_owner, nil, &namespace_id(&1, prefix))
+    |> Keyword.update(:"focus-scope-path", [], &namespace_ids(&1, prefix))
+  end
+
+  defp animation_ctx(opts, id, focused) do
+    %{
+      phase: Keyword.get(opts, :animation_phase, :base),
+      frame: Keyword.get(opts, :animation_frame, 0),
+      now: Keyword.get(opts, :animation_now),
+      pending?: Keyword.get(opts, :animation_pending?, false),
+      focused?: focused,
+      last_render_at: Keyword.get(opts, :last_render_at),
+      last_interaction_at: Keyword.get(opts, :last_interaction_at),
+      id: id
+    }
+  end
 
   defp max_key(elements) do
     elements
