@@ -111,7 +111,4 @@ defmodule TabsExample do
   end
 end
 
-Breeze.Server.start_link(view: TabsExample, hide_cursor: true)
-
-receive do
-end
+Breeze.Example.run([view: TabsExample, hide_cursor: true], keep_alive: :infinity)
