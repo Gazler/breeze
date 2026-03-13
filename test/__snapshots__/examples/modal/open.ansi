@@ -5,15 +5,15 @@ Escape closes the modal. q quits the example.
                                                                                 
 ╭──────────────────────────╮                                                    
 │[1mOpen modal[0m     [37m╭─[0m[1;48;5;0mFocused Widget Help[0m[37m──────────────────────────╮[0m                
-│               [37m│[0mCentered panel with trapped Tab focus.[48;5;0m        [0m[37m│[0m                
-│               [37m│[0mUse it for│help, palettes, and overlays.[48;5;0m      [0m[37m│[0m                
+│               [37m│[0mCentered[48;5;0m [0mpanel[48;5;0m [0mwith[48;5;0m [0mtrapped[48;5;0m [0mTab[48;5;0m [0mfocus.[48;5;0m        [0m[37m│[0m                
+│               [37m│[0mUse[48;5;0m [0mit[48;5;0m [0mfor[48;5;0m [0mhelp,[48;5;0m [0mpalettes,[48;5;0m [0mand[48;5;0m [0moverlays.[48;5;0m      [0m[37m│[0m                
 ╰───────────────[37m│[0m[48;5;0m                                              [0m[37m│[0m                
                 [37m│[0m[1mControls[0m[48;5;0m                                      [0m[37m│[0m                
-╭───────────────[37m│[0mTab───────Move between actions[48;5;0m                [0m[37m│[0m                
-│[1mBackground pane[0m[37m│[0mEscape    Dismiss the modal[48;5;0m                   [0m[37m│[0m                
-│Last action: no[37m│[0mEnter     Activate focused action[48;5;0m             [0m[37m│[0m                
-│               [37m│[0m[34m╭──────────────╮[0m╭──────────────╮              [37m│[0m                
-│               [37m│[0m[34m│[0m[1mConfirm[0m  │    [34m│[0m│[1mDismiss[0m       │              [37m│[0m                
+╭───────────────[37m│[0mTab[48;5;0m       [0mMove[48;5;0m [0mbetween[48;5;0m [0mactions[48;5;0m                [0m[37m│[0m                
+│[1mBackground pane[0m[37m│[0mEscape[48;5;0m    [0mDismiss[48;5;0m [0mthe[48;5;0m [0mmodal[48;5;0m                   [0m[37m│[0m                
+│Last action: no[37m│[0mEnter[48;5;0m     [0mActivate[48;5;0m [0mfocused[48;5;0m [0maction[48;5;0m             [0m[37m│[0m                
+│               [37m│[0m[34m╭──────────────╮[0m╭──────────────╮[48;5;0m              [0m[37m│[0m                
+│               [37m│[0m[34m│[0m[1mConfirm[0m[48;5;0m       [0m[34m│[0m│[1mDismiss[0m[48;5;0m       [0m│[48;5;0m              [0m[37m│[0m                
 ╰───────────────[37m│[0m[34m╰──────────────╯[0m╰──────────────╯[48;5;0m              [0m[37m│[0m                
                 [37m╰──────────────────────────────────────────────╯[0m                
                                                                                 

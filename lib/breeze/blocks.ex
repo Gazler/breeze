@@ -64,6 +64,117 @@ defmodule Breeze.Blocks do
   attr :id, :string, required: true
   attr :selected, :string, default: nil
   attr :style, :string, default: nil
+  attr :menu_style, :string, default: nil
+  attr :item_style, :string, default: nil
+  attr :width, :integer, default: nil
+  attr :menu_width, :integer, default: nil
+  attr :menu_top, :integer, default: 1
+  attr :menu_left, :integer, default: 0
+  attr :rest, :global
+
+  slot :item do
+    attr :value, :string, required: true
+  end
+
+  def dropdown(assigns) do
+    items_with_labels =
+      Enum.map(assigns.item, fn item ->
+        {item, render_slot(item, %{})}
+      end)
+
+    selected_label =
+      case Enum.find(items_with_labels, fn {item, _label} ->
+             Map.get(item, :value) == assigns[:selected]
+           end) do
+        {_item, label} -> label
+        nil -> to_string(assigns[:selected] || "")
+      end
+
+    width =
+      assigns[:width] ||
+        items_with_labels
+        |> Enum.map(fn {_item, label} -> String.length(label) + 4 end)
+        |> Kernel.++([String.length(selected_label) + 4, 8])
+        |> Enum.max()
+
+    menu_width = assigns[:menu_width] || width
+    menu_height = max(length(items_with_labels), 1)
+    trigger_content = build_dropdown_trigger(selected_label, width)
+
+    assigns =
+      assigns
+      |> assign(selected_label: selected_label)
+      |> assign(width: width)
+      |> assign(menu_width: menu_width)
+      |> assign(menu_height: menu_height)
+      |> assign(trigger_content: trigger_content)
+      |> assign(
+        trigger_style:
+          merge_style(
+            "bg-4 text-7 bold width-#{width} height-1 focus:inverse",
+            assigns[:style]
+          )
+      )
+      |> assign(menu_style: assigns[:menu_style])
+      |> assign(
+        item_style:
+          merge_style(
+            "width-#{menu_width} text-7 selected:bg-4 selected:text-7 focus:inverse",
+            assigns[:item_style]
+          )
+      )
+
+    assigns =
+      assign(assigns,
+        item_styles:
+          items_with_labels
+          |> Enum.with_index()
+          |> Enum.map(fn {{item, _label}, index} ->
+            {item, index, assigns.item_style}
+          end)
+      )
+
+    ~H"""
+    <box
+      id={@id}
+      implicit={Breeze.Implicit.Dropdown}
+      focusable
+      dropdown-selected={@selected}
+      dropdown-trigger-width={@width}
+      dropdown-menu-width={@menu_width}
+      dropdown-menu-height={@menu_height}
+      dropdown-menu-top={@menu_top}
+      dropdown-menu-left={@menu_left}
+      style={@trigger_style}
+      {@rest}
+    >
+      {@trigger_content}
+      <box dropdown-indicator-closed="true" style={@trigger_style}>▼</box>
+      <box dropdown-indicator-open="true" style={@trigger_style}>▲</box>
+      <box dropdown-frame="true" style={@menu_style}>
+      </box>
+      <box
+        :for={{item, index, item_style} <- @item_styles}
+        dropdown-item="true"
+        dropdown-item-index={index}
+        value={item.value}
+        style={item_style}
+      >
+        {render_slot(item, %{})}
+      </box>
+    </box>
+    """
+  end
+
+  defp build_dropdown_trigger(label, width) do
+    inner_width = max(width - 4, 0)
+    padded = String.pad_trailing(to_string(label), inner_width) |> String.slice(0, inner_width)
+    " " <> padded <> "   "
+  end
+
+  attr :id, :string, required: true
+  attr :selected, :string, default: nil
+  attr :style, :string, default: nil
   attr :item_style, :string, default: nil
   attr :rest, :global
 
@@ -79,7 +190,13 @@ defmodule Breeze.Blocks do
     assigns =
       assigns
       |> assign(active: active)
-      |> assign(style: merge_style("border overflow-hidden focus:border-3", assigns[:style]))
+      |> assign(
+        style:
+          merge_style(
+            "border overflow-hidden focus:border-3 grid grid-cols-1 grid-rows-2",
+            assigns[:style]
+          )
+      )
       |> assign(
         item_style:
           merge_style(
@@ -100,14 +217,12 @@ defmodule Breeze.Blocks do
       style={@style}
       {@rest}
     >
-      <box style="inline" tab-bar="true">
+      <box style="inline height-1" tab-bar="true">
         <box :for={t <- @tab} value={t.value} tab-label={t.label} style={@item_style}>
           {" #{t.label} "}
         </box>
       </box>
-      <box>
-      </box>
-      {render_slot(@active)}
+      <box style="height-full overflow-hidden">{render_slot(@active)}</box>
     </box>
     """
   end
@@ -197,20 +312,23 @@ defmodule Breeze.Blocks do
       |> assign(
         frame_width: assigns.width + 2,
         frame_height: assigns.height + 2,
-        style: merge_style("bg-0", assigns[:style])
+        style: merge_style("bg-0", assigns[:style]),
+        fill_content: blank_rect(assigns.width + 2, assigns.height + 2)
       )
 
     ~H"""
     <box
       id={@id}
+      focusable
       focus-scope="trap"
       implicit={Breeze.Implicit.Modal}
       width={@width}
       height={@height}
-      style={"width-#{@frame_width} height-#{@frame_height}"}
+      style={"width-#{@frame_width} height-#{@frame_height} bg-0 layer-50"}
       {@rest}
     >
-      <.panel width={@width} height={@height} style={@style}>
+      {@fill_content}
+      <.panel width={@width} height={@height} style={"absolute left-0 top-0 layer-51 #{@style}"}>
         <:title :if={assigns[:title]}>{render_slot(@title)}</:title>
         {render_slot(@inner_block)}
       </.panel>
@@ -261,5 +379,13 @@ defmodule Breeze.Blocks do
       [_only] -> token
       parts -> parts |> Enum.drop(-1) |> Enum.join("-")
     end
+  end
+
+  defp blank_rect(width, height) do
+    row = String.duplicate(" ", max(width, 0))
+
+    1..max(height, 0)
+    |> Enum.map(fn _ -> row end)
+    |> Enum.join("\n")
   end
 end
