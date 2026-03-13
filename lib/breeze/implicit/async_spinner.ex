@@ -9,9 +9,16 @@ defmodule Breeze.Implicit.AsyncSpinner do
   def handle_modifiers(:root, _flags, _state), do: []
   def handle_modifiers(:child, _flags, _state), do: []
 
-  def animate(:root, box, _flags, _state, %{frame: frame, pending?: pending?}) do
+  def animate(:root, box, _flags, _state, %{frame: frame, pending?: pending?} = ctx) do
     content = if pending?, do: Enum.at(@frames, rem(frame, length(@frames))), else: "·"
-    %{box | content: content}
+
+    case Map.get(ctx, :layout) do
+      %Breeze.Viewport{left: left, top: top} when pending? ->
+        {:ok, %{box | content: "·"}, overlays: [%{x: left, y: top, content: content}]}
+
+      _ ->
+        %{box | content: content}
+    end
   end
 
   def animate(:child, box, _flags, _state, _ctx), do: box

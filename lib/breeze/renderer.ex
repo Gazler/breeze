@@ -167,7 +167,10 @@ defmodule Breeze.Renderer do
 
     box =
       if implicit && function_exported?(implicit_mod, :animate, 5) do
-        implicit_mod.animate(type, box, flags, implicit, animation_ctx(opts, id, focused))
+        implicit_mod
+        |> apply(:animate, [type, box, flags, implicit, animation_ctx(opts, id, focused)])
+        |> normalize_animation_result()
+        |> elem(0)
       else
         box
       end
@@ -272,6 +275,10 @@ defmodule Breeze.Renderer do
         focusables: Enum.reverse(child_acc.focusables) ++ acc.focusables
     }
   end
+
+  defp normalize_animation_result({:ok, %Box{} = box, _opts}), do: {box, %{}}
+  defp normalize_animation_result({:ok, %Box{} = box}), do: {box, %{}}
+  defp normalize_animation_result(%Box{} = box), do: {box, %{}}
 
   defp namespace_live_acc(acc, prefix) do
     acc
@@ -410,6 +417,10 @@ defmodule Breeze.Renderer do
       end
 
     {style, Map.put(attrs, :display, %{display | rows: String.to_integer(num)})}
+  end
+
+  defp apply_style("layer-" <> num, {style, attrs}) do
+    {style, Map.put(attrs, :layer, String.to_integer(num))}
   end
 
   defp apply_style("overflow-scroll", {style, attrs}),

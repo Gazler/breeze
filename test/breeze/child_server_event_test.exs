@@ -35,6 +35,33 @@ defmodule Breeze.ChildServerEventTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule RootOnlyModalView do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term) do
+      {:ok, assign(term, show_modal: true, closed?: false)}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <.modal :if={@show_modal} id="root-only-modal" width={30} height={6} br-change="close_modal">
+          <:title>Modal</:title>
+          <box>No focusable children</box>
+        </.modal>
+      </box>
+      """
+    end
+
+    def handle_event("close_modal", _event, term) do
+      {:noreply, assign(term, show_modal: false, closed?: true)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   test "escape on a focused modal child routes to the modal implicit" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: ModalView, terminal: terminal)
@@ -47,6 +74,21 @@ defmodule Breeze.ChildServerEventTest do
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     state = :sys.get_state(pid)
 
+    assert state.assigns.closed? == true
+    assert state.assigns.show_modal == false
+  end
+
+  test "escape closes a modal with no focusable children by focusing the modal root" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: RootOnlyModalView, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert %{focused: "root-only-modal"} = Breeze.ChildServer.metadata(pid)
+
+    assert {:noreply, "root-only-modal", true} =
+             Breeze.ChildServer.dispatch_input(pid, "Escape")
+
+    state = :sys.get_state(pid)
     assert state.assigns.closed? == true
     assert state.assigns.show_modal == false
   end

@@ -7,6 +7,8 @@ defmodule Breeze.Viewport do
   """
 
   @type t :: %__MODULE__{
+          left: integer(),
+          top: integer(),
           width: non_neg_integer() | nil,
           height: non_neg_integer(),
           viewport_width: non_neg_integer() | nil,
@@ -15,7 +17,9 @@ defmodule Breeze.Viewport do
           content_height: non_neg_integer()
         }
 
-  defstruct width: nil,
+  defstruct left: 0,
+            top: 0,
+            width: nil,
             height: 0,
             viewport_width: nil,
             viewport_height: 0,
@@ -50,6 +54,8 @@ defmodule Breeze.Viewport do
       |> normalize_int(height)
 
     %__MODULE__{
+      left: normalize_signed_int(Map.get(dimensions, :left)),
+      top: normalize_signed_int(Map.get(dimensions, :top)),
       width: width,
       height: height,
       viewport_width: viewport_width,
@@ -130,6 +136,10 @@ defmodule Breeze.Viewport do
   defp normalize_optional_int(value, _fallback) when is_integer(value), do: max(value, 0)
   defp normalize_optional_int(nil, fallback), do: fallback
   defp normalize_optional_int(_value, fallback), do: fallback
+
+  defp normalize_signed_int(value, fallback \\ 0)
+  defp normalize_signed_int(value, _fallback) when is_integer(value), do: value
+  defp normalize_signed_int(_value, fallback), do: fallback
 
   defp clamp(value, min_value, max_value) do
     value
