@@ -227,6 +227,10 @@ defmodule Breeze.RenderState do
     {implicit_state, Map.new(implicit_meta)}
   end
 
+  defp normalize_init_result({:ok, implicit_state}) do
+    {implicit_state, %{}}
+  end
+
   defp normalize_init_result(implicit_state) do
     {implicit_state, %{}}
   end

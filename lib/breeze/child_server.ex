@@ -52,7 +52,12 @@ defmodule Breeze.ChildServer do
 
   @impl true
   def handle_call(:metadata, _from, term) do
-    {:reply, %{focused: term.focused, view: term.view}, term}
+    {:reply,
+     %{
+       focused: term.focused,
+       view: term.view,
+       focused_implicit_id: focused_implicit_id(term, term.focused)
+     }, term}
   end
 
   def handle_call({:render, opts}, _from, term) do
@@ -95,12 +100,14 @@ defmodule Breeze.ChildServer do
     end
   end
 
-  defp reply_from_result({:noreply, next_term}, _term) do
+  defp reply_from_result({:noreply, next_term}, term) do
+    next_term = apply_focus_transitions(term, next_term)
     notify_invalidate(next_term)
     {:reply, {:noreply, next_term.focused}, next_term}
   end
 
-  defp reply_from_result({:stop, next_term}, _term) do
+  defp reply_from_result({:stop, next_term}, term) do
+    next_term = apply_focus_transitions(term, next_term)
     notify_invalidate(next_term)
     {:stop, :normal, {:stop, next_term.focused}, next_term}
   end
@@ -272,18 +279,22 @@ defmodule Breeze.ChildServer do
       {id, {mod, implicit}}, acc ->
         every_ms = get_in(term.implicit_meta, [id, :rerender_every])
         box = Map.get(term.rendered_boxes, id)
+        layout = Map.get(term.elements, id)
 
         if is_integer(every_ms) and every_ms > 0 and match?(%BackBreeze.Box{}, box) and
              function_exported?(mod, :animate, 5) do
           [
             %{
               id: id,
+              owner_id: id,
               mod: mod,
               state: implicit,
               box: box,
+              layout: layout,
               flags: focus_flags(term, id),
               every_ms: every_ms,
-              active_when_pending: get_in(term.implicit_meta, [id, :active_when_pending]) == true
+              active_when_pending: get_in(term.implicit_meta, [id, :active_when_pending]) == true,
+              active_when_focused: get_in(term.implicit_meta, [id, :active_when_focused]) == true
             }
             | acc
           ]
@@ -308,13 +319,56 @@ defmodule Breeze.ChildServer do
   end
 
   defp reply_from_input_result({:noreply, next_term}, term) do
+    next_term = apply_focus_transitions(term, next_term)
     notify_invalidate(next_term)
     {:reply, {:noreply, next_term.focused, next_term != term}, next_term}
   end
 
-  defp reply_from_input_result({:stop, next_term}, _term) do
+  defp reply_from_input_result({:stop, next_term}, term) do
+    next_term = apply_focus_transitions(term, next_term)
     notify_invalidate(next_term)
     {:stop, :normal, {:stop, next_term.focused, true}, next_term}
+  end
+
+  defp apply_focus_transitions(prev_term, next_term) do
+    prev_implicit_id = focused_implicit_id(prev_term, prev_term.focused)
+    next_implicit_id = focused_implicit_id(next_term, next_term.focused)
+
+    next_term =
+      if prev_implicit_id && prev_implicit_id != next_implicit_id do
+        case Map.get(next_term.implicit_state, prev_implicit_id) do
+          {mod, state} ->
+            if function_exported?(mod, :blur, 1) do
+              Breeze.RenderState.put_implicit_state(
+                next_term,
+                prev_implicit_id,
+                mod,
+                mod.blur(state)
+              )
+            else
+              next_term
+            end
+
+          _ ->
+            next_term
+        end
+      else
+        next_term
+      end
+
+    next_term
+  end
+
+  defp focused_implicit_id(_term, nil), do: nil
+
+  defp focused_implicit_id(term, focused) do
+    cond do
+      Map.has_key?(term.implicit_state, focused) ->
+        focused
+
+      true ->
+        get_in(term.focus_meta, [focused, :implicit_owner])
+    end
   end
 
   defp notify_invalidate(term) do

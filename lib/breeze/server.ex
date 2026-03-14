@@ -47,6 +47,7 @@ defmodule Breeze.Server do
     children: %{},
     animation_timer: nil,
     next_tick_at: nil,
+    global_keybindings: [],
     hide_cursor?: true,
     busy_delay_ms: 120,
     frame_delay_ms: 80
@@ -124,6 +125,7 @@ defmodule Breeze.Server do
       reader: terminal.reader,
       view_pid: view_pid,
       focused: focused,
+      global_keybindings: Keyword.get(opts, :global_keybindings, []),
       hide_cursor?: hide_cursor?,
       busy_delay_ms: Keyword.get(opts, :busy_delay_ms, 120),
       frame_delay_ms: frame_delay_ms,
@@ -139,7 +141,20 @@ defmodule Breeze.Server do
   @impl true
   def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
     {:key, key} = decode_input(data)
-    {:noreply, handle_key(key, state)}
+
+    cond do
+      stop_global_key?(key, state) ->
+        stop(state)
+
+      sync_input?(state, key) ->
+        case process_input_batch(reader, data, state) do
+          {:stop, state} -> stop(state)
+          {:noreply, state} -> {:noreply, maybe_render_base(state)}
+        end
+
+      true ->
+        {:noreply, start_async_input(key, state)}
+    end
   end
 
   def handle_info({reader, {:signal, :winch}}, %{reader: reader} = state) do
@@ -229,34 +244,100 @@ defmodule Breeze.Server do
     end
   end
 
-  defp handle_key("q", state), do: stop(state)
+  defp process_input_batch(reader, data, state) do
+    case handle_key(data, state) do
+      {:stop, state} ->
+        {:stop, state}
 
-  defp handle_key(_key, %{pending_ref: ref} = state) when not is_nil(ref), do: state
-
-  defp handle_key(key, state) when key in ["\t", "ShiftTab"] do
-    ref = make_ref()
-    session = self()
-
-    Task.start(fn ->
-      reply = Breeze.ChildServer.dispatch_input(state.view_pid, key)
-      send(session, {:event_reply, ref, reply})
-    end)
-
-    state
-    |> Map.put(:pending_ref, ref)
-    |> Map.put(:pending_started_at, System.monotonic_time(:millisecond))
-    |> Map.put(:last_interaction_at, System.monotonic_time(:millisecond))
-    |> render_frame()
-    |> schedule_animation()
+      {:noreply, state} ->
+        drain_input_batch(reader, state)
+    end
   end
 
-  defp handle_key(key, state) do
+  defp drain_input_batch(reader, state) do
+    receive do
+      {^reader, {:data, data}} ->
+        process_input_batch(reader, data, state)
+    after
+      0 -> {:noreply, state}
+    end
+  end
+
+  defp handle_key(raw_key, state) do
+    {:key, key} = decode_input(raw_key)
+
+    case key do
+      key when key in ["\t", "ShiftTab"] ->
+        state
+        |> touch_interaction()
+        |> apply_input_reply(Breeze.ChildServer.dispatch_input(state.view_pid, key))
+
+      key ->
+        state
+        |> touch_interaction()
+        |> apply_input_reply(dispatch_input_hierarchy(state, key))
+    end
+  end
+
+  defp apply_input_reply(state, reply) do
+    case reply do
+      {:stop, _focused} ->
+        {:stop, state}
+
+      {:stop, _focused, _consumed} ->
+        {:stop, state}
+
+      {:noreply, focused} ->
+        {:noreply, Map.put(state, :focused, focused)}
+
+      {:noreply, focused, _consumed} ->
+        {:noreply, Map.put(state, :focused, focused)}
+    end
+  end
+
+  defp touch_interaction(state) do
+    %{state | last_interaction_at: System.monotonic_time(:millisecond)}
+  end
+
+  defp sync_input?(state, key) do
+    key in ["\t", "ShiftTab"] or focused_implicit?(state)
+  end
+
+  defp stop_global_key?(key, state) do
+    event = %{"key" => key}
+
+    Enum.any?(state.global_keybindings, fn
+      {^key, fun} when is_function(fun, 2) ->
+        match?({:stop, _}, fun.(event, state))
+
+      _ ->
+        false
+    end)
+  end
+
+  defp focused_implicit?(%{focused: nil}), do: false
+
+  defp focused_implicit?(state) do
+    case focused_child_chain(state) do
+      [{_child_id, %{pid: pid}} | _] ->
+        match?(%{focused_implicit_id: id} when not is_nil(id), Breeze.ChildServer.metadata(pid))
+
+      [] ->
+        match?(
+          %{focused_implicit_id: id} when not is_nil(id),
+          Breeze.ChildServer.metadata(state.view_pid)
+        )
+    end
+  end
+
+  defp start_async_input(_key, %{pending_ref: ref} = state) when not is_nil(ref), do: state
+
+  defp start_async_input(key, state) do
     ref = make_ref()
     session = self()
 
     Task.start(fn ->
       reply = dispatch_input_hierarchy(state, key)
-
       send(session, {:event_reply, ref, reply})
     end)
 
@@ -299,10 +380,12 @@ defmodule Breeze.Server do
 
         true ->
           decorations = decorations ++ child_decorations
+          state = %{state | focused: focused}
+          {base_output, decorations} = prepare_decorations(box.content, decorations, state)
 
           state
-          |> Map.put(:base_output, box.content)
-          |> Map.put(:decorations, initialize_decorations(decorations))
+          |> Map.put(:base_output, base_output)
+          |> Map.put(:decorations, decorations)
           |> Map.put(:focused, focused)
           |> Map.put(:last_render_at, System.monotonic_time(:millisecond))
           |> render_frame()
@@ -355,13 +438,17 @@ defmodule Breeze.Server do
   end
 
   defp render_frame(state) do
-    output = apply_decorations(state.base_output, state.decorations, state)
+    {output, decorations} = apply_decorations(state.base_output, state.decorations, state)
+    output = strip_private_use_chars(output)
+    overlays = terminal_overlays(decorations, state)
+
     screen_height = state.terminal.size.height
     output_lines = length(String.split(output, "\n"))
     trailing = String.duplicate("\n\e[K", max(screen_height - output_lines, 0))
     output = "\e[K" <> String.replace(output, "\n", "\n\e[K") <> trailing
     terminal = Termite.Terminal.write(state.terminal, "\e[H" <> output)
-    %{state | terminal: terminal}
+    terminal = Breeze.TerminalOverlay.write_overlays(terminal, overlays)
+    %{state | terminal: terminal, decorations: decorations}
   end
 
   defp initialize_decorations(decorations) do
@@ -370,6 +457,26 @@ defmodule Breeze.Server do
       |> Map.put_new(:frame_index, 0)
       |> Map.put_new(:every_ms, 500)
     end)
+  end
+
+  defp prepare_decorations(output, decorations, state) do
+    decorations
+    |> initialize_decorations()
+    |> Enum.reduce({output, []}, fn decoration, {acc, updated} ->
+      {_animated_box, current_content, current_overlays} = render_decoration(decoration, state)
+
+      # TODO: Replace async decoration content by box coordinates instead of substring matching.
+      {
+        String.replace(acc, decoration.box.content, current_content, global: false),
+        [
+          decoration
+          |> Map.put(:current_content, current_content)
+          |> Map.put(:current_overlays, current_overlays)
+          | updated
+        ]
+      }
+    end)
+    |> then(fn {prepared_output, updated} -> {prepared_output, Enum.reverse(updated)} end)
   end
 
   defp advance_decorations(state) do
@@ -385,27 +492,63 @@ defmodule Breeze.Server do
   end
 
   defp apply_decorations(output, decorations, state) do
-    Enum.reduce(decorations, output, fn decoration, acc ->
+    Enum.reduce(decorations, {output, []}, fn decoration, {acc, updated} ->
       if decoration_active?(decoration, state) do
-        ctx = %{
-          phase: :async,
-          frame: decoration.frame_index,
-          now: System.monotonic_time(:millisecond),
-          pending?: pending_active?(state),
-          focused?: decoration.id == state.focused,
-          last_render_at: state.last_render_at,
-          last_interaction_at: state.last_interaction_at
-        }
-
-        animated_box =
-          decoration.mod.animate(:root, decoration.box, decoration.flags, decoration.state, ctx)
+        {_animated_box, current_content, current_overlays} = render_decoration(decoration, state)
 
         # TODO: Replace async decoration content by box coordinates instead of substring matching.
-        String.replace(acc, decoration.box.content, animated_box.content, global: false)
+        {
+          String.replace(acc, decoration.current_content, current_content, global: false),
+          [
+            decoration
+            |> Map.put(:current_content, current_content)
+            |> Map.put(:current_overlays, current_overlays)
+            | updated
+          ]
+        }
       else
-        acc
+        {acc, [decoration | updated]}
       end
     end)
+    |> then(fn {final_output, updated} -> {final_output, Enum.reverse(updated)} end)
+  end
+
+  defp render_decoration(decoration, state) do
+    now = System.monotonic_time(:millisecond)
+
+    ctx = decoration_ctx(decoration, state, now)
+
+    {animated_box, animate_opts} =
+      if function_exported?(decoration.mod, :animate, 5) do
+        decoration.mod
+        |> apply(:animate, [:root, decoration.box, decoration.flags, decoration.state, ctx])
+        |> normalize_animation_result()
+      else
+        {decoration.box, %{}}
+      end
+
+    {animated_box, animated_box.content, Map.get(animate_opts, :overlays, [])}
+  end
+
+  defp decoration_ctx(decoration, state, now) do
+    %{
+      phase: :async,
+      frame: decoration.frame_index,
+      now: now,
+      pending?: pending_active?(state),
+      focused?: (decoration[:owner_id] || decoration.id) == state.focused,
+      last_render_at: state.last_render_at,
+      last_interaction_at: state.last_interaction_at,
+      id: decoration.id,
+      layout: decoration[:layout]
+    }
+  end
+
+  defp strip_private_use_chars(output) do
+    output
+    |> String.to_charlist()
+    |> Enum.reject(&(&1 in 0xE000..0xF8FF))
+    |> List.to_string()
   end
 
   defp schedule_animation(%{decorations: []} = state), do: state
@@ -444,9 +587,14 @@ defmodule Breeze.Server do
 
   defp decoration_active?(decoration, state) do
     cond do
-      decoration[:active_when_pending] -> pending_active?(state)
-      decoration[:active_when_focused] -> decoration[:owner_id] == state.focused
-      true -> true
+      decoration[:active_when_pending] ->
+        pending_active?(state)
+
+      decoration[:active_when_focused] ->
+        (decoration[:owner_id] || decoration[:id]) == state.focused
+
+      true ->
+        true
     end
   end
 
@@ -485,6 +633,25 @@ defmodule Breeze.Server do
 
   defp remaining_busy_delay(_state), do: nil
 
+  defp terminal_overlays(decorations, state) do
+    decorations
+    |> Enum.filter(&decoration_active?(&1, state))
+    |> Enum.flat_map(&Map.get(&1, :current_overlays, []))
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp normalize_animation_result({:ok, %BackBreeze.Box{} = box, opts}) when is_list(opts) do
+    {box, Map.new(opts)}
+  end
+
+  defp normalize_animation_result({:ok, %BackBreeze.Box{} = box}) do
+    {box, %{}}
+  end
+
+  defp normalize_animation_result(%BackBreeze.Box{} = box) do
+    {box, %{}}
+  end
+
   defp stop(state) do
     if Process.alive?(state.view_pid) do
       Process.exit(state.view_pid, :normal)
@@ -500,47 +667,7 @@ defmodule Breeze.Server do
     System.halt()
   end
 
-  defp decode_input("\e"), do: {:key, "Escape"}
-  defp decode_input("\r"), do: {:key, "Enter"}
-
-  defp decode_input(raw_key) do
-    key =
-      cond do
-        String.starts_with?(raw_key, "\eO") ->
-          convert_key_o(String.trim_leading(raw_key, "\eO"))
-
-        String.starts_with?(raw_key, Termite.Screen.escape_code()) ->
-          convert_key(String.trim_leading(raw_key, Termite.Screen.escape_code()))
-
-        true ->
-          raw_key
-      end
-
-    {:key, key}
-  end
-
-  defp convert_key_o("P"), do: "F1"
-  defp convert_key_o("Q"), do: "F2"
-  defp convert_key_o("R"), do: "F3"
-  defp convert_key_o("S"), do: "F4"
-  defp convert_key_o(key), do: key
-
-  defp convert_key("11~"), do: "F1"
-  defp convert_key("12~"), do: "F2"
-  defp convert_key("13~"), do: "F3"
-  defp convert_key("14~"), do: "F4"
-  defp convert_key("A"), do: "ArrowUp"
-  defp convert_key("B"), do: "ArrowDown"
-  defp convert_key("C"), do: "ArrowRight"
-  defp convert_key("D"), do: "ArrowLeft"
-  defp convert_key("Z"), do: "ShiftTab"
-  defp convert_key("H"), do: "Home"
-  defp convert_key("F"), do: "End"
-  defp convert_key("1~"), do: "Home"
-  defp convert_key("4~"), do: "End"
-  defp convert_key("5~"), do: "PageUp"
-  defp convert_key("6~"), do: "PageDown"
-  defp convert_key(key), do: key
+  defp decode_input(raw_key), do: {:key, Breeze.KeyDecoder.decode(raw_key)}
 
   defp ensure_children(state, missing) do
     Enum.reduce(missing, {state, false}, fn {id, attrs}, {state, started?} ->

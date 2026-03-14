@@ -5,8 +5,17 @@ defmodule Breeze.ViewportTest do
 
   describe "from_dimensions/1" do
     test "normalizes a dimension map" do
-      viewport = Viewport.from_dimensions(%{height: 10, viewport_height: 4, content_height: 20})
+      viewport =
+        Viewport.from_dimensions(%{
+          left: 3,
+          top: 4,
+          height: 10,
+          viewport_height: 4,
+          content_height: 20
+        })
 
+      assert viewport.left == 3
+      assert viewport.top == 4
       assert viewport.height == 10
       assert viewport.viewport_height == 4
       assert viewport.content_height == 20
@@ -15,6 +24,8 @@ defmodule Breeze.ViewportTest do
     test "falls back to sane defaults" do
       viewport = Viewport.from_dimensions(nil)
 
+      assert viewport.left == 0
+      assert viewport.top == 0
       assert viewport.height == 0
       assert viewport.viewport_height == 0
       assert viewport.content_height == 0

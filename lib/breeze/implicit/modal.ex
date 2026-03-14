@@ -36,7 +36,9 @@ defmodule Breeze.Implicit.Modal do
     [style: "absolute left-#{state.left} top-#{state.top}"]
   end
 
-  def handle_modifiers(:child, _flags, _state), do: []
+  def handle_modifiers(:child, _flags, _state) do
+    []
+  end
 
   defp dimension(attrs, key, fallback) do
     case Map.get(attrs, key, fallback) do
