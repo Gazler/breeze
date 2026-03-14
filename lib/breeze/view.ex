@@ -213,7 +213,9 @@ defmodule Breeze.View do
   There are two final handlers used during rendering.
 
   `animate/5` can transform the rendered `BackBreeze.Box` for lightweight
-  renderer-driven animation and other presentation changes.
+  renderer-driven animation and other presentation changes. It can return either
+  the updated box directly or `{:ok, box, overlays: overlays}` to request
+  terminal overlays during async animation passes.
 
   `handle_modifiers/3` receives `:root` or `:child` as the first argument and can be
   used to tell the renderer things about the state.
@@ -357,5 +359,18 @@ defmodule Breeze.View do
   @spec reset(map(), String.t()) :: map()
   def reset(term, id) do
     update_in(term.implicit_state, &Map.delete(&1, id))
+  end
+
+  @doc """
+  Update the implicit state for the given element ID in place.
+  """
+  @spec update_implicit(map(), String.t(), ({module(), map()} -> map())) :: map()
+  def update_implicit(term, id, fun) do
+    update_in(term.implicit_state, fn implicit_state ->
+      case Map.get(implicit_state, id) do
+        {mod, state} -> Map.put(implicit_state, id, {mod, fun.({mod, state})})
+        nil -> implicit_state
+      end
+    end)
   end
 end
