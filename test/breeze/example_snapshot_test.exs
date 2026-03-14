@@ -47,7 +47,7 @@ defmodule Breeze.ExampleSnapshotTest do
   setup_all do
     Application.put_env(:breeze, :example_mode, :load_only)
 
-    for file <- ~w(counter.exs docs.exs modal.exs snake.exs tabs.exs) do
+    for file <- ~w(counter.exs docs.exs modal.exs posting.exs snake.exs tabs.exs) do
       Code.require_file(Path.expand("../../examples/#{file}", __DIR__))
     end
 
@@ -119,6 +119,15 @@ defmodule Breeze.ExampleSnapshotTest do
     assert {:noreply, _focused, true} = Breeze.Test.input(session, "ArrowRight")
 
     assert_snapshot(Breeze.Test.render!(session), "examples/tabs/scrolled-tab.ansi",
+      snapshot_dir: "../__snapshots__"
+    )
+  end
+
+  test "posting example initial snapshot" do
+    session = Breeze.Test.start!(Posting, size: {120, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert_snapshot(Breeze.Test.render!(session), "examples/posting/initial.ansi",
       snapshot_dir: "../__snapshots__"
     )
   end
