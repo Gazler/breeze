@@ -34,23 +34,22 @@ defmodule Docs do
   def render(assigns) do
     ~H"""
     <box style="grid grid-cols-2 height-screen width-screen">
-      <box style="grid grid-cols-1 grid-rows-2 height-screen">
+      <box style="grid grid-cols-1 grid-rows-2 width-full height-full">
         <.list
           id="docs"
           br-change="change"
-          style="height-screen focus:scrollbar-3"
+          style="width-full height-full focus:scrollbar-3"
           item_style="selected:bg-24 selected:text-0 focus:selected:text-7 focus:selected:bg-4 width-full"
         >
           <:item :for={doc <- @docs} value={inspect(doc)}>{inspect(doc)}</:item>
         </.list>
         <.list
-          :if={@selected}
           id="functions"
           br-change="function"
-          style="height-screen focus:scrollbar-3"
+          style="width-full height-full focus:scrollbar-3"
           item_style="selected:bg-24 selected:text-0 focus:selected:text-7 focus:selected:bg-4 width-full"
         >
-          <:item :for={function <- @functions} value={function}>{function}</:item>
+          <:item :for={function <- @functions || []} value={function}>{function}</:item>
         </.list>
       </box>
       <.markdown
