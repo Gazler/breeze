@@ -19,8 +19,8 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, {:render_snapshot, opts})
   end
 
-  def dispatch_input(pid, key) do
-    GenServer.call(pid, {:input, key})
+  def dispatch_input(pid, input) do
+    GenServer.call(pid, {:input, input})
   end
 
   def dispatch_event(pid, change, event) do
@@ -75,9 +75,9 @@ defmodule Breeze.ChildServer do
     reply_from_input_result(handle_event(change, event, touched_term), touched_term)
   end
 
-  def handle_call({:input, key}, _from, term) do
+  def handle_call({:input, input}, _from, term) do
     touched_term = touch_interaction(term)
-    reply_from_input_result(process_input(key, touched_term), touched_term)
+    reply_from_input_result(process_input(input, touched_term), touched_term)
   end
 
   def handle_call({:info, message, terminal}, _from, term) do
@@ -176,7 +176,9 @@ defmodule Breeze.ChildServer do
 
     {acc, box} = Breeze.Renderer.render(term.view, term.assigns, final_opts)
     term = Breeze.RenderState.build(term, acc)
+
     term = %{term | focus_meta: Breeze.Focus.build_meta(acc.elements, term.implicit_state)}
+
     decorations = extract_async_decorations(term)
 
     {term, acc, box, decorations}
@@ -234,6 +236,29 @@ defmodule Breeze.ChildServer do
     {:noreply, %{term | focused: focused, allow_unfocused?: is_nil(focused)}}
   end
 
+  defp process_input(%{"mouse" => mouse} = event, term) do
+    case mouse_target(term, mouse) do
+      nil ->
+        normalize_result(term.view.handle_event(:ignore_me, event, term), term)
+
+      target ->
+        term =
+          if focus_mouse_target?(target, mouse, term) do
+            %{term | focused: target}
+          else
+            term
+          end
+
+        event =
+          event
+          |> Map.put("target", target)
+          |> Map.put("row", mouse_row(term, target, mouse))
+          |> Map.put("col", mouse_col(term, target, mouse))
+
+        handle_event(:ignore_me, event, term, target)
+    end
+  end
+
   defp process_input(key, term) do
     event = %{"key" => key}
 
@@ -249,11 +274,13 @@ defmodule Breeze.ChildServer do
     end
   end
 
-  defp handle_event(change, event, term) do
+  defp handle_event(change, event, term, target_id \\ nil) do
+    target_id = target_id || term.focused
+
     {view_state, implicit_consumed, term} =
       Breeze.RenderState.dispatch_implicit_event(
         term,
-        term.focused,
+        target_id,
         event,
         &handle_implicit_change/4
       )
@@ -377,4 +404,51 @@ defmodule Breeze.ChildServer do
       _ -> :ok
     end
   end
+
+  defp mouse_target(term, %{x: x, y: y}) do
+    x = x - 1
+    y = y - 1
+
+    term.mouse_targets
+    |> Enum.filter(fn {_id, bounds} ->
+      is_integer(bounds[:left]) and is_integer(bounds[:right]) and is_integer(bounds[:top]) and
+        is_integer(bounds[:bottom]) and x >= bounds.left and x <= bounds.right and
+        y >= bounds.top and y <= bounds.bottom
+    end)
+    |> Enum.sort_by(fn {_id, bounds} ->
+      area = (bounds.right - bounds.left + 1) * (bounds.bottom - bounds.top + 1)
+      {area, bounds.top, bounds.left}
+    end)
+    |> List.first()
+    |> case do
+      {id, _bounds} -> id
+      nil -> nil
+    end
+  end
+
+  defp mouse_row(term, target, %{y: y}) do
+    bounds = Map.fetch!(term.mouse_targets, target)
+    box = Map.get(term.rendered_boxes, target)
+    top_inset = border_inset(box, :top)
+    max(y - 1 - bounds.top - top_inset, 0)
+  end
+
+  defp mouse_col(term, target, %{x: x}) do
+    bounds = Map.fetch!(term.mouse_targets, target)
+    box = Map.get(term.rendered_boxes, target)
+    left_inset = border_inset(box, :left)
+    max(x - 1 - bounds.left - left_inset, 0)
+  end
+
+  defp border_inset(%BackBreeze.Box{style: %{border: border}}, side) do
+    if Map.get(border, side), do: 1, else: 0
+  end
+
+  defp border_inset(_, _side), do: 0
+
+  defp focus_mouse_target?(target, %{button: :left, action: :press}, term) do
+    target in term.focusables
+  end
+
+  defp focus_mouse_target?(_target, _mouse, _term), do: false
 end

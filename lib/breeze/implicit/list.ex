@@ -113,6 +113,35 @@ defmodule Breeze.Implicit.List do
     |> maybe_change()
   end
 
+  def handle_event(
+        _,
+        %{"mouse" => %{button: :left, action: :press}, "row" => row, "element" => element},
+        state
+      )
+      when is_integer(row) and row >= 0 do
+    case clicked_index_at_row(state.values, row + state.offset, state.width) do
+      nil ->
+        {:noreply, state}
+
+      index ->
+        state
+        |> set_selection(index, element)
+        |> maybe_change()
+    end
+  end
+
+  def handle_event(_, %{"mouse" => %{button: :wheel_down} = mouse, "element" => element}, state) do
+    viewport = Viewport.from_dimensions(element)
+    offset = Viewport.clamp_scroll_y(state.offset + wheel_repeat(mouse), viewport)
+    {:noreply, %{state | offset: offset}}
+  end
+
+  def handle_event(_, %{"mouse" => %{button: :wheel_up} = mouse, "element" => element}, state) do
+    viewport = Viewport.from_dimensions(element)
+    offset = Viewport.clamp_scroll_y(state.offset - wheel_repeat(mouse), viewport)
+    {:noreply, %{state | offset: offset}}
+  end
+
   def handle_event(_, _, state), do: {:noreply, state}
 
   @spec handle_modifiers(:root | :child, keyword(), state()) :: keyword()
@@ -168,6 +197,9 @@ defmodule Breeze.Implicit.List do
     {{:change, payload}, state}
   end
 
+  defp wheel_repeat(%{repeat: repeat}) when is_integer(repeat) and repeat > 0, do: repeat
+  defp wheel_repeat(_mouse), do: 1
+
   defp next_index(%{selected_index: nil}, delta) when delta >= 0, do: 0
   defp next_index(%{selected_index: nil, values: values}, _delta), do: max(length(values) - 1, 0)
 
@@ -220,6 +252,25 @@ defmodule Breeze.Implicit.List do
       end)
 
     idx
+  end
+
+  defp clicked_index_at_row(values, row, width) do
+    Enum.with_index(values)
+    |> Enum.reduce_while({0, nil}, fn {value, idx}, {cur_row, _found} ->
+      next_row = cur_row + item_rows(value, width)
+
+      cond do
+        row < cur_row ->
+          {:halt, {cur_row, nil}}
+
+        row < next_row ->
+          {:halt, {cur_row, idx}}
+
+        true ->
+          {:cont, {next_row, nil}}
+      end
+    end)
+    |> elem(1)
   end
 
   defp normalize_selected_index(_index, []), do: nil

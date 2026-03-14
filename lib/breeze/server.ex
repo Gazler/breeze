@@ -20,6 +20,7 @@ defmodule Breeze.Term do
     implicit_meta: %{},
     rendered_contents: %{},
     rendered_boxes: %{},
+    mouse_targets: %{},
     children: %{},
     frame_delay_ms: 16,
     render_timer: nil
@@ -33,6 +34,9 @@ defmodule Breeze.Server do
 
   use GenServer
 
+  @render_tracking_key {__MODULE__, :render_tracking}
+  @flush_input_batch :flush_input_batch
+
   defstruct [
     :terminal,
     :reader,
@@ -43,6 +47,8 @@ defmodule Breeze.Server do
     :pending_started_at,
     :last_render_at,
     :last_interaction_at,
+    queued_input: [],
+    input_flush_scheduled?: false,
     decorations: [],
     children: %{},
     animation_timer: nil,
@@ -57,6 +63,7 @@ defmodule Breeze.Server do
           {:view, module()}
           | {:start_opts, keyword()}
           | {:hide_cursor, boolean()}
+          | {:mouse, boolean() | keyword()}
           | {:global_keybindings, list()}
           | {:frame_delay_ms, pos_integer()}
 
@@ -67,6 +74,7 @@ defmodule Breeze.Server do
 
     * `:view` - the view to run. This is required
     * `:hide_cursor` - hide the cursor on start. Defaults to `false`
+    * `:mouse` - enable mouse tracking. Defaults to `false`. Pass `true` for click mode or keyword options for `Termite.Screen.enable_mouse/2`
     * `:global_keybindings` - app-wide keybindings checked before focused event handling
 
   """
@@ -96,9 +104,11 @@ defmodule Breeze.Server do
     start_opts = Keyword.get(opts, :start_opts, [])
     hide_cursor? = Keyword.get(opts, :hide_cursor, true)
     frame_delay_ms = Keyword.get(opts, :frame_delay_ms, 80)
+    mouse = Keyword.get(opts, :mouse, false)
 
     terminal = Termite.Terminal.start()
     terminal = if hide_cursor?, do: Termite.Screen.hide_cursor(terminal), else: terminal
+    terminal = enable_mouse(terminal, mouse)
     terminal = Termite.Screen.clear_screen(terminal)
 
     session = self()
@@ -140,21 +150,12 @@ defmodule Breeze.Server do
 
   @impl true
   def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
-    {:key, key} = decode_input(data)
+    state =
+      state
+      |> enqueue_input(decode_input(data))
+      |> schedule_input_flush()
 
-    cond do
-      stop_global_key?(key, state) ->
-        stop(state)
-
-      sync_input?(state, key) ->
-        case process_input_batch(reader, data, state) do
-          {:stop, state} -> stop(state)
-          {:noreply, state} -> {:noreply, maybe_render_base(state)}
-        end
-
-      true ->
-        {:noreply, start_async_input(key, state)}
-    end
+    {:noreply, state}
   end
 
   def handle_info({reader, {:signal, :winch}}, %{reader: reader} = state) do
@@ -176,6 +177,23 @@ defmodule Breeze.Server do
 
   def handle_info({:child_invalidated, _id}, state) do
     {:noreply, maybe_render_base(state)}
+  end
+
+  def handle_info(@flush_input_batch, state) do
+    state = %{state | input_flush_scheduled?: false}
+
+    case flush_input_batch(state) do
+      {:stop, state} ->
+        stop(state)
+
+      {:noreply, state} ->
+        state =
+          state
+          |> maybe_render_base()
+          |> schedule_input_flush()
+
+        {:noreply, state}
+    end
   end
 
   def handle_info(:animation_tick, %{decorations: []} = state) do
@@ -244,28 +262,43 @@ defmodule Breeze.Server do
     end
   end
 
-  defp process_input_batch(reader, data, state) do
-    case handle_key(data, state) do
+  defp flush_input_batch(%{queued_input: []} = state), do: {:noreply, state}
+
+  defp flush_input_batch(%{queued_input: [decoded | rest]} = state) do
+    state = %{state | queued_input: rest}
+
+    case process_batched_input(decoded, state) do
       {:stop, state} ->
         {:stop, state}
 
       {:noreply, state} ->
-        drain_input_batch(reader, state)
+        continue_flushing_or_pause(state)
     end
   end
 
-  defp drain_input_batch(reader, state) do
-    receive do
-      {^reader, {:data, data}} ->
-        process_input_batch(reader, data, state)
-    after
-      0 -> {:noreply, state}
+  defp process_batched_input({:mouse, %{button: button} = event}, state)
+       when button in [:wheel_down, :wheel_up] do
+    {event, state} = coalesce_wheel_events_from_queue(event, state, 1)
+    handle_mouse(event, state)
+  end
+
+  defp process_batched_input(decoded, state), do: handle_decoded_sync_input(decoded, state)
+
+  defp continue_flushing_or_pause(%{queued_input: [next | _]} = state) do
+    if sync_input_message?(next, state) do
+      flush_input_batch(state)
+    else
+      {:noreply, state}
     end
   end
 
-  defp handle_key(raw_key, state) do
-    {:key, key} = decode_input(raw_key)
+  defp continue_flushing_or_pause(state), do: {:noreply, state}
 
+  defp handle_decoded_sync_input({:mouse, event}, state) do
+    handle_mouse(event, state)
+  end
+
+  defp handle_decoded_sync_input({:key, key}, state) do
     case key do
       key when key in ["\t", "ShiftTab"] ->
         state
@@ -277,6 +310,36 @@ defmodule Breeze.Server do
         |> touch_interaction()
         |> apply_input_reply(dispatch_input_hierarchy(state, key))
     end
+  end
+
+  defp sync_input_message?({:mouse, _event}, _state), do: true
+
+  defp sync_input_message?({:key, key}, state) do
+    key in ["\t", "ShiftTab"] or stop_global_key?(key, state) or sync_input?(state, key)
+  end
+
+  defp sync_input_message?(_, _state), do: false
+
+  defp coalesce_wheel_events_from_queue(event, %{queued_input: [next | rest]} = state, repeat) do
+    case next do
+      {:mouse, %{button: button} = next_event} ->
+        if button == event.button and wheel_match?(event, next_event) do
+          coalesce_wheel_events_from_queue(event, %{state | queued_input: rest}, repeat + 1)
+        else
+          {Map.put(event, :repeat, repeat), state}
+        end
+
+      _ ->
+        {Map.put(event, :repeat, repeat), state}
+    end
+  end
+
+  defp coalesce_wheel_events_from_queue(event, state, repeat),
+    do: {Map.put(event, :repeat, repeat), state}
+
+  defp wheel_match?(left, right) do
+    left.action == right.action and left.x == right.x and left.y == right.y and
+      left.modifiers == right.modifiers
   end
 
   defp apply_input_reply(state, reply) do
@@ -330,36 +393,22 @@ defmodule Breeze.Server do
     end
   end
 
-  defp start_async_input(_key, %{pending_ref: ref} = state) when not is_nil(ref), do: state
-
-  defp start_async_input(key, state) do
-    ref = make_ref()
-    session = self()
-
-    Task.start(fn ->
-      reply = dispatch_input_hierarchy(state, key)
-      send(session, {:event_reply, ref, reply})
-    end)
-
+  defp handle_mouse(event, state) do
     state
-    |> Map.put(:pending_ref, ref)
-    |> Map.put(:pending_started_at, System.monotonic_time(:millisecond))
-    |> Map.put(:last_interaction_at, System.monotonic_time(:millisecond))
-    |> render_frame()
-    |> schedule_animation()
+    |> touch_interaction()
+    |> apply_input_reply(Breeze.ChildServer.dispatch_input(state.view_pid, %{"mouse" => event}))
   end
 
   defp render_base(state, attempts \\ 1)
 
   defp render_base(state, attempts) do
-    token = make_ref()
-    collector = self()
+    begin_render_tracking()
 
     {:ok, _acc, box, decorations} =
       Breeze.ChildServer.render_snapshot(state.view_pid,
         implicit_state: %{},
         terminal: state.terminal,
-        live_view: fn attrs, opts -> render_live_child(attrs, opts, state, collector, token) end
+        live_view: fn attrs, opts -> render_live_child(attrs, opts, state) end
       )
 
     focused =
@@ -368,7 +417,7 @@ defmodule Breeze.Server do
         _ -> state.focused
       end
 
-    %{missing: missing, decorations: child_decorations} = collect_render_tracking(token)
+    %{missing: missing, decorations: child_decorations} = finish_render_tracking()
     {state, started?} = ensure_children(state, missing)
 
     if started? do
@@ -398,14 +447,14 @@ defmodule Breeze.Server do
     if Process.alive?(pid), do: render_base(state), else: state
   end
 
-  defp render_live_child(attrs, opts, state, collector, token) do
+  defp render_live_child(attrs, opts, state) do
     id = fetch_live_attr!(attrs, :id)
     full_id = live_id(Keyword.get(opts, :live_prefix), id)
     preload_only = fetch_live_attr(attrs, :preload_only, false)
 
     case Map.get(state.children, full_id) do
       nil ->
-        send(collector, {:breeze_live_track, token, :missing, {full_id, attrs}})
+        track_missing_live_child({full_id, attrs})
         if preload_only, do: :preloaded, else: :missing
 
       %{pid: pid} ->
@@ -421,15 +470,12 @@ defmodule Breeze.Server do
               terminal: state.terminal,
               live_prefix: full_id,
               live_view: fn child_attrs, child_opts ->
-                render_live_child(child_attrs, child_opts, state, collector, token)
+                render_live_child(child_attrs, child_opts, state)
               end
             )
 
           Enum.each(child_decorations, fn decoration ->
-            send(
-              collector,
-              {:breeze_live_track, token, :decoration, namespace_decoration(decoration, full_id)}
-            )
+            track_render_decoration(namespace_decoration(decoration, full_id))
           end)
 
           {:rendered, id, child_acc, child_box}
@@ -652,6 +698,13 @@ defmodule Breeze.Server do
     {box, %{}}
   end
 
+  defp enable_mouse(terminal, false), do: terminal
+  defp enable_mouse(terminal, nil), do: terminal
+  defp enable_mouse(terminal, true), do: Termite.Screen.enable_mouse(terminal)
+
+  defp enable_mouse(terminal, opts) when is_list(opts),
+    do: Termite.Screen.enable_mouse(terminal, opts)
+
   defp stop(state) do
     if Process.alive?(state.view_pid) do
       Process.exit(state.view_pid, :normal)
@@ -659,6 +712,7 @@ defmodule Breeze.Server do
 
     terminal =
       state.terminal
+      |> Termite.Screen.disable_mouse()
       |> Termite.Screen.clear_screen()
       |> Termite.Screen.show_cursor()
       |> Termite.Screen.exit_alt_screen()
@@ -667,7 +721,15 @@ defmodule Breeze.Server do
     System.halt()
   end
 
-  defp decode_input(raw_key), do: {:key, Breeze.KeyDecoder.decode(raw_key)}
+  defp decode_input(raw_key) do
+    case Breeze.Mouse.decode(raw_key) do
+      {:ok, event} ->
+        {:mouse, event}
+
+      :error ->
+        {:key, Breeze.KeyDecoder.decode(raw_key)}
+    end
+  end
 
   defp ensure_children(state, missing) do
     Enum.reduce(missing, {state, false}, fn {id, attrs}, {state, started?} ->
@@ -700,18 +762,48 @@ defmodule Breeze.Server do
     %{pid: pid, ref: ref, view: view, persistent: persistent}
   end
 
-  defp collect_render_tracking(token) do
-    receive do
-      {:breeze_live_track, ^token, :missing, item} ->
-        acc = collect_render_tracking(token)
-        %{acc | missing: [item | acc.missing]}
+  defp begin_render_tracking do
+    Process.put(@render_tracking_key, %{missing: [], decorations: []})
+  end
 
-      {:breeze_live_track, ^token, :decoration, decoration} ->
-        acc = collect_render_tracking(token)
-        %{acc | decorations: [decoration | acc.decorations]}
-    after
-      0 -> %{missing: [], decorations: []}
-    end
+  defp finish_render_tracking do
+    Process.get(@render_tracking_key, %{missing: [], decorations: []})
+    |> then(fn tracking ->
+      Process.delete(@render_tracking_key)
+
+      %{
+        missing: Enum.reverse(tracking.missing),
+        decorations: Enum.reverse(tracking.decorations)
+      }
+    end)
+  end
+
+  defp track_missing_live_child(item) do
+    update_render_tracking(fn tracking ->
+      %{tracking | missing: [item | tracking.missing]}
+    end)
+  end
+
+  defp track_render_decoration(decoration) do
+    update_render_tracking(fn tracking ->
+      %{tracking | decorations: [decoration | tracking.decorations]}
+    end)
+  end
+
+  defp update_render_tracking(fun) do
+    tracking = Process.get(@render_tracking_key, %{missing: [], decorations: []})
+    Process.put(@render_tracking_key, fun.(tracking))
+  end
+
+  defp enqueue_input(state, decoded) do
+    update_in(state.queued_input, &(&1 ++ [decoded]))
+  end
+
+  defp schedule_input_flush(%{input_flush_scheduled?: true} = state), do: state
+
+  defp schedule_input_flush(state) do
+    send(self(), @flush_input_batch)
+    %{state | input_flush_scheduled?: true}
   end
 
   defp dispatch_input_hierarchy(state, key) do

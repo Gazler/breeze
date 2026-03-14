@@ -194,18 +194,21 @@ defmodule Breeze.Renderer do
       element.attributes
       |> merge_scroll_modifier(scroll_modifier)
       |> Map.put(:style, element.style)
+      |> Map.put(:owner_id, id)
 
     children = Enum.reverse(children)
     content = box.content
 
+    final_box = %{Box.new(opts) | children: children, content: content}
+
     acc =
       if root_id do
-        %{acc | focusables: focusables, boxes: Map.put(acc.boxes, root_id, box)}
+        %{acc | focusables: focusables, boxes: Map.put(acc.boxes, root_id, final_box)}
       else
         %{acc | focusables: focusables}
       end
 
-    {acc, %{Box.new(opts) | children: children, content: content}}
+    {acc, final_box}
   end
 
   defp parse_modifiers(modifiers, style_flags) when is_list(modifiers) do

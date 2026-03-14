@@ -89,6 +89,85 @@ defmodule Breeze.Implicit.ListTest do
       assert state.selected == "c"
       assert state.selected_index == 2
     end
+
+    test "selects the clicked row and emits change" do
+      viewport = Viewport.from_dimensions(%{height: 4, viewport_height: 4, content_height: 6})
+
+      state = %{
+        values: ["alpha", "beta", "gamma"],
+        selected: "alpha",
+        selected_index: 0,
+        offset: 0,
+        loop: true,
+        scroll_padding: 0,
+        width: 0
+      }
+
+      {{:change, payload}, state} =
+        Implicit.List.handle_event(
+          :ignore,
+          %{
+            "mouse" => %{button: :left, action: :press},
+            "row" => 2,
+            "element" => viewport
+          },
+          state
+        )
+
+      assert state.selected == "gamma"
+      assert state.selected_index == 2
+      assert payload == %{value: "gamma", index: 2, offset: 0}
+    end
+
+    test "wheel scroll updates offset without changing selection" do
+      viewport = Viewport.from_dimensions(%{height: 3, viewport_height: 3, content_height: 8})
+
+      state = %{
+        values: Enum.map(1..8, &"item-#{&1}"),
+        selected: "item-2",
+        selected_index: 1,
+        offset: 1,
+        loop: true,
+        scroll_padding: 0,
+        width: 0
+      }
+
+      assert {:noreply, next_state} =
+               Implicit.List.handle_event(
+                 :ignore,
+                 %{"mouse" => %{button: :wheel_down}, "element" => viewport},
+                 state
+               )
+
+      assert next_state.offset == 2
+      assert next_state.selected == "item-2"
+      assert next_state.selected_index == 1
+    end
+
+    test "wheel scroll respects coalesced repeat counts" do
+      viewport = Viewport.from_dimensions(%{height: 3, viewport_height: 3, content_height: 8})
+
+      state = %{
+        values: Enum.map(1..8, &"item-#{&1}"),
+        selected: "item-2",
+        selected_index: 1,
+        offset: 1,
+        loop: true,
+        scroll_padding: 0,
+        width: 0
+      }
+
+      assert {:noreply, next_state} =
+               Implicit.List.handle_event(
+                 :ignore,
+                 %{"mouse" => %{button: :wheel_down, repeat: 3}, "element" => viewport},
+                 state
+               )
+
+      assert next_state.offset == 4
+      assert next_state.selected == "item-2"
+      assert next_state.selected_index == 1
+    end
   end
 
   describe "handle_modifiers/3" do

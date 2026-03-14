@@ -63,6 +63,13 @@ defmodule Docs do
     """
   end
 
+  def handle_info(:resize, term) do
+    {screen_width, _} = BackBreeze.screen_dimensions(term.terminal)
+    doc_width = div(screen_width, 2) - 2
+
+    {:noreply, assign(term, doc_width: doc_width)}
+  end
+
   def handle_info(_, term) do
     {:noreply, term}
   end
@@ -107,6 +114,7 @@ defmodule Docs do
   def handle_event("function", %{value: value}, term) do
     doc = fetch_function_doc(term.assigns.selected, value)
     term = assign(term, fun_selected: value, fun_doc: doc)
+
     term = reset(term, "doc")
     {:noreply, term}
   end
