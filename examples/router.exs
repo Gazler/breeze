@@ -345,11 +345,11 @@ global_keybindings = [
   {"q", fn _event, term -> {:stop, term} end}
 ]
 
-Breeze.Server.start_link(
-  view: RouterExample,
-  hide_cursor: true,
-  global_keybindings: global_keybindings
+Breeze.Example.run(
+  [
+    view: RouterExample,
+    hide_cursor: true,
+    global_keybindings: global_keybindings
+  ],
+  keep_alive: :infinity
 )
-
-receive do
-end

@@ -1,0 +1,24 @@
+[1mModal example[0m                                                                   
+Press Enter or m to open the modal.                                             
+Tab should stay inside the modal until it closes.                               
+Escape closes the modal. q quits the example.                                   
+                                                                                
+[34m╭──────────────────────────╮[0m                                                    
+[34m│[0m[1mOpen modal[0m                [34m│[0m                                                    
+[34m│[0m                          [34m│[0m                                                    
+[34m│[0m                          [34m│[0m                                                    
+[34m╰──────────────────────────╯[0m                                                    
+                                                                                
+╭──────────────────────────╮                                                    
+│[1mBackground panel[0m          │                                                    
+│Last action: confirm      │                                                    
+│                          │                                                    
+│                          │                                                    
+╰──────────────────────────╯                                                    
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                

@@ -41,11 +41,11 @@ defmodule SlowEventAnimationDemo do
   def handle_info(_, term), do: {:noreply, term}
 end
 
-Breeze.Server.start_link(
-  view: SlowEventAnimationDemo,
-  hide_cursor: true,
-  global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+Breeze.Example.run(
+  [
+    view: SlowEventAnimationDemo,
+    hide_cursor: true,
+    global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+  ],
+  keep_alive: :infinity
 )
-
-receive do
-end

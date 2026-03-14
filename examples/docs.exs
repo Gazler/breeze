@@ -2,8 +2,16 @@ defmodule Docs do
   use Breeze.View
   import Breeze.Blocks
 
-  def mount(_opts, term) do
-    {:ok, docs} = :application.get_key(:kernel, :modules)
+  def mount(opts, term) do
+    docs =
+      case Keyword.get(opts, :docs) do
+        nil ->
+          {:ok, docs} = :application.get_key(:kernel, :modules)
+          docs
+
+        docs ->
+          docs
+      end
 
     {screen_width, _} = BackBreeze.screen_dimensions(term.terminal)
     doc_width = div(screen_width, 2) - 2
@@ -69,10 +77,10 @@ defmodule Docs do
 
     term =
       case Code.fetch_docs(module) do
-        {:docs_v1, _, lang, _, _, _, props} when lang in [:erlang, :elixir] ->
+        {:docs_v1, _, lang, _, _, _, docs} when lang in [:erlang, :elixir] ->
           funs =
-            Enum.reduce(props, [], fn prop, acc ->
-              head = elem(prop, 0)
+            Enum.reduce(docs, [], fn doc, acc ->
+              head = elem(doc, 0)
 
               case head do
                 {:function, fun, arity} -> ["#{fun}/#{arity}" | acc]
@@ -145,11 +153,11 @@ defmodule Docs do
   end
 end
 
-Breeze.Server.start_link(
-  view: Docs,
-  hide_cursor: true,
-  global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+Breeze.Example.run(
+  [
+    view: Docs,
+    hide_cursor: true,
+    global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+  ],
+  keep_alive: :infinity
 )
-
-receive do
-end

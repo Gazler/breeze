@@ -1,0 +1,24 @@
+[1mModal example[0m                                                                   
+Press Enter or m to open the modal.                                             
+Tab should stay inside the modal until it closes.                               
+Escape closes the modal. q quits the example.                                   
+                                                                                
+╭──────────────────────────╮                                                    
+│[1mOpen modal[0m     [37m╭─[0m[1;48;5;0mFocused Widget Help[0m[37m──────────────────────────╮[0m                
+│               [37m│[0mCentered panel with trapped Tab focus.[48;5;0m        [0m[37m│[0m                
+│               [37m│[0mUse it for│help, palettes, and overlays.[48;5;0m      [0m[37m│[0m                
+╰───────────────[37m│[0m[48;5;0m                                              [0m[37m│[0m                
+                [37m│[0m[1mControls[0m[48;5;0m                                      [0m[37m│[0m                
+╭───────────────[37m│[0mTab───────Move between actions[48;5;0m                [0m[37m│[0m                
+│[1mBackground pane[0m[37m│[0mEscape    Dismiss the modal[48;5;0m                   [0m[37m│[0m                
+│Last action: no[37m│[0mEnter     Activate focused action[48;5;0m             [0m[37m│[0m                
+│               [37m│[0m[34m╭──────────────╮[0m╭──────────────╮              [37m│[0m                
+│               [37m│[0m[34m│[0m[1mConfirm[0m  │    [34m│[0m│[1mDismiss[0m       │              [37m│[0m                
+╰───────────────[37m│[0m[34m╰──────────────╯[0m╰──────────────╯[48;5;0m              [0m[37m│[0m                
+                [37m╰──────────────────────────────────────────────╯[0m                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                

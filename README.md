@@ -98,3 +98,26 @@ end
 ```
 
 More examples are available in the examples directory.
+
+## Testing
+
+Breeze ships with `Breeze.Test` for deterministic view tests:
+
+```elixir
+defmodule MyApp.CounterTest do
+  use ExUnit.Case, async: true
+
+  test "counter snapshot" do
+    session = Breeze.Test.start!(MyApp.CounterView, size: {30, 5})
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert Breeze.Test.render!(session) =~ "Counter: 0"
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "ArrowUp")
+    assert Breeze.Test.render!(session) =~ "Counter: 1"
+  end
+end
+```
+
+The rendered content keeps raw terminal escape sequences intact, so projects can
+build their own snapshot assertions on top when needed.

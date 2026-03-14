@@ -1,0 +1,14 @@
+[1mTabs example[0m                      
+Use left/right arrows while the ta
+The tab bar should scroll horizont
+[34m╭──────────────────────────────╮[0m  
+[34m│[0m  Responses  Headers [1;48;5;4;38;5;7m Cookies [0m[34m│[0m  
+[34m│[0m                              [34m│[0m  
+[34m│[0m[1mCookies[0m                      ▲[34m│[0m  
+[34m│[0mSelected tab value: cookies  █[34m│[0m  
+[34m│[0m                             │[34m│[0m  
+[34m│[0mCookies panel line 1         │[34m│[0m  
+[34m│[0mCookies panel line 2         │[34m│[0m  
+[34m│[0mCookies panel line 3         ▼[34m│[0m  
+[34m╰──────────────────────────────╯[0m  
+                                  

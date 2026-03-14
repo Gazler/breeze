@@ -1,7 +1,9 @@
 defmodule Snake do
   use Breeze.View
 
-  def mount(_opts, term) do
+  def mount(opts, term) do
+    maybe_seed_rand(Keyword.get(opts, :seed))
+
     path = [{1, 1}, {1, 2}, {1, 3}, {1, 4}]
     size = %{width: 15, height: 10}
     food = random_food(size, path)
@@ -9,7 +11,9 @@ defmodule Snake do
     term =
       assign(term, %{size: size, direction: :right, path: path, food: food, input_buffer: []})
 
-    :timer.send_interval(100, self(), :tick)
+    if tick_ms = Keyword.get(opts, :tick_ms, 100) do
+      :timer.send_interval(tick_ms, self(), :tick)
+    end
 
     {:ok, term}
   end
@@ -117,13 +121,19 @@ defmodule Snake do
       do: random_food(size, path),
       else: %{x: x, y: y, color: color, glyph: glyph}
   end
+
+  defp maybe_seed_rand(nil), do: :ok
+
+  defp maybe_seed_rand({a, b, c}) do
+    :rand.seed(:exsss, {a, b, c})
+  end
 end
 
-Breeze.Server.start_link(
-  view: Snake,
-  hide_cursor: true,
-  global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+Breeze.Example.run(
+  [
+    view: Snake,
+    hide_cursor: true,
+    global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+  ],
+  keep_alive: :infinity
 )
-
-receive do
-end

@@ -17,7 +17,7 @@ defmodule Breeze.Renderer do
     {acc, box} = build_from_tree_nodes(root_children, opts)
 
     %{box: box, dimensions: dimensions} =
-      BackBreeze.Box.render_with_dimensions(box)
+      BackBreeze.Box.render_with_dimensions(box, opts)
 
     {Map.put(acc, :dimensions, dimensions), box}
   end
