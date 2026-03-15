@@ -262,7 +262,7 @@ defmodule Breeze.ChildServer do
   defp process_input(key, term) do
     event = %{"key" => key}
 
-    case Breeze.Server.dispatch_global_keybindings(event, term) do
+    case Breeze.GlobalKeybindings.dispatch(event, term) do
       {:stop, term} ->
         {:stop, term}
 
