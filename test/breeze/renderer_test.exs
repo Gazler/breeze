@@ -73,6 +73,18 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule FixedPositionExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box style="fixed right-0 bottom-0">X</box>
+      </box>
+      """
+    end
+  end
+
   defmodule ParentImplicit do
     def init(_children, last_state), do: %{offset_x: last_state[:offset_x] || 0}
     def handle_event(_, _, state), do: {:noreply, state}
@@ -139,6 +151,20 @@ defmodule Breeze.RendererTest do
                │BBBB  │
                │CCCC  │
                └──────┘\
+               """
+    end
+
+    test "supports fixed positioning with right and bottom offsets" do
+      {_, box} =
+        Renderer.render(FixedPositionExample, %{},
+          terminal: %Termite.Terminal{size: %{width: 5, height: 3}}
+        )
+
+      assert box.content ==
+               """
+                    
+                    
+                   X\
                """
     end
   end

@@ -443,12 +443,19 @@ defmodule Breeze.Renderer do
   end
 
   defp apply_style("absolute", {style, attrs}), do: {style, Map.put(attrs, :position, :absolute)}
+  defp apply_style("fixed", {style, attrs}), do: {style, Map.put(attrs, :position, :fixed)}
 
   defp apply_style("left-" <> num, {style, attrs}),
     do: {style, Map.put(attrs, :left, String.to_integer(num))}
 
+  defp apply_style("right-" <> num, {style, attrs}),
+    do: {style, Map.put(attrs, :right, String.to_integer(num))}
+
   defp apply_style("top-" <> num, {style, attrs}),
     do: {style, Map.put(attrs, :top, String.to_integer(num))}
+
+  defp apply_style("bottom-" <> num, {style, attrs}),
+    do: {style, Map.put(attrs, :bottom, String.to_integer(num))}
 
   defp apply_style("width-auto", {style, attrs}), do: {Style.width(style, :auto), attrs}
   defp apply_style("width-full", {style, attrs}), do: {Style.width(style, :full), attrs}
