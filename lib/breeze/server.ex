@@ -491,7 +491,6 @@ defmodule Breeze.Server do
       decorations: child_decorations,
       child_timings: child_timings
     } = finish_render_tracking(tracking_ref)
-
     profile_entries = Breeze.DebugProfiler.snapshot(profile_scope)
     {state, started?} = ensure_children(state, missing)
 
@@ -624,7 +623,7 @@ defmodule Breeze.Server do
       {_animated_box, current_content, current_overlays} = render_decoration(decoration, state)
 
       {
-        String.replace(acc, decoration.box.content, current_content, global: false),
+        String.replace(acc, rendered_fragment(decoration.box, state), current_content, global: false),
         [
           decoration
           |> Map.put(:current_content, current_content)
@@ -683,7 +682,7 @@ defmodule Breeze.Server do
         {decoration.box, %{}}
       end
 
-    {animated_box, animated_box.content, Map.get(animate_opts, :overlays, [])}
+    {animated_box, rendered_fragment(animated_box, state), Map.get(animate_opts, :overlays, [])}
   end
 
   defp decoration_ctx(decoration, state, now) do
@@ -705,6 +704,12 @@ defmodule Breeze.Server do
     |> String.to_charlist()
     |> Enum.reject(&(&1 in 0xE000..0xF8FF))
     |> List.to_string()
+  end
+
+  defp rendered_fragment(box, state) do
+    box
+    |> BackBreeze.Box.render(terminal: state.terminal)
+    |> Map.get(:content)
   end
 
   defp schedule_animation(%{decorations: []} = state), do: state
@@ -971,7 +976,6 @@ defmodule Breeze.Server do
     send(self(), @flush_input_batch)
     %{state | input_flush_scheduled?: true}
   end
-
   defp sum_timing_us(child_timings) do
     Enum.reduce(child_timings, 0, fn %{us: us}, acc -> acc + us end)
   end

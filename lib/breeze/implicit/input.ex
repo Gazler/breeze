@@ -2,7 +2,6 @@ defmodule Breeze.Implicit.Input do
   @moduledoc false
 
   @type state :: %{
-          optional(:viewport_width) => integer(),
           value: String.t(),
           cursor: non_neg_integer()
         }
@@ -89,8 +88,9 @@ defmodule Breeze.Implicit.Input do
         %{layout: layout, now: now, last_interaction_at: last_interaction_at}
       )
       when is_map(layout) do
+    layout = resolve_layout(layout, state)
     source = source_content(box.content, state)
-    {content, display_cursor} = render_visible_content(source, state)
+    {content, display_cursor} = render_visible_content(source, state, layout)
 
     overlay = %{
       x: layout.left + border_left_offset(box) + display_cursor,
@@ -102,17 +102,9 @@ defmodule Breeze.Implicit.Input do
     {:ok, %{box | content: content}, overlays: [overlay]}
   end
 
-  def animate(:root, box, _flags, state, _ctx) do
-    source = source_content(box.content, state)
-    {content, _display_cursor} = render_visible_content(source, state)
-    %{box | content: content}
-  end
+  def animate(:root, box, _flags, _state, _ctx), do: box
 
   def animate(:child, box, _flags, _state, _ctx), do: box
-
-  def reconcile(%Breeze.Viewport{} = element, state) do
-    Map.put(state, :viewport_width, element.viewport_width || element.width || 0)
-  end
 
   defp change(state) do
     {{:change, %{value: state.value, cursor: state.cursor}}, state}
@@ -168,7 +160,7 @@ defmodule Breeze.Implicit.Input do
     end
   end
 
-  defp render_visible_content(content, %{viewport_width: width} = state)
+  defp render_visible_content(content, state, %{viewport_width: width})
        when is_binary(content) and is_integer(width) and width > 0 do
     display_cursor = display_cursor_index(content, state)
     content_length = String.length(content)
@@ -180,8 +172,16 @@ defmodule Breeze.Implicit.Input do
     {slice_graphemes(content, scroll_left, visible_width, width), visible_cursor}
   end
 
-  defp render_visible_content(content, state) when is_binary(content) do
+  defp render_visible_content(content, state, _layout) when is_binary(content) do
     {content, display_cursor_index(content, state)}
+  end
+
+  defp resolve_layout(%Breeze.Viewport{} = layout, _state), do: layout
+
+  defp resolve_layout(layout, state) when is_map(layout) do
+    layout
+    |> Map.put_new(:viewport_width, Map.get(state, :viewport_width))
+    |> Breeze.Viewport.from_dimensions()
   end
 
   defp visible_width(true, width) when width > 1 do

@@ -164,6 +164,7 @@ Breeze.Example.run(
   [
     view: Docs,
     hide_cursor: true,
+    mouse: true,
     global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
   ],
   keep_alive: :infinity

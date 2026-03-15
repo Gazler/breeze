@@ -6,7 +6,7 @@ defmodule Breeze.Debug do
   def mount(opts, term) do
     width = Keyword.get(opts, :width, 42)
     height = Keyword.get(opts, :height, 22)
-    fixed? = Keyword.get(opts, :fixed, false)
+    fixed = Keyword.get(opts, :fixed, false)
     right = Keyword.get(opts, :right, 0)
     bottom = Keyword.get(opts, :bottom, 0)
 
@@ -17,10 +17,9 @@ defmodule Breeze.Debug do
     {:ok,
      assign(term,
        stats: %{},
-       enabled?: not is_nil(term.server),
        width: width,
        height: height,
-       fixed?: fixed?,
+       fixed: fixed,
        right: right,
        bottom: bottom
      )}
@@ -108,7 +107,7 @@ defmodule Breeze.Debug do
   defp root_style(assigns) do
     base = "border-rounded bg-0 width-#{assigns.width} height-#{assigns.height}"
 
-    if assigns.fixed? do
+    if assigns.fixed do
       base <> " fixed right-#{assigns.right} bottom-#{assigns.bottom}"
     else
       base

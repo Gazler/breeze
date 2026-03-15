@@ -62,8 +62,8 @@ defmodule Breeze.ChildServer do
   end
 
   def handle_call({:render, opts}, _from, term) do
-    {term, acc, box, _decorations} = render_term(term, opts)
-    {:reply, {:ok, acc, box}, term}
+    {term, acc, box, decorations} = render_term(term, opts)
+    {:reply, {:ok, acc, render_current_frame_box(term, box, decorations, opts)}, term}
   end
 
   def handle_call({:render_snapshot, opts}, _from, term) do
@@ -121,73 +121,52 @@ defmodule Breeze.ChildServer do
     term = maybe_put_terminal(term, Keyword.get(opts, :terminal))
     term = %{term | focused: Keyword.get(opts, :focused, term.focused)}
     implicit_state = Keyword.get(opts, :implicit_state, %{}) |> Map.merge(term.implicit_state)
-    opts = Keyword.put(opts, :implicit_state, implicit_state)
+    opts =
+      opts
+      |> Keyword.put(:implicit_state, implicit_state)
+      |> Keyword.put(:previous_elements, term.elements)
+
     profile_scope = Keyword.get(opts, :profile_scope)
     profile_label = profile_label(term, opts)
-
-    {term, _acc, _box} =
-      render_with_reconciled_implicits(term, opts, fn current_term, current_opts ->
-        {acc, box} =
-          profile(profile_scope, profile_label, :child_render_us, fn ->
-            Breeze.Renderer.render(current_term.view, current_term.assigns, current_opts)
-          end)
-
-        current_term =
-          profile(profile_scope, profile_label, :render_state_us, fn ->
-            Breeze.RenderState.build(current_term, acc)
-          end)
-
-        focus_meta = Breeze.Focus.build_meta(acc.elements, current_term.implicit_state)
-
-        focus_memory =
-          Breeze.Focus.remember_focus(
-            current_term.focus_memory,
-            current_term.focused,
-            current_term.focus_meta
-          )
-
-        focused =
-          if explicit_focus? do
-            current_term.focused
-          else
-            trapped_scope = Breeze.Focus.trapped_scope?(acc.focusables, focus_meta)
-
-            if current_term.allow_unfocused? and is_nil(current_term.focused) and
-                 not trapped_scope do
-              nil
-            else
-              Breeze.Focus.normalize_focus(
-                current_term.focused,
-                acc.focusables,
-                focus_meta,
-                focus_memory
-              )
-            end
-          end
-
-        current_term = %{
-          current_term
-          | focus_meta: focus_meta,
-            focus_memory: focus_memory,
-            focused: focused,
-            allow_unfocused?: current_term.allow_unfocused? and is_nil(focused)
-        }
-
-        {current_term, acc, box}
-      end)
 
     final_opts =
       opts
       |> Keyword.put(:focused, term.focused)
-      |> Keyword.put(:implicit_state, term.implicit_state)
+      |> Keyword.put(:implicit_state, implicit_state)
       |> Keyword.put(:implicit_meta, term.implicit_meta)
       |> Keyword.put(:last_render_at, term.last_render_at)
       |> Keyword.put(:last_interaction_at, term.last_interaction_at)
       |> Keyword.put(:animation_now, System.monotonic_time(:millisecond))
 
+    initial_implicit_meta = term.implicit_meta
+    {term, acc, box} = render_pass(term, final_opts, profile_scope, profile_label, explicit_focus?)
+
+    {term, acc, box} =
+      if term.implicit_state != implicit_state or term.implicit_meta != initial_implicit_meta do
+        rerender_opts =
+          final_opts
+          |> Keyword.put(:focused, term.focused)
+          |> Keyword.put(:implicit_state, term.implicit_state)
+          |> Keyword.put(:implicit_meta, term.implicit_meta)
+          |> Keyword.put(:previous_elements, term.elements)
+
+        render_pass(term, rerender_opts, profile_scope, profile_label, explicit_focus?)
+      else
+        {term, acc, box}
+      end
+
+    decorations =
+      profile(profile_scope, profile_label, :decorations_us, fn ->
+        extract_async_decorations(term)
+      end)
+
+    {term, acc, box, decorations}
+  end
+
+  defp render_pass(term, opts, profile_scope, profile_label, explicit_focus?) do
     {acc, box} =
       profile(profile_scope, profile_label, :child_render_us, fn ->
-        Breeze.Renderer.render(term.view, term.assigns, final_opts)
+        Breeze.Renderer.render(term.view, term.assigns, opts)
       end)
 
     term =
@@ -230,27 +209,24 @@ defmodule Breeze.ChildServer do
         allow_unfocused?: term.allow_unfocused? and is_nil(focused)
     }
 
-    decorations =
-      profile(profile_scope, profile_label, :decorations_us, fn ->
-        extract_async_decorations(term)
-      end)
-
-    {term, acc, box, decorations}
+    {term, acc, box}
   end
 
-  defp render_with_reconciled_implicits(term, opts, render_fun, attempts \\ 2) do
-    {term, acc, box} = render_fun.(term, opts)
+  defp render_current_frame_box(_term, box, [], _opts), do: box
 
-    implicit_state =
-      Breeze.RenderState.reconcile_implicits(term.implicit_state, term.elements)
+  defp render_current_frame_box(term, _box, _decorations, opts) do
+    render_opts =
+      opts
+      |> Keyword.put(:focused, term.focused)
+      |> Keyword.put(:implicit_state, term.implicit_state)
+      |> Keyword.put(:implicit_meta, term.implicit_meta)
+      |> Keyword.put(:last_render_at, term.last_render_at)
+      |> Keyword.put(:last_interaction_at, term.last_interaction_at)
+      |> Keyword.put(:animation_now, System.monotonic_time(:millisecond))
+      |> Keyword.put(:previous_elements, term.elements)
 
-    if attempts > 0 and implicit_state != term.implicit_state do
-      term = %{term | implicit_state: implicit_state}
-      opts = Keyword.put(opts, :implicit_state, implicit_state)
-      render_with_reconciled_implicits(term, opts, render_fun, attempts - 1)
-    else
-      {term, acc, box}
-    end
+    {_acc, box} = Breeze.Renderer.render(term.view, term.assigns, render_opts)
+    box
   end
 
   defp normalize_result({:noreply, next_term}, _term), do: {:noreply, next_term}

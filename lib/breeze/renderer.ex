@@ -9,6 +9,16 @@ defmodule Breeze.Renderer do
     content
   end
 
+  def render_tree(mod, assigns, opts \\ []) do
+    rendered = mod.render(assigns)
+
+    [{_tag, _, root_children}] =
+      rendered
+      |> Breeze.Template.render_to_tree(assigns)
+
+    build_from_tree_nodes(root_children, opts)
+  end
+
   def render(mod, assigns, opts \\ []) do
     profile_scope = Keyword.get(opts, :profile_scope)
     profile_label = Keyword.get(opts, :profile_label, inspect(mod))
@@ -181,10 +191,13 @@ defmodule Breeze.Renderer do
 
     type = if id == root_id, do: :root, else: :child
 
+    previous_elements = Keyword.get(opts, :previous_elements, %{})
+    previous_layout = if id, do: Map.get(previous_elements, id), else: nil
+
     box =
       if implicit && function_exported?(implicit_mod, :animate, 5) do
         implicit_mod
-        |> apply(:animate, [type, box, flags, implicit, animation_ctx(opts, id, focused)])
+        |> apply(:animate, [type, box, flags, implicit, animation_ctx(opts, id, focused, previous_layout)])
         |> normalize_animation_result()
         |> elem(0)
       else
@@ -193,6 +206,7 @@ defmodule Breeze.Renderer do
 
     {style_flags, style_modifiers, scroll_modifier} =
       if implicit do
+        flags = if previous_layout, do: Keyword.put(flags, :layout_element, previous_layout), else: flags
         modifiers = implicit_mod.handle_modifiers(type, flags, implicit)
         parse_modifiers(modifiers, style_flags)
       else
@@ -357,7 +371,7 @@ defmodule Breeze.Renderer do
     |> Keyword.update(:"focus-scope-path", [], &namespace_ids(&1, prefix))
   end
 
-  defp animation_ctx(opts, id, focused) do
+  defp animation_ctx(opts, id, focused, previous_layout) do
     %{
       phase: Keyword.get(opts, :animation_phase, :base),
       frame: Keyword.get(opts, :animation_frame, 0),
@@ -366,7 +380,8 @@ defmodule Breeze.Renderer do
       focused?: focused,
       last_render_at: Keyword.get(opts, :last_render_at),
       last_interaction_at: Keyword.get(opts, :last_interaction_at),
-      id: id
+      id: id,
+      layout: previous_layout
     }
   end
 

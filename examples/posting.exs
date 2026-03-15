@@ -44,8 +44,8 @@ defmodule Posting do
         url_width: screen_width - 18,
         request_tab: "headers",
         response_tab: "body",
-        show_help: false,
-        show_debug: false
+        show_debug: System.get_env("BREEZE_DEBUG") == "1",
+        show_help: false
       )
 
     {:ok, term}

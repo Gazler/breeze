@@ -68,6 +68,11 @@ defmodule Breeze.InputRouter do
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
+  def handle_call(:stats, _from, state) do
+    {:reply, Breeze.Server.stats(state.server_pid), state}
+  end
+
+  @impl true
   def terminate(_reason, state) do
     state.halt_fun.()
     :ok
