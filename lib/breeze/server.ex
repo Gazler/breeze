@@ -54,7 +54,6 @@ defmodule Breeze.Server do
     animation_timer: nil,
     next_tick_at: nil,
     global_keybindings: [],
-    hide_cursor?: true,
     busy_delay_ms: 120,
     frame_delay_ms: 80
   ]
@@ -80,36 +79,21 @@ defmodule Breeze.Server do
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts)
+    Breeze.InputRouter.start_link(opts)
   end
 
   @doc false
-  def dispatch_global_keybindings(event, state) do
-    case Enum.find(state.global_keybindings, fn {key, _fun} -> key == event["key"] end) do
-      nil ->
-        :continue
-
-      {_key, fun} when is_function(fun, 2) ->
-        case fun.(event, state) do
-          :continue -> :continue
-          {:stop, state} -> {:stop, state}
-          {:noreply, state} -> {:noreply, state}
-        end
-    end
+  @spec start_app_link(keyword()) :: GenServer.on_start()
+  def start_app_link(opts) do
+    GenServer.start_link(__MODULE__, opts)
   end
 
   @impl true
   def init(opts) do
     view = Keyword.fetch!(opts, :view)
     start_opts = Keyword.get(opts, :start_opts, [])
-    hide_cursor? = Keyword.get(opts, :hide_cursor, true)
     frame_delay_ms = Keyword.get(opts, :frame_delay_ms, 80)
-    mouse = Keyword.get(opts, :mouse, false)
-
-    terminal = Termite.Terminal.start()
-    terminal = if hide_cursor?, do: Termite.Screen.hide_cursor(terminal), else: terminal
-    terminal = enable_mouse(terminal, mouse)
-    terminal = Termite.Screen.clear_screen(terminal)
+    terminal = Keyword.fetch!(opts, :terminal)
 
     session = self()
 
@@ -132,11 +116,10 @@ defmodule Breeze.Server do
 
     state = %__MODULE__{
       terminal: terminal,
-      reader: terminal.reader,
+      reader: Keyword.get(opts, :reader, terminal.reader),
       view_pid: view_pid,
       focused: focused,
       global_keybindings: Keyword.get(opts, :global_keybindings, []),
-      hide_cursor?: hide_cursor?,
       busy_delay_ms: Keyword.get(opts, :busy_delay_ms, 120),
       frame_delay_ms: frame_delay_ms,
       base_output: "",
@@ -152,7 +135,7 @@ defmodule Breeze.Server do
   def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
     state =
       state
-      |> enqueue_input(decode_input(data))
+      |> enqueue_input(Breeze.Input.decode(data))
       |> schedule_input_flush()
 
     {:noreply, state}
@@ -189,7 +172,7 @@ defmodule Breeze.Server do
       {:noreply, state} ->
         state =
           state
-          |> maybe_render_base()
+          |> maybe_render_after_input()
           |> schedule_input_flush()
 
         {:noreply, state}
@@ -282,7 +265,7 @@ defmodule Breeze.Server do
     handle_mouse(event, state)
   end
 
-  defp process_batched_input(decoded, state), do: handle_decoded_sync_input(decoded, state)
+  defp process_batched_input(decoded, state), do: handle_deferred_or_sync_input(decoded, state)
 
   defp continue_flushing_or_pause(%{queued_input: [next | _]} = state) do
     if sync_input_message?(next, state) do
@@ -293,6 +276,14 @@ defmodule Breeze.Server do
   end
 
   defp continue_flushing_or_pause(state), do: {:noreply, state}
+
+  defp handle_deferred_or_sync_input(decoded, state) do
+    if sync_input_message?(decoded, state) do
+      handle_decoded_sync_input(decoded, state)
+    else
+      handle_deferred_input(decoded, state)
+    end
+  end
 
   defp handle_decoded_sync_input({:mouse, event}, state) do
     handle_mouse(event, state)
@@ -312,10 +303,23 @@ defmodule Breeze.Server do
     end
   end
 
-  defp sync_input_message?({:mouse, _event}, _state), do: true
+  defp handle_deferred_input({:key, _key}, %{pending_ref: ref} = state) when not is_nil(ref) do
+    {:noreply, state}
+  end
+
+  defp handle_deferred_input({:key, key}, state) do
+    {:noreply, start_async_dispatch(touch_interaction(state), key)}
+  end
+
+  defp handle_deferred_input(_decoded, state), do: {:noreply, state}
+
+  defp sync_input_message?({:mouse, _event}, %{pending_ref: nil}), do: true
+  defp sync_input_message?({:mouse, _event}, _state), do: false
 
   defp sync_input_message?({:key, key}, state) do
-    key in ["\t", "ShiftTab"] or stop_global_key?(key, state) or sync_input?(state, key)
+    stop_global_key?(key, state) or
+      (is_nil(state.pending_ref) and
+         (key in ["\t", "ShiftTab"] or sync_input?(state, key)))
   end
 
   defp sync_input_message?(_, _state), do: false
@@ -367,15 +371,7 @@ defmodule Breeze.Server do
   end
 
   defp stop_global_key?(key, state) do
-    event = %{"key" => key}
-
-    Enum.any?(state.global_keybindings, fn
-      {^key, fun} when is_function(fun, 2) ->
-        match?({:stop, _}, fun.(event, state))
-
-      _ ->
-        false
-    end)
+    Breeze.GlobalKeybindings.stop_action?(%{"key" => key}, state)
   end
 
   defp focused_implicit?(%{focused: nil}), do: false
@@ -446,6 +442,9 @@ defmodule Breeze.Server do
   defp maybe_render_base(%{view_pid: pid} = state) do
     if Process.alive?(pid), do: render_base(state), else: state
   end
+
+  defp maybe_render_after_input(%{pending_ref: ref} = state) when not is_nil(ref), do: state
+  defp maybe_render_after_input(state), do: maybe_render_base(state)
 
   defp render_live_child(attrs, opts, state) do
     id = fetch_live_attr!(attrs, :id)
@@ -698,13 +697,6 @@ defmodule Breeze.Server do
     {box, %{}}
   end
 
-  defp enable_mouse(terminal, false), do: terminal
-  defp enable_mouse(terminal, nil), do: terminal
-  defp enable_mouse(terminal, true), do: Termite.Screen.enable_mouse(terminal)
-
-  defp enable_mouse(terminal, opts) when is_list(opts),
-    do: Termite.Screen.enable_mouse(terminal, opts)
-
   defp stop(state) do
     if Process.alive?(state.view_pid) do
       Process.exit(state.view_pid, :normal)
@@ -721,16 +713,6 @@ defmodule Breeze.Server do
     System.halt()
   end
 
-  defp decode_input(raw_key) do
-    case Breeze.Mouse.decode(raw_key) do
-      {:ok, event} ->
-        {:mouse, event}
-
-      :error ->
-        {:key, Breeze.KeyDecoder.decode(raw_key)}
-    end
-  end
-
   defp ensure_children(state, missing) do
     Enum.reduce(missing, {state, false}, fn {id, attrs}, {state, started?} ->
       if Map.has_key?(state.children, id) do
@@ -740,6 +722,21 @@ defmodule Breeze.Server do
         {%{state | children: Map.put(state.children, id, child)}, true}
       end
     end)
+  end
+
+  defp start_async_dispatch(state, key) do
+    caller = self()
+    ref = make_ref()
+
+    Task.start(fn ->
+      reply = dispatch_input_hierarchy(state, key)
+      send(caller, {:event_reply, ref, reply})
+    end)
+
+    state
+    |> Map.put(:pending_ref, ref)
+    |> Map.put(:pending_started_at, System.monotonic_time(:millisecond))
+    |> schedule_animation()
   end
 
   defp start_child!(attrs, terminal) do

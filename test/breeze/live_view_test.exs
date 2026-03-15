@@ -3,7 +3,6 @@ defmodule Breeze.LiveViewTest do
 
   alias Breeze.ChildServer
   alias Breeze.Renderer
-  alias Breeze.Server
   alias Breeze.Template
 
   defmodule CounterChild do
@@ -252,6 +251,6 @@ defmodule Breeze.LiveViewTest do
     }
 
     assert {:noreply, %Breeze.Term{assigns: %{handled?: true}}} =
-             Server.dispatch_global_keybindings(event, term)
+             Breeze.GlobalKeybindings.dispatch(event, term)
   end
 end
