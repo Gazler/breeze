@@ -54,7 +54,7 @@ defmodule Breeze.LoggerTest do
         %{level: :info, line: "line-#{index}", style: "text-6"}
       end
 
-    {_, box} =
+    {acc, _box} =
       Renderer.render(
         Breeze.Logger,
         %{title: "Logs", min_level: :debug, width: 40, height: 6, lines: lines},
@@ -62,7 +62,7 @@ defmodule Breeze.LoggerTest do
         implicit_state: %{"logger" => {Breeze.Implicit.Scroll, %{offset_y: 3}}}
       )
 
-    assert logger_viewport(box).scroll == {3, 0}
+    assert logger_viewport(acc).scroll == {3, 0}
   end
 
   test "child views apply scroll implicit key events" do
@@ -74,14 +74,14 @@ defmodule Breeze.LoggerTest do
     {:ok, pid} = ChildServer.start(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
     {:ok, _acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
     :sys.replace_state(pid, fn term -> Breeze.View.assign(term, lines: lines) end)
-    {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
-    initial_scroll = logger_viewport(box).scroll
+    {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+    initial_scroll = logger_viewport(acc).scroll
 
     assert {:noreply, "logger", true} =
              ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "k"})
 
-    {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
-    assert logger_viewport(box).scroll == {elem(initial_scroll, 0) - 1, 0}
+    {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+    assert logger_viewport(acc).scroll == {elem(initial_scroll, 0) - 1, 0}
   end
 
   test "focused logger still receives non-scroll keys" do
@@ -113,15 +113,15 @@ defmodule Breeze.LoggerTest do
 
     {:ok, pid} = ChildServer.start(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
     :sys.replace_state(pid, fn term -> Breeze.View.assign(term, lines: lines) end)
-    {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
-    bottom_scroll = logger_viewport(box).scroll
+    {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+    bottom_scroll = logger_viewport(acc).scroll
 
     Logger.info("autofollow-#{System.unique_integer([:positive])}")
     Logger.flush()
 
     wait_until(fn ->
-      {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
-      logger_viewport(box).scroll == {elem(bottom_scroll, 0) + 1, 0}
+      {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+      logger_viewport(acc).scroll == {elem(bottom_scroll, 0) + 1, 0}
     end)
   end
 
@@ -133,8 +133,8 @@ defmodule Breeze.LoggerTest do
 
     {:ok, pid} = ChildServer.start(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
     :sys.replace_state(pid, fn term -> Breeze.View.assign(term, lines: lines) end)
-    {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
-    bottom_scroll = logger_viewport(box).scroll
+    {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+    bottom_scroll = logger_viewport(acc).scroll
 
     assert {:noreply, "logger", true} =
              ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "k"})
@@ -143,8 +143,8 @@ defmodule Breeze.LoggerTest do
     Logger.flush()
 
     wait_until(fn ->
-      {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
-      logger_viewport(box).scroll == {elem(bottom_scroll, 0) - 1, 0}
+      {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+      logger_viewport(acc).scroll == {elem(bottom_scroll, 0) - 1, 0}
     end)
   end
 
@@ -161,5 +161,5 @@ defmodule Breeze.LoggerTest do
 
   defp wait_until(_fun, 0), do: flunk("condition not met")
 
-  defp logger_viewport(box), do: List.last(box.children)
+  defp logger_viewport(acc), do: Map.fetch!(acc.boxes, "logger")
 end
