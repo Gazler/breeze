@@ -40,6 +40,7 @@ defmodule Breeze.MixProject do
     [
       {:termite, github: "Gazler/termite", override: true},
       {:back_breeze, github: "Gazler/back_breeze"},
+      {:telemetry, "~> 1.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end

@@ -41,6 +41,7 @@ defmodule Breeze.ChildServer do
 
     term = %Breeze.Term{
       view: view,
+      server: Keyword.get(opts, :server),
       terminal: terminal,
       global_keybindings: global_keybindings,
       assigns: %{__invalidate__: invalidate}
@@ -121,11 +122,21 @@ defmodule Breeze.ChildServer do
     term = %{term | focused: Keyword.get(opts, :focused, term.focused)}
     implicit_state = Keyword.get(opts, :implicit_state, %{}) |> Map.merge(term.implicit_state)
     opts = Keyword.put(opts, :implicit_state, implicit_state)
+    profile_scope = Keyword.get(opts, :profile_scope)
+    profile_label = profile_label(term, opts)
 
     {term, _acc, _box} =
       render_with_reconciled_implicits(term, opts, fn current_term, current_opts ->
-        {acc, box} = Breeze.Renderer.render(current_term.view, current_term.assigns, current_opts)
-        current_term = Breeze.RenderState.build(current_term, acc)
+        {acc, box} =
+          profile(profile_scope, profile_label, :child_render_us, fn ->
+            Breeze.Renderer.render(current_term.view, current_term.assigns, current_opts)
+          end)
+
+        current_term =
+          profile(profile_scope, profile_label, :render_state_us, fn ->
+            Breeze.RenderState.build(current_term, acc)
+          end)
+
         focus_meta = Breeze.Focus.build_meta(acc.elements, current_term.implicit_state)
 
         focus_memory =
@@ -174,12 +185,55 @@ defmodule Breeze.ChildServer do
       |> Keyword.put(:last_interaction_at, term.last_interaction_at)
       |> Keyword.put(:animation_now, System.monotonic_time(:millisecond))
 
-    {acc, box} = Breeze.Renderer.render(term.view, term.assigns, final_opts)
-    term = Breeze.RenderState.build(term, acc)
+    {acc, box} =
+      profile(profile_scope, profile_label, :child_render_us, fn ->
+        Breeze.Renderer.render(term.view, term.assigns, final_opts)
+      end)
 
-    term = %{term | focus_meta: Breeze.Focus.build_meta(acc.elements, term.implicit_state)}
+    term =
+      profile(profile_scope, profile_label, :render_state_us, fn ->
+        Breeze.RenderState.build(term, acc)
+      end)
 
-    decorations = extract_async_decorations(term)
+    focus_meta = Breeze.Focus.build_meta(acc.elements, term.implicit_state)
+
+    focus_memory =
+      Breeze.Focus.remember_focus(
+        term.focus_memory,
+        term.focused,
+        term.focus_meta
+      )
+
+    focused =
+      if explicit_focus? do
+        term.focused
+      else
+        trapped_scope = Breeze.Focus.trapped_scope?(acc.focusables, focus_meta)
+
+        if term.allow_unfocused? and is_nil(term.focused) and not trapped_scope do
+          nil
+        else
+          Breeze.Focus.normalize_focus(
+            term.focused,
+            acc.focusables,
+            focus_meta,
+            focus_memory
+          )
+        end
+      end
+
+    term = %{
+      term
+      | focus_meta: focus_meta,
+        focus_memory: focus_memory,
+        focused: focused,
+        allow_unfocused?: term.allow_unfocused? and is_nil(focused)
+    }
+
+    decorations =
+      profile(profile_scope, profile_label, :decorations_us, fn ->
+        extract_async_decorations(term)
+      end)
 
     {term, acc, box, decorations}
   end
@@ -451,4 +505,24 @@ defmodule Breeze.ChildServer do
   end
 
   defp focus_mouse_target?(_target, _mouse, _term), do: false
+
+  defp profile_label(term, opts) do
+    case Keyword.get(opts, :live_prefix) do
+      nil -> inspect(term.view)
+      prefix -> prefix <> " " <> inspect(term.view)
+    end
+  end
+
+  defp profile(nil, _label, _metric, fun), do: fun.()
+
+  defp profile(scope, label, metric, fun) do
+    :telemetry.span(
+      [:breeze, :render],
+      %{scope: scope, label: label, metric: metric},
+      fn ->
+        result = fun.()
+        {result, %{scope: scope, label: label, metric: metric}}
+      end
+    )
+  end
 end

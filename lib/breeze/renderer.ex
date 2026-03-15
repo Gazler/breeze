@@ -10,14 +10,30 @@ defmodule Breeze.Renderer do
   end
 
   def render(mod, assigns, opts \\ []) do
-    [{_tag, _, root_children}] =
-      mod.render(assigns)
-      |> Breeze.Template.render_to_tree(assigns)
+    profile_scope = Keyword.get(opts, :profile_scope)
+    profile_label = Keyword.get(opts, :profile_label, inspect(mod))
 
-    {acc, box} = build_from_tree_nodes(root_children, opts)
+    rendered =
+      profile(profile_scope, profile_label, :view_render_us, fn ->
+        mod.render(assigns)
+      end)
+
+    [{_tag, _, root_children}] =
+      profile(profile_scope, profile_label, :template_tree_us, fn ->
+        Breeze.Template.render_to_tree(rendered, assigns)
+      end)
+
+    {acc, box} =
+      profile(profile_scope, profile_label, :build_tree_us, fn ->
+        build_from_tree_nodes(root_children, opts)
+      end)
 
     %{box: box, dimensions: dimensions} =
-      BackBreeze.Box.render_with_dimensions(box, opts)
+      profile(profile_scope, profile_label, :layout_us, fn ->
+        BackBreeze.Box.render_with_dimensions(box, opts)
+      end)
+
+    emit_metric(profile_scope, profile_label, :element_count, map_size(acc.elements))
 
     {Map.put(acc, :dimensions, dimensions), box}
   end
@@ -490,4 +506,27 @@ defmodule Breeze.Renderer do
     do: {Style.border_color(style, String.to_integer(num)), attrs}
 
   defp apply_style(_, acc), do: acc
+
+  defp profile(nil, _label, _metric, fun), do: fun.()
+
+  defp profile(scope, label, metric, fun) do
+    :telemetry.span(
+      [:breeze, :render],
+      %{scope: scope, label: label, metric: metric},
+      fn ->
+        result = fun.()
+        {result, %{scope: scope, label: label, metric: metric}}
+      end
+    )
+  end
+
+  defp emit_metric(nil, _label, _metric, _value), do: :ok
+
+  defp emit_metric(scope, label, metric, value) do
+    :telemetry.execute(
+      [:breeze, :render, :metric],
+      %{value: value},
+      %{scope: scope, label: label, metric: metric}
+    )
+  end
 end
