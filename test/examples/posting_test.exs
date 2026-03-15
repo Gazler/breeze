@@ -1,9 +1,14 @@
 defmodule PostingTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   setup_all do
-    System.put_env("BREEZE_EXAMPLE_NO_START", "1")
+    Application.put_env(:breeze, :example_mode, :load_only)
     Code.require_file("examples/posting.exs")
+
+    on_exit(fn ->
+      Application.delete_env(:breeze, :example_mode)
+    end)
+
     :ok
   end
 

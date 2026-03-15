@@ -270,9 +270,8 @@ defmodule Posting do
   def handle_info(_, term), do: {:noreply, term}
 end
 
-unless System.get_env("BREEZE_EXAMPLE_NO_START") == "1" do
-  Breeze.Server.start_link(view: Posting, hide_cursor: true)
-
-  receive do
-  end
-end
+Breeze.Example.run(
+  view: Posting,
+  hide_cursor: true,
+  global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+)

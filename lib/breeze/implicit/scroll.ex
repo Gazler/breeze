@@ -61,6 +61,30 @@ defmodule Breeze.Implicit.Scroll do
     {:noreply, put_offset(state, offset_y, viewport)}
   end
 
+  def handle_event(_, %{"mouse" => %{button: :wheel_down} = mouse, "element" => element}, state) do
+    viewport = Viewport.from_dimensions(element)
+
+    offset_y =
+      Viewport.clamp_scroll_y(
+        state.offset_y + wheel_step(viewport) * wheel_repeat(mouse),
+        viewport
+      )
+
+    {:noreply, put_offset(state, offset_y, viewport)}
+  end
+
+  def handle_event(_, %{"mouse" => %{button: :wheel_up} = mouse, "element" => element}, state) do
+    viewport = Viewport.from_dimensions(element)
+
+    offset_y =
+      Viewport.clamp_scroll_y(
+        state.offset_y - wheel_step(viewport) * wheel_repeat(mouse),
+        viewport
+      )
+
+    {:noreply, put_offset(state, offset_y, viewport)}
+  end
+
   def handle_event(_, _, state), do: {:noreply, state}
 
   def handle_modifiers(:root, _flags, state), do: [scroll_y: state.offset_y]
@@ -80,6 +104,13 @@ defmodule Breeze.Implicit.Scroll do
   end
 
   def reconcile(viewport, state), do: reconcile(Viewport.from_dimensions(viewport), state)
+
+  defp wheel_step(%Viewport{viewport_height: height}) do
+    max(div(height, 2), 1)
+  end
+
+  defp wheel_repeat(%{repeat: repeat}) when is_integer(repeat) and repeat > 0, do: repeat
+  defp wheel_repeat(_mouse), do: 1
 
   defp put_offset(state, offset_y, viewport) do
     max_offset = Viewport.max_scroll_y(viewport)

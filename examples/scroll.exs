@@ -48,6 +48,7 @@ end
 Breeze.Example.run(
   [
     view: Scroll,
+    mouse: true,
     global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
   ],
   keep_alive: 100_000

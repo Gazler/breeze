@@ -49,6 +49,35 @@ defmodule Breeze.Implicit.ScrollTest do
       assert next_state.offset_y == 8
       assert next_state.pinned_bottom == true
     end
+
+    test "wheel scroll moves the viewport" do
+      viewport = %{viewport_height: 4, content_height: 12, height: 4}
+      state = %{offset_y: 3, autoscroll: nil, pinned_bottom: false}
+
+      assert {:noreply, next_state} =
+               Scroll.handle_event(
+                 :ignore_me,
+                 %{"mouse" => %{button: :wheel_down}, "element" => viewport},
+                 state
+               )
+
+      assert next_state.offset_y == 5
+      assert next_state.pinned_bottom == false
+    end
+
+    test "wheel scroll respects coalesced repeat counts" do
+      viewport = %{viewport_height: 4, content_height: 20, height: 4}
+      state = %{offset_y: 3, autoscroll: nil, pinned_bottom: false}
+
+      assert {:noreply, next_state} =
+               Scroll.handle_event(
+                 :ignore_me,
+                 %{"mouse" => %{button: :wheel_down, repeat: 3}, "element" => viewport},
+                 state
+               )
+
+      assert next_state.offset_y == 9
+    end
   end
 
   describe "reconcile/2" do

@@ -20,11 +20,14 @@ defmodule Breeze.RenderState do
         if change, do: Map.put(events, id, %{change: change}), else: events
       end)
 
-    elements = build_dimensions(acc)
+    raw_dimensions = build_dimensions(acc)
+    elements = Map.new(raw_dimensions, fn {id, dims} -> {id, Viewport.from_dimensions(dims)} end)
+    mouse_targets = build_mouse_targets(raw_dimensions)
 
     %{
       term
       | elements: elements,
+        mouse_targets: mouse_targets,
         focusables: acc.focusables,
         implicit_state: implicits,
         implicit_meta: implicit_meta,
@@ -38,8 +41,24 @@ defmodule Breeze.RenderState do
     |> Enum.reduce(%{}, fn {{_idx, flags}, dims}, elements ->
       case Keyword.get(flags, :id) do
         nil -> elements
-        id -> Map.put(elements, id, Viewport.from_dimensions(dims))
+        id -> Map.put(elements, id, dims)
       end
+    end)
+  end
+
+  defp build_mouse_targets(raw_dimensions) do
+    Map.new(raw_dimensions, fn {id, dims} ->
+      width = Map.get(dims, :width) || Map.get(dims, :viewport_width) || 0
+      height = Map.get(dims, :height) || Map.get(dims, :viewport_height) || 0
+      left = Map.get(dims, :left, 0)
+      top = Map.get(dims, :top, 0)
+
+      {id,
+       dims
+       |> Map.put(:left, left)
+       |> Map.put(:top, top)
+       |> Map.put(:right, left + max(width - 1, 0))
+       |> Map.put(:bottom, top + max(height - 1, 0))}
     end)
   end
 
