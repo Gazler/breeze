@@ -93,7 +93,9 @@ defmodule Breeze.Implicit.Scroll do
 
   def handle_event(_, _, state), do: {:noreply, state}
 
-  def handle_modifiers(:root, flags, state), do: [scroll_y: effective_offset_y(state, Keyword.get(flags, :layout_element))]
+  def handle_modifiers(:root, flags, state),
+    do: [scroll_y: effective_offset_y(state, Keyword.get(flags, :layout_element))]
+
   def handle_modifiers(:child, _flags, _state), do: []
 
   defp wheel_step(%Viewport{viewport_height: height}) do

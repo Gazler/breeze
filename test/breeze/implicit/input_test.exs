@@ -351,7 +351,10 @@ defmodule Breeze.Implicit.InputTest do
   end
 
   test "animate can derive viewport width from layout metadata without storing it in state" do
-    box = %Box{content: " hello world", style: %BackBreeze.Style{border: BackBreeze.Border.line()}}
+    box = %Box{
+      content: " hello world",
+      style: %BackBreeze.Style{border: BackBreeze.Border.line()}
+    }
 
     assert {:ok, %Box{content: "world "}, overlays: [%{x: 12, y: 5, char: " ", visible?: true}]} =
              Input.animate(

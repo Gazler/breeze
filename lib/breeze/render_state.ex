@@ -9,7 +9,8 @@ defmodule Breeze.RenderState do
 
     {implicit_build_state, events} =
       Enum.reduce(sorted_elements, {initial_implicit_build_state(), %{}}, fn {_idx, elem} = item,
-                                                                             {implicit_state, events} ->
+                                                                             {implicit_state,
+                                                                              events} ->
         next_implicit_state =
           reduce_implicit_item(item, implicit_state, term, total)
 

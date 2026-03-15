@@ -62,8 +62,8 @@ defmodule Breeze.ChildServer do
   end
 
   def handle_call({:render, opts}, _from, term) do
-    {term, acc, box, decorations} = render_term(term, opts)
-    {:reply, {:ok, acc, render_current_frame_box(term, box, decorations, opts)}, term}
+    {term, acc, box, _decorations} = render_term(term, opts)
+    {:reply, {:ok, acc, box}, term}
   end
 
   def handle_call({:render_snapshot, opts}, _from, term) do
@@ -121,6 +121,7 @@ defmodule Breeze.ChildServer do
     term = maybe_put_terminal(term, Keyword.get(opts, :terminal))
     term = %{term | focused: Keyword.get(opts, :focused, term.focused)}
     implicit_state = Keyword.get(opts, :implicit_state, %{}) |> Map.merge(term.implicit_state)
+
     opts =
       opts
       |> Keyword.put(:implicit_state, implicit_state)
@@ -139,7 +140,9 @@ defmodule Breeze.ChildServer do
       |> Keyword.put(:animation_now, System.monotonic_time(:millisecond))
 
     initial_implicit_meta = term.implicit_meta
-    {term, acc, box} = render_pass(term, final_opts, profile_scope, profile_label, explicit_focus?)
+
+    {term, acc, box} =
+      render_pass(term, final_opts, profile_scope, profile_label, explicit_focus?)
 
     {term, acc, box} =
       if term.implicit_state != implicit_state or term.implicit_meta != initial_implicit_meta do
@@ -210,23 +213,6 @@ defmodule Breeze.ChildServer do
     }
 
     {term, acc, box}
-  end
-
-  defp render_current_frame_box(_term, box, [], _opts), do: box
-
-  defp render_current_frame_box(term, _box, _decorations, opts) do
-    render_opts =
-      opts
-      |> Keyword.put(:focused, term.focused)
-      |> Keyword.put(:implicit_state, term.implicit_state)
-      |> Keyword.put(:implicit_meta, term.implicit_meta)
-      |> Keyword.put(:last_render_at, term.last_render_at)
-      |> Keyword.put(:last_interaction_at, term.last_interaction_at)
-      |> Keyword.put(:animation_now, System.monotonic_time(:millisecond))
-      |> Keyword.put(:previous_elements, term.elements)
-
-    {_acc, box} = Breeze.Renderer.render(term.view, term.assigns, render_opts)
-    box
   end
 
   defp normalize_result({:noreply, next_term}, _term), do: {:noreply, next_term}

@@ -27,6 +27,8 @@ defmodule Breeze.Debug do
 
   def render(assigns) do
     stats = assigns.stats || %{}
+    hot_width = max(assigns.width - 5, 1)
+    profile_width = max(assigns.width - 4, 1)
 
     assigns =
       assign(assigns,
@@ -45,12 +47,12 @@ defmodule Breeze.Debug do
         focus_label: stats[:focused] || "-",
         pending_label: to_string(stats[:pending?] || false),
         screen_label: fmt_screen(stats[:screen]),
-        hottest_child_label: fmt_hottest_child(stats[:last_live_children] || []),
-        profile_1: fmt_profile(Enum.at(stats[:last_render_profile] || [], 0)),
-        profile_2: fmt_profile(Enum.at(stats[:last_render_profile] || [], 1)),
-        profile_3: fmt_profile(Enum.at(stats[:last_render_profile] || [], 2)),
-        profile_4: fmt_profile(Enum.at(stats[:last_render_profile] || [], 3)),
-        profile_5: fmt_profile(Enum.at(stats[:last_render_profile] || [], 4))
+        hottest_child_label: fmt_hottest_child(stats[:last_live_children] || [], hot_width),
+        profile_1: fmt_profile(Enum.at(stats[:last_render_profile] || [], 0), profile_width),
+        profile_2: fmt_profile(Enum.at(stats[:last_render_profile] || [], 1), profile_width),
+        profile_3: fmt_profile(Enum.at(stats[:last_render_profile] || [], 2), profile_width),
+        profile_4: fmt_profile(Enum.at(stats[:last_render_profile] || [], 3), profile_width),
+        profile_5: fmt_profile(Enum.at(stats[:last_render_profile] || [], 4), profile_width)
       )
 
     ~H"""
@@ -92,17 +94,17 @@ defmodule Breeze.Debug do
   defp fmt_screen(%{width: width, height: height}), do: "#{width}x#{height}"
   defp fmt_screen(_screen), do: "-"
 
-  defp fmt_hottest_child([%{id: id, view: view, us: us} | _]) do
-    "#{id} #{view} #{fmt_us(us)}"
+  defp fmt_hottest_child([%{id: id, view: view, us: us} | _], width) do
+    fit_text("#{id} #{view} #{fmt_us(us)}", width)
   end
 
-  defp fmt_hottest_child(_children), do: "-"
+  defp fmt_hottest_child(_children, _width), do: "-"
 
-  defp fmt_profile(%{label: label, metric: metric, value: value}) do
-    "#{label} #{metric_name(metric)} #{fmt_us(value)}"
+  defp fmt_profile(%{label: label, metric: metric, value: value}, width) do
+    fit_text("#{label} #{metric_name(metric)} #{fmt_us(value)}", width)
   end
 
-  defp fmt_profile(_entry), do: "-"
+  defp fmt_profile(_entry, _width), do: "-"
 
   defp root_style(assigns) do
     base = "border-rounded bg-0 width-#{assigns.width} height-#{assigns.height}"
@@ -129,4 +131,14 @@ defmodule Breeze.Debug do
   defp metric_name(:render_state_us), do: "state"
   defp metric_name(:decorations_us), do: "decor"
   defp metric_name(metric), do: to_string(metric)
+
+  defp fit_text(text, width) when is_binary(text) and is_integer(width) and width > 3 do
+    if String.length(text) > width do
+      String.slice(text, 0, width - 3) <> "..."
+    else
+      text
+    end
+  end
+
+  defp fit_text(text, _width), do: text
 end

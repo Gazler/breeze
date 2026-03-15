@@ -197,7 +197,13 @@ defmodule Breeze.Renderer do
     box =
       if implicit && function_exported?(implicit_mod, :animate, 5) do
         implicit_mod
-        |> apply(:animate, [type, box, flags, implicit, animation_ctx(opts, id, focused, previous_layout)])
+        |> apply(:animate, [
+          type,
+          box,
+          flags,
+          implicit,
+          animation_ctx(opts, id, focused, previous_layout)
+        ])
         |> normalize_animation_result()
         |> elem(0)
       else
@@ -206,7 +212,11 @@ defmodule Breeze.Renderer do
 
     {style_flags, style_modifiers, scroll_modifier} =
       if implicit do
-        flags = if previous_layout, do: Keyword.put(flags, :layout_element, previous_layout), else: flags
+        flags =
+          if previous_layout,
+            do: Keyword.put(flags, :layout_element, previous_layout),
+            else: flags
+
         modifiers = implicit_mod.handle_modifiers(type, flags, implicit)
         parse_modifiers(modifiers, style_flags)
       else

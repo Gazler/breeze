@@ -44,6 +44,7 @@ defmodule Breeze.Server do
     :view_pid,
     :focused,
     :base_output,
+    :last_frame_payload,
     :pending_ref,
     :pending_started_at,
     :last_render_at,
@@ -491,6 +492,7 @@ defmodule Breeze.Server do
       decorations: child_decorations,
       child_timings: child_timings
     } = finish_render_tracking(tracking_ref)
+
     profile_entries = Breeze.DebugProfiler.snapshot(profile_scope)
     {state, started?} = ensure_children(state, missing)
 
@@ -588,21 +590,30 @@ defmodule Breeze.Server do
     {output, decorations} = apply_decorations(state.base_output, state.decorations, state)
     output = strip_private_use_chars(output)
     overlays = terminal_overlays(decorations, state)
+    overlay_output = Breeze.TerminalOverlay.render_overlays(overlays)
 
     screen_height = state.terminal.size.height
     output_lines = length(String.split(output, "\n"))
     trailing = String.duplicate("\n\e[K", max(screen_height - output_lines, 0))
     output = "\e[K" <> String.replace(output, "\n", "\n\e[K") <> trailing
+    frame_payload = "\e[H" <> output <> overlay_output
     composed_at = System.monotonic_time(:microsecond)
-    terminal = Termite.Terminal.write(state.terminal, "\e[H" <> output)
-    terminal = Breeze.TerminalOverlay.write_overlays(terminal, overlays)
-    written_at = System.monotonic_time(:microsecond)
+
+    {terminal, write_duration} =
+      if frame_payload == state.last_frame_payload do
+        {state.terminal, 0}
+      else
+        terminal = Termite.Terminal.write(state.terminal, frame_payload)
+        written_at = System.monotonic_time(:microsecond)
+        {terminal, written_at - composed_at}
+      end
 
     state
     |> Map.put(:terminal, terminal)
     |> Map.put(:decorations, decorations)
+    |> Map.put(:last_frame_payload, frame_payload)
     |> put_debug_stat(:last_frame_compose_us, composed_at - started_at)
-    |> put_debug_stat(:last_terminal_write_us, written_at - composed_at)
+    |> put_debug_stat(:last_terminal_write_us, write_duration)
     |> put_debug_stat(:last_frame_us, System.monotonic_time(:microsecond) - started_at)
     |> put_debug_stat(:last_frame_bytes, byte_size(output))
     |> put_debug_stat(:overlay_count, length(overlays))
@@ -623,7 +634,9 @@ defmodule Breeze.Server do
       {_animated_box, current_content, current_overlays} = render_decoration(decoration, state)
 
       {
-        String.replace(acc, rendered_fragment(decoration.box, state), current_content, global: false),
+        String.replace(acc, rendered_fragment(decoration.box, state), current_content,
+          global: false
+        ),
         [
           decoration
           |> Map.put(:current_content, current_content)
@@ -976,6 +989,7 @@ defmodule Breeze.Server do
     send(self(), @flush_input_batch)
     %{state | input_flush_scheduled?: true}
   end
+
   defp sum_timing_us(child_timings) do
     Enum.reduce(child_timings, 0, fn %{us: us}, acc -> acc + us end)
   end

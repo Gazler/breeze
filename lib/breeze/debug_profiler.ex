@@ -53,6 +53,7 @@ defmodule Breeze.DebugProfiler do
         :ok
     end
   end
+
   defp ensure_table do
     case :ets.whereis(@table) do
       :undefined ->
@@ -89,6 +90,7 @@ defmodule Breeze.DebugProfiler do
     :ets.insert(@table, {{scope, label, metric}, value})
     :ok
   end
+
   defp sort_value(value) when is_integer(value), do: value
   defp sort_value(_value), do: -1
 end
