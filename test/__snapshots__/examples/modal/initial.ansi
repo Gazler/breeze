@@ -1,24 +1,17 @@
-[1mModal example[0m                                                                   
+[1mModal example[0m
 Press Enter or m to open the modal.                                             
 Tab should stay inside the modal until it closes.                               
 Escape closes the modal. q quits the example.                                   
-                                                                                
-[38;5;4m╭──────────────────────────╮[0m                                                    
-[38;5;4m│[0m[1mOpen modal[0m                [38;5;4m│[0m                                                    
-[38;5;4m│[0m                          [38;5;4m│[0m                                                    
-[38;5;4m│[0m                          [38;5;4m│[0m                                                    
-[38;5;4m╰──────────────────────────╯[0m                                                    
-                                                                                
-╭──────────────────────────╮                                                    
-│[1mBackground panel[0m          │                                                    
-│Last action: none         │                                                    
-│                          │                                                    
-│                          │                                                    
-╰──────────────────────────╯                                                    
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
+
+[38;5;4m╭──────────────────────────╮[0m
+[38;5;4m│[0m[1mOpen modal[0m                [38;5;4m│[0m
+[38;5;4m│[0m                          [38;5;4m│[0m
+[38;5;4m│[0m                          [38;5;4m│[0m
+[38;5;4m╰──────────────────────────╯[0m
+
+╭──────────────────────────╮
+│[1mBackground panel[0m          │
+│Last action: none         │
+│                          │
+│                          │
+╰──────────────────────────╯

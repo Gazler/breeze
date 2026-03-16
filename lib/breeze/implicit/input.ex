@@ -239,6 +239,8 @@ defmodule Breeze.Implicit.Input do
       key not in ["\n", "\r", "\t", "\v", "\f"]
   end
 
+  defp insertable_key?(_key), do: false
+
   defp border_left_offset(%{style: %{border: border}}), do: if(border.left, do: 1, else: 0)
   defp border_top_offset(%{style: %{border: border}}), do: if(border.top, do: 1, else: 0)
 end
