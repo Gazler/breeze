@@ -100,6 +100,17 @@ defmodule Breeze.ExampleSnapshotTest do
     )
   end
 
+  test "modal example snapshots opening the inset modal" do
+    session = Breeze.Test.start!(ModalExample, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "3")
+
+    assert_snapshot(Breeze.Test.render!(session), "examples/modal/inset-open.ansi",
+      snapshot_dir: "../__snapshots__"
+    )
+  end
+
   test "tabs example snapshots horizontal selection changes" do
     session = Breeze.Test.start!(TabsExample, size: {34, 14})
     on_exit(fn -> Breeze.Test.stop(session) end)

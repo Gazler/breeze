@@ -85,6 +85,89 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule CenteredFixedPositionExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box style="fixed center">OK</box>
+      </box>
+      """
+    end
+  end
+
+  defmodule InsetFixedPositionExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box style="fixed inset-1">OK</box>
+      </box>
+      """
+    end
+  end
+
+  defmodule FullscreenInsetFixedPositionExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box style="fixed inset-1 width-screen height-screen border">
+        </box>
+      </box>
+      """
+    end
+  end
+
+  defmodule CenterXFixedPositionExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box style="fixed center-x top-0">OK</box>
+      </box>
+      """
+    end
+  end
+
+  defmodule CenterYFixedPositionExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box style="fixed left-0 center-y">OK</box>
+      </box>
+      """
+    end
+  end
+
+  defmodule TextAlignmentExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box style="border width-7 text-center">Hey</box>
+      """
+    end
+  end
+
+  defmodule PaddingBottomExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box style="padding-bottom-1">
+        <box>Top</box>
+      </box>
+      """
+    end
+  end
+
   defmodule ParentImplicit do
     def init(_children, last_state), do: %{offset_x: last_state[:offset_x] || 0}
     def handle_event(_, _, state), do: {:noreply, state}
@@ -165,6 +248,104 @@ defmodule Breeze.RendererTest do
                     
                     
                    X\
+               """
+    end
+
+    test "supports centered fixed positioning" do
+      {_, box} =
+        Renderer.render(CenteredFixedPositionExample, %{},
+          terminal: %Termite.Terminal{size: %{width: 10, height: 4}}
+        )
+
+      assert box.content ==
+               """
+                         
+                   OK    
+                         
+                         \
+               """
+    end
+
+    test "supports inset positioning for fixed boxes" do
+      {_, box} =
+        Renderer.render(InsetFixedPositionExample, %{},
+          terminal: %Termite.Terminal{size: %{width: 6, height: 4}}
+        )
+
+      assert box.content ==
+               """
+                     
+                OK   
+                     
+                     \
+               """
+    end
+
+    test "supports inset-constrained fixed screen boxes" do
+      {_, box} =
+        Renderer.render(FullscreenInsetFixedPositionExample, %{},
+          terminal: %Termite.Terminal{size: %{width: 10, height: 6}}
+        )
+
+      assert box.content ==
+               """
+                         
+                ┌──────┐ 
+                │      │ 
+                │      │ 
+                └──────┘ 
+                         \
+               """
+    end
+
+    test "supports centered fixed positioning on the x axis only" do
+      {_, box} =
+        Renderer.render(CenterXFixedPositionExample, %{},
+          terminal: %Termite.Terminal{size: %{width: 10, height: 4}}
+        )
+
+      assert box.content ==
+               """
+                   OK    
+                         
+                         
+                         \
+               """
+    end
+
+    test "supports centered fixed positioning on the y axis only" do
+      {_, box} =
+        Renderer.render(CenterYFixedPositionExample, %{},
+          terminal: %Termite.Terminal{size: %{width: 10, height: 4}}
+        )
+
+      assert box.content ==
+               """
+                         
+               OK        
+                         
+                         \
+               """
+    end
+
+    test "supports centered text alignment classes" do
+      {_, box} = Renderer.render(TextAlignmentExample, %{})
+
+      assert box.content ==
+               """
+               ┌───────┐
+               │  Hey  │
+               └───────┘\
+               """
+    end
+
+    test "supports bottom padding classes" do
+      {_, box} = Renderer.render(PaddingBottomExample, %{})
+
+      assert box.content ==
+               """
+               Top
+                  \
                """
     end
   end

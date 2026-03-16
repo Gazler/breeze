@@ -486,6 +486,39 @@ defmodule Breeze.Renderer do
   defp apply_style("absolute", {style, attrs}), do: {style, Map.put(attrs, :position, :absolute)}
   defp apply_style("fixed", {style, attrs}), do: {style, Map.put(attrs, :position, :fixed)}
 
+  defp apply_style("center", {style, attrs}) do
+    {style, attrs |> Map.put(:left, :center) |> Map.put(:top, :center)}
+  end
+
+  defp apply_style("center-x", {style, attrs}) do
+    {style, Map.put(attrs, :left, :center)}
+  end
+
+  defp apply_style("center-y", {style, attrs}) do
+    {style, Map.put(attrs, :top, :center)}
+  end
+
+  defp apply_style("inset-x-" <> num, {style, attrs}) do
+    inset = String.to_integer(num)
+    {style, attrs |> Map.put(:left, inset) |> Map.put(:right, inset)}
+  end
+
+  defp apply_style("inset-y-" <> num, {style, attrs}) do
+    inset = String.to_integer(num)
+    {style, attrs |> Map.put(:top, inset) |> Map.put(:bottom, inset)}
+  end
+
+  defp apply_style("inset-" <> num, {style, attrs}) do
+    inset = String.to_integer(num)
+
+    {style,
+     attrs
+     |> Map.put(:left, inset)
+     |> Map.put(:right, inset)
+     |> Map.put(:top, inset)
+     |> Map.put(:bottom, inset)}
+  end
+
   defp apply_style("left-" <> num, {style, attrs}),
     do: {style, Map.put(attrs, :left, String.to_integer(num))}
 
@@ -511,6 +544,25 @@ defmodule Breeze.Renderer do
 
   defp apply_style("height-" <> num, {style, attrs}),
     do: {Style.height(style, String.to_integer(num)), attrs}
+
+  defp apply_style("padding-top-" <> num, {style, attrs}),
+    do: {Style.padding_top(style, String.to_integer(num)), attrs}
+
+  defp apply_style("padding-right-" <> num, {style, attrs}),
+    do: {Style.padding_right(style, String.to_integer(num)), attrs}
+
+  defp apply_style("padding-bottom-" <> num, {style, attrs}),
+    do: {Style.padding_bottom(style, String.to_integer(num)), attrs}
+
+  defp apply_style("padding-left-" <> num, {style, attrs}),
+    do: {Style.padding_left(style, String.to_integer(num)), attrs}
+
+  defp apply_style("padding-" <> num, {style, attrs}),
+    do: {Style.padding(style, String.to_integer(num)), attrs}
+
+  defp apply_style("text-left", {style, attrs}), do: {Style.text_align(style, :left), attrs}
+  defp apply_style("text-center", {style, attrs}), do: {Style.text_align(style, :center), attrs}
+  defp apply_style("text-right", {style, attrs}), do: {Style.text_align(style, :right), attrs}
 
   defp apply_style("text-" <> num, {style, attrs}),
     do: {Style.foreground_color(style, String.to_integer(num)), attrs}

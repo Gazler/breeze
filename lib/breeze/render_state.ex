@@ -56,24 +56,41 @@ defmodule Breeze.RenderState do
 
   defp build_layout_maps(raw_dimensions) do
     Enum.reduce(raw_dimensions, {%{}, %{}}, fn {id, dims}, {elements, mouse_targets} ->
-      width = Map.get(dims, :width) || Map.get(dims, :viewport_width) || 0
-      height = Map.get(dims, :height) || Map.get(dims, :viewport_height) || 0
+      width = resolved_dimension(dims, :width, :viewport_width)
+      height = resolved_dimension(dims, :height, :viewport_height)
       left = Map.get(dims, :left, 0)
       top = Map.get(dims, :top, 0)
 
-      target =
+      normalized_dims =
         dims
+        |> Map.put(:width, width)
+        |> Map.put(:height, height)
+        |> Map.put(:viewport_width, integer_dimension(Map.get(dims, :viewport_width), width))
+        |> Map.put(:viewport_height, integer_dimension(Map.get(dims, :viewport_height), height))
+
+      target =
+        normalized_dims
         |> Map.put(:left, left)
         |> Map.put(:top, top)
         |> Map.put(:right, left + max(width - 1, 0))
         |> Map.put(:bottom, top + max(height - 1, 0))
 
       {
-        Map.put(elements, id, Viewport.from_dimensions(dims)),
+        Map.put(elements, id, Viewport.from_dimensions(normalized_dims)),
         Map.put(mouse_targets, id, target)
       }
     end)
   end
+
+  defp resolved_dimension(dims, primary_key, fallback_key) do
+    dims
+    |> Map.get(primary_key)
+    |> integer_dimension(Map.get(dims, fallback_key, 0))
+  end
+
+  defp integer_dimension(value, _fallback) when is_integer(value), do: value
+  defp integer_dimension(_value, fallback) when is_integer(fallback), do: fallback
+  defp integer_dimension(_value, _fallback), do: 0
 
   def dispatch_implicit_event(term, id, payload, route_change_fun, visited \\ MapSet.new()) do
     do_dispatch_implicit_event(term, id, payload, route_change_fun, visited)

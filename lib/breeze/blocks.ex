@@ -298,23 +298,68 @@ defmodule Breeze.Blocks do
   end
 
   attr :id, :string, required: true
-  attr :width, :integer, required: true
-  attr :height, :integer, required: true
+  attr :width, :integer, default: nil
+  attr :height, :integer, default: nil
+  attr :inset, :integer, default: nil
+  attr :inset_x, :integer, default: nil
+  attr :inset_y, :integer, default: nil
   attr :style, :string, default: nil
+  attr :frame_style, :string, default: nil
   attr :rest, :global
 
   slot :title
   slot :inner_block
 
   def modal(assigns) do
+    {frame_style, panel_style} =
+      case {assigns[:width], assigns[:height], assigns[:inset], assigns[:inset_x],
+            assigns[:inset_y]} do
+        {width, height, nil, nil, nil} when is_integer(width) and is_integer(height) ->
+          {
+            merge_style(
+              "fixed center width-#{width + 2} height-#{height + 2} bg-0 layer-50",
+              assigns[:frame_style]
+            ),
+            merge_style(
+              "absolute left-0 top-0 layer-51 width-#{width} height-#{height} border-rounded border-7 bg-0",
+              assigns[:style]
+            )
+          }
+
+        {nil, nil, inset, nil, nil} when is_integer(inset) ->
+          {
+            merge_style(
+              "fixed inset-#{inset} width-screen height-screen bg-0 layer-50",
+              assigns[:frame_style]
+            ),
+            merge_style(
+              "absolute left-0 right-0 top-0 bottom-0 layer-51 width-full height-full border-rounded border-7 bg-0",
+              assigns[:style]
+            )
+          }
+
+        {nil, nil, nil, inset_x, inset_y}
+        when is_integer(inset_x) and is_integer(inset_y) ->
+          {
+            merge_style(
+              "fixed inset-x-#{inset_x} inset-y-#{inset_y} width-screen height-screen bg-0 layer-50",
+              assigns[:frame_style]
+            ),
+            merge_style(
+              "absolute left-0 right-0 top-0 bottom-0 layer-51 width-full height-full border-rounded border-7 bg-0",
+              assigns[:style]
+            )
+          }
+
+        _ ->
+          raise ArgumentError,
+                "modal requires either width/height, inset, or inset_x/inset_y"
+      end
+
     assigns =
       assigns
-      |> assign(
-        frame_width: assigns.width + 2,
-        frame_height: assigns.height + 2,
-        style: merge_style("bg-0", assigns[:style]),
-        fill_content: blank_rect(assigns.width + 2, assigns.height + 2)
-      )
+      |> assign(frame_style: frame_style)
+      |> assign(panel_style: panel_style)
 
     ~H"""
     <box
@@ -322,16 +367,13 @@ defmodule Breeze.Blocks do
       focusable
       focus-scope="trap"
       implicit={Breeze.Implicit.Modal}
-      width={@width}
-      height={@height}
-      style={"width-#{@frame_width} height-#{@frame_height} bg-0 layer-50"}
+      style={@frame_style}
       {@rest}
     >
-      {@fill_content}
-      <.panel width={@width} height={@height} style={"absolute left-0 top-0 layer-51 #{@style}"}>
-        <:title :if={assigns[:title]}>{render_slot(@title)}</:title>
+      <box style={@panel_style}>
+        <box :if={assigns[:title]} style="absolute left-2 top-0 bold bg-0">{render_slot(@title)}</box>
         {render_slot(@inner_block)}
-      </.panel>
+      </box>
     </box>
     """
   end
@@ -379,13 +421,5 @@ defmodule Breeze.Blocks do
       [_only] -> token
       parts -> parts |> Enum.drop(-1) |> Enum.join("-")
     end
-  end
-
-  defp blank_rect(width, height) do
-    row = String.duplicate(" ", max(width, 0))
-
-    1..max(height, 0)
-    |> Enum.map(fn _ -> row end)
-    |> Enum.join("\n")
   end
 end
