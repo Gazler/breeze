@@ -80,34 +80,26 @@ defmodule Breeze.Implicit.ScrollTest do
     end
   end
 
-  describe "reconcile/2" do
+  describe "handle_modifiers/3" do
     test "autoscrolls to bottom when pinned" do
       viewport = Viewport.from_dimensions(%{viewport_height: 5, content_height: 14, height: 5})
       state = %{offset_y: 4, autoscroll: "bottom", pinned_bottom: true}
 
-      next_state = Scroll.reconcile(viewport, state)
-
-      assert next_state.offset_y == 9
-      assert next_state.pinned_bottom == true
+      assert [scroll_y: 9] = Scroll.handle_modifiers(:root, [layout_element: viewport], state)
     end
 
     test "does not autoscroll when user has scrolled away" do
       viewport = Viewport.from_dimensions(%{viewport_height: 5, content_height: 14, height: 5})
       state = %{offset_y: 3, autoscroll: "bottom", pinned_bottom: false}
 
-      next_state = Scroll.reconcile(viewport, state)
-
-      assert next_state.offset_y == 3
-      assert next_state.pinned_bottom == false
+      assert [scroll_y: 3] = Scroll.handle_modifiers(:root, [layout_element: viewport], state)
     end
 
     test "clamps offset even without autoscroll" do
       viewport = Viewport.from_dimensions(%{viewport_height: 5, content_height: 9, height: 5})
       state = %{offset_y: 20}
 
-      next_state = Scroll.reconcile(viewport, state)
-
-      assert next_state.offset_y == 4
+      assert [scroll_y: 4] = Scroll.handle_modifiers(:root, [layout_element: viewport], state)
     end
   end
 end

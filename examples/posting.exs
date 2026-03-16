@@ -44,6 +44,7 @@ defmodule Posting do
         url_width: screen_width - 18,
         request_tab: "headers",
         response_tab: "body",
+        show_debug: System.get_env("BREEZE_DEBUG") == "1",
         show_help: false
       )
 
@@ -173,6 +174,8 @@ defmodule Posting do
           <box> Next  </box>
           <box style="bg-7 text-0 bold"> F1 </box>
           <box> Help  </box>
+          <box style="bg-7 text-0 bold"> F2 </box>
+          <box> Debug  </box>
           <box style="bg-7 text-0 bold"> q </box>
           <box> Quit </box>
         </box>
@@ -209,7 +212,15 @@ defmodule Posting do
           <box style="bg-7 text-0 bold width-8"> q </box>
           <box>Quit</box>
         </box>
+        <box style="inline">
+          <box style="bg-7 text-0 bold width-8"> F2 </box>
+          <box>Toggle debug panel</box>
+        </box>
       </.modal>
+      <box :if={@show_debug} style="fixed right-0 bottom-0 width-34 height-18">
+        <live id="debug" view={Breeze.Debug} start_opts={[width: 34, height: 18]}>
+        </live>
+      </box>
     </box>
     """
   end
@@ -252,6 +263,9 @@ defmodule Posting do
 
   def handle_event(_, %{"key" => "F1"}, term),
     do: {:noreply, term |> assign(show_help: true) |> focus("help")}
+
+  def handle_event(_, %{"key" => "F2"}, term),
+    do: {:noreply, assign(term, show_debug: !term.assigns.show_debug)}
 
   def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
   def handle_event(_, _, term), do: {:noreply, term}

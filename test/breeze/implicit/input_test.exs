@@ -262,7 +262,7 @@ defmodule Breeze.Implicit.InputTest do
 
     assert %Breeze.Term{
              implicit_state: %{
-               "website" => {Breeze.Implicit.Input, %{viewport_width: 24}}
+               "website" => {Breeze.Implicit.Input, %{value: _, cursor: 78}}
              }
            } = :sys.get_state(pid)
 
@@ -350,11 +350,23 @@ defmodule Breeze.Implicit.InputTest do
     assert String.ends_with?(value, "histor")
   end
 
-  test "reconcile stores the rendered viewport width" do
-    assert %{viewport_width: 24} =
-             Input.reconcile(%Breeze.Viewport{width: 24, viewport_width: 24}, %{
-               value: "hello",
-               cursor: 5
-             })
+  test "animate can derive viewport width from layout metadata without storing it in state" do
+    box = %Box{
+      content: " hello world",
+      style: %BackBreeze.Style{border: BackBreeze.Border.line()}
+    }
+
+    assert {:ok, %Box{content: "world "}, overlays: [%{x: 12, y: 5, char: " ", visible?: true}]} =
+             Input.animate(
+               :root,
+               box,
+               [focused: true],
+               %{value: "hello world", cursor: 11},
+               %{
+                 layout: %{left: 6, top: 4, viewport_width: 6},
+                 now: 0,
+                 last_interaction_at: nil
+               }
+             )
   end
 end

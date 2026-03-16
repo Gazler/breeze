@@ -1,10 +1,10 @@
-[33m┌──────────────────────────────────────┐[0m┌──────────────────────────────────────┐
-[33m│[0mTask                                  [38;5;3m▲[0m│[30;43m## map(enumerable, fun)               [0m▲
-[33m│[0mTime                                  [38;5;3m│[0m│                                      █
-[33m│[0mTuple                                 [38;5;3m│[0m│Returns a list where each element is  █
-[33m│[0mURI                                   [38;5;3m█[0m│the result of invoking [36mfun[0m on each    █
-[33m│[0m[48;5;4;38;5;7mVersion                               [0m[38;5;3m▼[0m│corresponding element of [36menumerable[0m.  █
-[33m└──────────────────────────────────────┘[0m│                                      █
+[38;5;3m┌──────────────────────────────────────┐[0m┌──────────────────────────────────────┐
+[38;5;3m│[0mTask                                  [38;5;3m▲[0m│[30;43m## map(enumerable, fun)               [0m▲
+[38;5;3m│[0mTime                                  [38;5;3m│[0m│                                      █
+[38;5;3m│[0mTuple                                 [38;5;3m│[0m│Returns a list where each element is  █
+[38;5;3m│[0mURI                                   [38;5;3m█[0m│the result of invoking [36mfun[0m on each    █
+[38;5;3m│[0m[48;5;4;38;5;7mVersion                               [0m[38;5;3m▼[0m│corresponding element of [36menumerable[0m.  █
+[38;5;3m└──────────────────────────────────────┘[0m│                                      █
 ┌──────────────────────────────────────┐│For maps, the function expects a      █
 │all?/1                                ▲│key-value tuple.                      │
 │all?/2                                █│                                      │

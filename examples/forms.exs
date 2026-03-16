@@ -47,7 +47,7 @@ defmodule FormsDemo do
               value: value,
               cursor: cursor,
               row_style: row_style(id),
-              display: " " <> String.pad_trailing(value, max(width - 1, 0))
+              display: input_preview(value, cursor, width)
             }
           end)
       )
@@ -116,6 +116,31 @@ defmodule FormsDemo do
 
   defp row_style("path"), do: "height-4"
   defp row_style(_id), do: "height-5"
+
+  defp input_preview(value, cursor, width) do
+    source = " " <> value
+    display_cursor = min(max(cursor, 0) + 1, String.length(source))
+    scrolled? = display_cursor >= width and width > 1
+    visible_width = if(scrolled?, do: width - 1, else: width)
+
+    scroll_left =
+      cond do
+        display_cursor >= String.length(source) and String.length(source) >= visible_width ->
+          max(String.length(source) - visible_width, 0)
+
+        display_cursor >= visible_width ->
+          display_cursor - (visible_width - 1)
+
+        true ->
+          0
+      end
+
+    source
+    |> String.graphemes()
+    |> Enum.slice(scroll_left, visible_width)
+    |> Enum.join()
+    |> String.pad_trailing(width)
+  end
 end
 
 Breeze.Example.run(

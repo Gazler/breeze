@@ -4,27 +4,32 @@ defmodule Breeze.TerminalOverlay do
   @recent_interaction_ms @blink_interval_ms * 2
 
   def write_overlays(terminal, overlays) when is_list(overlays) do
-    Enum.reduce(overlays, terminal, &write_overlay(&2, &1))
+    overlay_output = render_overlays(overlays)
+
+    if overlay_output == "" do
+      terminal
+    else
+      Termite.Terminal.write(terminal, overlay_output)
+    end
   end
 
-  def write_overlay(terminal, nil), do: terminal
-
-  def write_overlay(terminal, %{visible?: false}), do: terminal
-
-  def write_overlay(terminal, %{x: x, y: y, content: content}) when is_binary(content) do
-    terminal
-    |> Termite.Screen.cursor_position(x + 1, y + 1)
-    |> Termite.Terminal.write(content)
-    |> Termite.Screen.cursor_position(x + 1, y + 1)
+  def render_overlays(overlays) when is_list(overlays) do
+    Enum.map_join(overlays, "", &render_overlay/1)
   end
 
-  def write_overlay(terminal, %{x: x, y: y, char: char}) do
+  def render_overlay(nil), do: ""
+
+  def render_overlay(%{visible?: false}), do: ""
+
+  def render_overlay(%{x: x, y: y, content: content}) when is_binary(content) do
+    position = cursor_position_code(x, y)
+    position <> content <> position
+  end
+
+  def render_overlay(%{x: x, y: y, char: char}) do
+    position = cursor_position_code(x, y)
     content = cursor_open_code() <> char <> Termite.Style.reset_code()
-
-    terminal
-    |> Termite.Screen.cursor_position(x + 1, y + 1)
-    |> Termite.Terminal.write(content)
-    |> Termite.Screen.cursor_position(x + 1, y + 1)
+    position <> content <> position
   end
 
   def visible?(now_ms, last_interaction_at) when is_integer(now_ms) do
@@ -55,4 +60,6 @@ defmodule Breeze.TerminalOverlay do
     |> Termite.Style.background(11)
     |> Termite.Style.open_code()
   end
+
+  defp cursor_position_code(x, y), do: "\e[#{y + 1};#{x + 1}H"
 end

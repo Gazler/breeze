@@ -1,14 +1,14 @@
 [1mTabs example[0m                      
 Use left/right arrows while the ta
 The tab bar should scroll horizont
-[34m╭──────────────────────────────╮[0m  
-[34m│[0m[1;48;5;4;38;5;7m Overview [0m Requests  Responses[34m│[0m  
-[34m│[0m[1mOverview[0m                     ▲[34m│[0m  
-[34m│[0mSelected tab value: overview █[34m│[0m  
-[34m│[0m                             │[34m│[0m  
-[34m│[0mOverview panel line 1        │[34m│[0m  
-[34m│[0mOverview panel line 2        │[34m│[0m  
-[34m│[0mOverviewpanelline3▼           [34m│[0m  
-[34m│[0m                              [34m│[0m  
-[34m╰──────────────────────────────╯[0m  
+[38;5;4m╭──────────────────────────────╮[0m  
+[38;5;4m│[0m[1;48;5;4;38;5;7m Overview [0m Requests  Responses[38;5;4m│[0m  
+[38;5;4m│[0m[1mOverview[0m                     ▲[38;5;4m│[0m  
+[38;5;4m│[0mSelected tab value: overview █[38;5;4m│[0m  
+[38;5;4m│[0m                             │[38;5;4m│[0m  
+[38;5;4m│[0mOverview panel line 1        │[38;5;4m│[0m  
+[38;5;4m│[0mOverview panel line 2        │[38;5;4m│[0m  
+[38;5;4m│[0mOverview panel line 3        ▼[38;5;4m│[0m  
+[38;5;4m│[0m                              [38;5;4m│[0m  
+[38;5;4m╰──────────────────────────────╯[0m  
                                   

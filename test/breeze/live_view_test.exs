@@ -5,6 +5,18 @@ defmodule Breeze.LiveViewTest do
   alias Breeze.Renderer
   alias Breeze.Template
 
+  defmodule FakeAdapter do
+    @behaviour Termite.Terminal.Adapter
+
+    def start(_opts) do
+      {:ok, %{ref: make_ref(), size: %{width: 80, height: 24}}}
+    end
+
+    def reader(term), do: {:ok, term.ref}
+    def write(term, _str), do: {:ok, term}
+    def resize(term), do: term.size
+  end
+
   defmodule CounterChild do
     use Breeze.View
 
@@ -95,6 +107,35 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule DebugToggleRoot do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, assign(term, show_debug: false)}
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box>root</box>
+        <box :if={@show_debug} style="fixed right-0 bottom-0 width-18 height-6">
+          <live id="debug" view={CounterChild} start_opts={[]}>
+          </live>
+        </box>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "F2"}, term) do
+      {:noreply, assign(term, show_debug: !term.assigns.show_debug)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  def telemetry_test_handler(event, measurements, metadata, parent) do
+    send(parent, {:telemetry_event, event, measurements, metadata})
+  end
+
   test "render_to_tree preserves typed live attrs" do
     [{:box, _, [{:live, attrs}]}] =
       ParentLiveExample.render(%{start_opts: [seed: 1]})
@@ -155,6 +196,70 @@ defmodule Breeze.LiveViewTest do
     assert acc.ids == ["child::panel", "child::button"]
     assert acc.focusables == ["child::button"]
     assert box.content =~ "Count: 1"
+  end
+
+  test "renderer emits profiling telemetry events for external consumers" do
+    handler_id = "breeze-live-view-test-#{System.unique_integer([:positive])}"
+    parent = self()
+
+    :ok =
+      :telemetry.attach_many(
+        handler_id,
+        [
+          [:breeze, :render, :stop],
+          [:breeze, :render, :metric]
+        ],
+        &__MODULE__.telemetry_test_handler/4,
+        parent
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    profile_scope = make_ref()
+
+    {_acc, box} =
+      Renderer.render(CounterChild, %{count: 1},
+        profile_scope: profile_scope,
+        profile_label: "counter-child"
+      )
+
+    assert box.content =~ "Count: 1"
+
+    assert_receive {:telemetry_event, [:breeze, :render, :stop], measurements, metadata}
+    assert is_integer(measurements.duration)
+    assert metadata.scope == profile_scope
+    assert metadata.label == "counter-child"
+    assert metadata.metric in [:view_render_us, :template_tree_us, :build_tree_us, :layout_us]
+
+    assert_receive {:telemetry_event, [:breeze, :render, :metric], %{value: value}, metadata}
+    assert value > 0
+    assert metadata.scope == profile_scope
+    assert metadata.label == "counter-child"
+    assert metadata.metric == :element_count
+  end
+
+  test "debug profiler snapshots telemetry-derived profiling metrics" do
+    profile_scope = make_ref()
+    Breeze.DebugProfiler.reset(profile_scope)
+
+    {_acc, box} =
+      Renderer.render(CounterChild, %{count: 1},
+        profile_scope: profile_scope,
+        profile_label: "counter-child"
+      )
+
+    assert box.content =~ "Count: 1"
+
+    snapshot = Breeze.DebugProfiler.snapshot(profile_scope)
+
+    assert Enum.any?(snapshot, fn entry ->
+             entry.label == "counter-child" and entry.metric == :view_render_us and
+               is_integer(entry.value) and entry.value >= 0
+           end)
+
+    assert Enum.any?(snapshot, fn entry ->
+             entry.label == "counter-child" and entry.metric == :element_count and entry.value > 0
+           end)
   end
 
   defmodule DualLiveExample do
@@ -237,6 +342,27 @@ defmodule Breeze.LiveViewTest do
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: nil, implicit_state: %{})
     assert box.content =~ "Frame: 1"
+  end
+
+  test "server starts nested live children that appear after an event" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: DebugToggleRoot,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    send(pid, {reader, {:data, "\eOQ"}})
+    Process.sleep(50)
+
+    state = :sys.get_state(pid)
+    assert Map.has_key?(state.children, "debug")
+    assert state.base_output =~ "Count: 1"
+
+    Process.exit(pid, :normal)
   end
 
   test "global keybindings are dispatched before focused event handling" do

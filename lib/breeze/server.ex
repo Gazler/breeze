@@ -3,6 +3,7 @@ defmodule Breeze.Term do
 
   defstruct [
     :view,
+    :server,
     :terminal,
     :reader,
     last_render_at: nil,
@@ -34,7 +35,7 @@ defmodule Breeze.Server do
 
   use GenServer
 
-  @render_tracking_key {__MODULE__, :render_tracking}
+  @render_tracking_table __MODULE__.RenderTracking
   @flush_input_batch :flush_input_batch
 
   defstruct [
@@ -43,6 +44,7 @@ defmodule Breeze.Server do
     :view_pid,
     :focused,
     :base_output,
+    :last_frame_payload,
     :pending_ref,
     :pending_started_at,
     :last_render_at,
@@ -54,6 +56,10 @@ defmodule Breeze.Server do
     animation_timer: nil,
     next_tick_at: nil,
     global_keybindings: [],
+    debug_subscribers: MapSet.new(),
+    debug_stats: %{},
+    debug_push_timer: nil,
+    debug_push_interval_ms: 250,
     busy_delay_ms: 120,
     frame_delay_ms: 80
   ]
@@ -88,6 +94,16 @@ defmodule Breeze.Server do
     GenServer.start_link(__MODULE__, opts)
   end
 
+  @spec stats(pid()) :: map()
+  def stats(pid) do
+    GenServer.call(pid, :stats)
+  end
+
+  @spec subscribe_debug(pid(), pid()) :: :ok
+  def subscribe_debug(pid, subscriber) do
+    GenServer.cast(pid, {:subscribe_debug, subscriber})
+  end
+
   @impl true
   def init(opts) do
     view = Keyword.fetch!(opts, :view)
@@ -102,6 +118,7 @@ defmodule Breeze.Server do
         view: view,
         start_opts: start_opts,
         terminal: terminal,
+        server: self(),
         global_keybindings: Keyword.get(opts, :global_keybindings, []),
         invalidate: fn -> send(session, :child_invalidated) end
       )
@@ -132,10 +149,34 @@ defmodule Breeze.Server do
   end
 
   @impl true
+  def handle_call(:stats, _from, state) do
+    {:reply,
+     state.debug_stats
+     |> Map.put(:focused, state.focused)
+     |> Map.put(:pending?, not is_nil(state.pending_ref))
+     |> Map.put(:screen, state.terminal.size), state}
+  end
+
+  @impl true
+  def handle_cast({:subscribe_debug, subscriber}, state) do
+    if is_pid(subscriber), do: Process.monitor(subscriber)
+
+    state =
+      state
+      |> Map.update!(:debug_subscribers, &MapSet.put(&1, subscriber))
+      |> push_debug_stats_now()
+
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
+    started_at = System.monotonic_time(:microsecond)
+
     state =
       state
       |> enqueue_input(Breeze.Input.decode(data))
+      |> put_debug_stat(:last_input_us, System.monotonic_time(:microsecond) - started_at)
       |> schedule_input_flush()
 
     {:noreply, state}
@@ -184,13 +225,25 @@ defmodule Breeze.Server do
   end
 
   def handle_info(:animation_tick, state) do
+    started_at = System.monotonic_time(:microsecond)
+
     state =
       state
       |> Map.put(:animation_timer, nil)
       |> Map.put(:next_tick_at, nil)
       |> advance_decorations()
       |> render_frame()
+      |> put_debug_stat(:last_animation_us, System.monotonic_time(:microsecond) - started_at)
       |> schedule_animation()
+
+    {:noreply, state}
+  end
+
+  def handle_info(:debug_push, state) do
+    state =
+      state
+      |> Map.put(:debug_push_timer, nil)
+      |> push_debug_stats_now()
 
     {:noreply, state}
   end
@@ -233,12 +286,22 @@ defmodule Breeze.Server do
         stop(state)
 
       {:DOWN, ref, :process, _pid, _reason} ->
-        children =
-          state.children
-          |> Enum.reject(fn {_id, child} -> child.ref == ref end)
-          |> Map.new()
+        cond do
+          MapSet.member?(state.debug_subscribers, elem(message, 3)) ->
+            {:noreply,
+             %{
+               state
+               | debug_subscribers: MapSet.delete(state.debug_subscribers, elem(message, 3))
+             }}
 
-        {:noreply, %{state | children: children}}
+          true ->
+            children =
+              state.children
+              |> Enum.reject(fn {_id, child} -> child.ref == ref end)
+              |> Map.new()
+
+            {:noreply, %{state | children: children}}
+        end
 
       _ ->
         {:noreply, state}
@@ -398,14 +461,25 @@ defmodule Breeze.Server do
   defp render_base(state, attempts \\ 1)
 
   defp render_base(state, attempts) do
-    begin_render_tracking()
+    tracking_ref = begin_render_tracking()
+    started_at = System.monotonic_time(:microsecond)
+    profile_scope = make_ref()
+    Breeze.DebugProfiler.reset(profile_scope)
+    root_started_at = System.monotonic_time(:microsecond)
 
     {:ok, _acc, box, decorations} =
       Breeze.ChildServer.render_snapshot(state.view_pid,
         implicit_state: %{},
         terminal: state.terminal,
-        live_view: fn attrs, opts -> render_live_child(attrs, opts, state) end
+        render_tracking_ref: tracking_ref,
+        profile_scope: profile_scope,
+        profile_label: inspect(root_view_module(state)),
+        live_view: fn attrs, opts ->
+          render_live_child(attrs, opts, state, profile_scope, tracking_ref)
+        end
       )
+
+    root_snapshot_us = System.monotonic_time(:microsecond) - root_started_at
 
     focused =
       case Breeze.ChildServer.metadata(state.view_pid) do
@@ -413,7 +487,13 @@ defmodule Breeze.Server do
         _ -> state.focused
       end
 
-    %{missing: missing, decorations: child_decorations} = finish_render_tracking()
+    %{
+      missing: missing,
+      decorations: child_decorations,
+      child_timings: child_timings
+    } = finish_render_tracking(tracking_ref)
+
+    profile_entries = Breeze.DebugProfiler.snapshot(profile_scope)
     {state, started?} = ensure_children(state, missing)
 
     if started? do
@@ -426,13 +506,26 @@ defmodule Breeze.Server do
         true ->
           decorations = decorations ++ child_decorations
           state = %{state | focused: focused}
+          prep_started_at = System.monotonic_time(:microsecond)
           {base_output, decorations} = prepare_decorations(box.content, decorations, state)
+          prepare_decorations_us = System.monotonic_time(:microsecond) - prep_started_at
 
           state
           |> Map.put(:base_output, base_output)
           |> Map.put(:decorations, decorations)
           |> Map.put(:focused, focused)
           |> Map.put(:last_render_at, System.monotonic_time(:millisecond))
+          |> put_debug_stat(:last_root_snapshot_us, root_snapshot_us)
+          |> put_debug_stat(:last_live_children_us, sum_timing_us(child_timings))
+          |> put_debug_stat(:last_live_children, normalize_child_timings(child_timings))
+          |> put_debug_stat(:last_render_profile, summarize_profile(profile_entries))
+          |> put_debug_stat(:last_reconcile_passes, 0)
+          |> put_debug_stat(:last_reconcile_changed_ids, nil)
+          |> put_debug_stat(:last_prepare_decorations_us, prepare_decorations_us)
+          |> put_debug_stat(
+            :last_render_base_us,
+            System.monotonic_time(:microsecond) - started_at
+          )
           |> render_frame()
           |> schedule_animation()
       end
@@ -446,14 +539,14 @@ defmodule Breeze.Server do
   defp maybe_render_after_input(%{pending_ref: ref} = state) when not is_nil(ref), do: state
   defp maybe_render_after_input(state), do: maybe_render_base(state)
 
-  defp render_live_child(attrs, opts, state) do
+  defp render_live_child(attrs, opts, state, profile_scope, tracking_ref) do
     id = fetch_live_attr!(attrs, :id)
     full_id = live_id(Keyword.get(opts, :live_prefix), id)
     preload_only = fetch_live_attr(attrs, :preload_only, false)
 
     case Map.get(state.children, full_id) do
       nil ->
-        track_missing_live_child({full_id, attrs})
+        track_missing_live_child(tracking_ref, {full_id, attrs})
         if preload_only, do: :preloaded, else: :missing
 
       %{pid: pid} ->
@@ -461,6 +554,7 @@ defmodule Breeze.Server do
           :preloaded
         else
           local_focused = strip_live_prefix(state.focused, full_id)
+          child_started_at = System.monotonic_time(:microsecond)
 
           {:ok, child_acc, child_box, child_decorations} =
             Breeze.ChildServer.render_snapshot(pid,
@@ -468,13 +562,22 @@ defmodule Breeze.Server do
               implicit_state: %{},
               terminal: state.terminal,
               live_prefix: full_id,
+              render_tracking_ref: tracking_ref,
+              profile_scope: profile_scope,
+              profile_label: "#{full_id} #{inspect(state.children[full_id].view)}",
               live_view: fn child_attrs, child_opts ->
-                render_live_child(child_attrs, child_opts, state)
+                render_live_child(child_attrs, child_opts, state, profile_scope, tracking_ref)
               end
             )
 
+          track_child_timing(tracking_ref, %{
+            id: full_id,
+            view: state.children[full_id].view,
+            us: System.monotonic_time(:microsecond) - child_started_at
+          })
+
           Enum.each(child_decorations, fn decoration ->
-            track_render_decoration(namespace_decoration(decoration, full_id))
+            track_render_decoration(tracking_ref, namespace_decoration(decoration, full_id))
           end)
 
           {:rendered, id, child_acc, child_box}
@@ -483,17 +586,37 @@ defmodule Breeze.Server do
   end
 
   defp render_frame(state) do
+    started_at = System.monotonic_time(:microsecond)
     {output, decorations} = apply_decorations(state.base_output, state.decorations, state)
     output = strip_private_use_chars(output)
     overlays = terminal_overlays(decorations, state)
+    overlay_output = Breeze.TerminalOverlay.render_overlays(overlays)
 
     screen_height = state.terminal.size.height
     output_lines = length(String.split(output, "\n"))
     trailing = String.duplicate("\n\e[K", max(screen_height - output_lines, 0))
     output = "\e[K" <> String.replace(output, "\n", "\n\e[K") <> trailing
-    terminal = Termite.Terminal.write(state.terminal, "\e[H" <> output)
-    terminal = Breeze.TerminalOverlay.write_overlays(terminal, overlays)
-    %{state | terminal: terminal, decorations: decorations}
+    frame_payload = "\e[H" <> output <> overlay_output
+    composed_at = System.monotonic_time(:microsecond)
+
+    {terminal, write_duration} =
+      if frame_payload == state.last_frame_payload do
+        {state.terminal, 0}
+      else
+        terminal = Termite.Terminal.write(state.terminal, frame_payload)
+        written_at = System.monotonic_time(:microsecond)
+        {terminal, written_at - composed_at}
+      end
+
+    state
+    |> Map.put(:terminal, terminal)
+    |> Map.put(:decorations, decorations)
+    |> Map.put(:last_frame_payload, frame_payload)
+    |> put_debug_stat(:last_frame_compose_us, composed_at - started_at)
+    |> put_debug_stat(:last_terminal_write_us, write_duration)
+    |> put_debug_stat(:last_frame_us, System.monotonic_time(:microsecond) - started_at)
+    |> put_debug_stat(:last_frame_bytes, byte_size(output))
+    |> put_debug_stat(:overlay_count, length(overlays))
   end
 
   defp initialize_decorations(decorations) do
@@ -510,9 +633,10 @@ defmodule Breeze.Server do
     |> Enum.reduce({output, []}, fn decoration, {acc, updated} ->
       {_animated_box, current_content, current_overlays} = render_decoration(decoration, state)
 
-      # TODO: Replace async decoration content by box coordinates instead of substring matching.
       {
-        String.replace(acc, decoration.box.content, current_content, global: false),
+        String.replace(acc, rendered_fragment(decoration.box, state), current_content,
+          global: false
+        ),
         [
           decoration
           |> Map.put(:current_content, current_content)
@@ -541,7 +665,6 @@ defmodule Breeze.Server do
       if decoration_active?(decoration, state) do
         {_animated_box, current_content, current_overlays} = render_decoration(decoration, state)
 
-        # TODO: Replace async decoration content by box coordinates instead of substring matching.
         {
           String.replace(acc, decoration.current_content, current_content, global: false),
           [
@@ -572,7 +695,7 @@ defmodule Breeze.Server do
         {decoration.box, %{}}
       end
 
-    {animated_box, animated_box.content, Map.get(animate_opts, :overlays, [])}
+    {animated_box, rendered_fragment(animated_box, state), Map.get(animate_opts, :overlays, [])}
   end
 
   defp decoration_ctx(decoration, state, now) do
@@ -594,6 +717,12 @@ defmodule Breeze.Server do
     |> String.to_charlist()
     |> Enum.reject(&(&1 in 0xE000..0xF8FF))
     |> List.to_string()
+  end
+
+  defp rendered_fragment(box, state) do
+    box
+    |> BackBreeze.Box.render(terminal: state.terminal)
+    |> Map.get(:content)
   end
 
   defp schedule_animation(%{decorations: []} = state), do: state
@@ -736,8 +865,37 @@ defmodule Breeze.Server do
     state
     |> Map.put(:pending_ref, ref)
     |> Map.put(:pending_started_at, System.monotonic_time(:millisecond))
+    |> put_debug_stat(:last_async_key, key)
     |> schedule_animation()
   end
+
+  defp put_debug_stat(state, key, value) do
+    state
+    |> Map.update(:debug_stats, %{key => value}, &Map.put(&1, key, value))
+    |> schedule_debug_push()
+  end
+
+  defp push_debug_stats_now(state) do
+    stats =
+      state.debug_stats
+      |> Map.put(:focused, state.focused)
+      |> Map.put(:pending?, not is_nil(state.pending_ref))
+      |> Map.put(:screen, state.terminal.size)
+
+    Enum.each(state.debug_subscribers, fn subscriber ->
+      if is_pid(subscriber) and Process.alive?(subscriber) do
+        send(subscriber, {:debug_stats, stats})
+      end
+    end)
+
+    state
+  end
+
+  defp schedule_debug_push(%{debug_push_timer: nil, debug_push_interval_ms: interval} = state) do
+    %{state | debug_push_timer: Process.send_after(self(), :debug_push, interval)}
+  end
+
+  defp schedule_debug_push(state), do: state
 
   defp start_child!(attrs, terminal) do
     view = fetch_live_attr!(attrs, :view)
@@ -751,6 +909,7 @@ defmodule Breeze.Server do
       Breeze.ChildServer.start(
         view: view,
         start_opts: start_opts,
+        server: self(),
         terminal: terminal,
         invalidate: invalidate
       )
@@ -760,36 +919,64 @@ defmodule Breeze.Server do
   end
 
   defp begin_render_tracking do
-    Process.put(@render_tracking_key, %{missing: [], decorations: []})
+    ensure_render_tracking_table!()
+    make_ref()
   end
 
-  defp finish_render_tracking do
-    Process.get(@render_tracking_key, %{missing: [], decorations: []})
-    |> then(fn tracking ->
-      Process.delete(@render_tracking_key)
+  defp finish_render_tracking(ref) do
+    ensure_render_tracking_table!()
 
+    entries = :ets.take(@render_tracking_table, ref)
+
+    Enum.reduce(entries, %{missing: [], decorations: [], child_timings: []}, fn
+      {^ref, :missing, item}, tracking ->
+        %{tracking | missing: [item | tracking.missing]}
+
+      {^ref, :decoration, decoration}, tracking ->
+        %{tracking | decorations: [decoration | tracking.decorations]}
+
+      {^ref, :child_timing, child_timing}, tracking ->
+        %{tracking | child_timings: [child_timing | tracking.child_timings]}
+    end)
+    |> then(fn tracking ->
       %{
         missing: Enum.reverse(tracking.missing),
-        decorations: Enum.reverse(tracking.decorations)
+        decorations: Enum.reverse(tracking.decorations),
+        child_timings: Enum.reverse(tracking.child_timings)
       }
     end)
   end
 
-  defp track_missing_live_child(item) do
-    update_render_tracking(fn tracking ->
-      %{tracking | missing: [item | tracking.missing]}
-    end)
+  defp track_missing_live_child(ref, item) do
+    ensure_render_tracking_table!()
+    true = :ets.insert(@render_tracking_table, {ref, :missing, item})
+    :ok
   end
 
-  defp track_render_decoration(decoration) do
-    update_render_tracking(fn tracking ->
-      %{tracking | decorations: [decoration | tracking.decorations]}
-    end)
+  defp track_render_decoration(ref, decoration) do
+    ensure_render_tracking_table!()
+    true = :ets.insert(@render_tracking_table, {ref, :decoration, decoration})
+    :ok
   end
 
-  defp update_render_tracking(fun) do
-    tracking = Process.get(@render_tracking_key, %{missing: [], decorations: []})
-    Process.put(@render_tracking_key, fun.(tracking))
+  defp track_child_timing(ref, child_timing) do
+    ensure_render_tracking_table!()
+    true = :ets.insert(@render_tracking_table, {ref, :child_timing, child_timing})
+    :ok
+  end
+
+  defp ensure_render_tracking_table! do
+    case :ets.whereis(@render_tracking_table) do
+      :undefined ->
+        try do
+          :ets.new(@render_tracking_table, [:named_table, :public, :bag])
+        rescue
+          ArgumentError -> :ok
+        end
+
+      _tid ->
+        :ok
+    end
   end
 
   defp enqueue_input(state, decoded) do
@@ -801,6 +988,58 @@ defmodule Breeze.Server do
   defp schedule_input_flush(state) do
     send(self(), @flush_input_batch)
     %{state | input_flush_scheduled?: true}
+  end
+
+  defp sum_timing_us(child_timings) do
+    Enum.reduce(child_timings, 0, fn %{us: us}, acc -> acc + us end)
+  end
+
+  defp normalize_child_timings(child_timings) do
+    child_timings
+    |> Enum.sort_by(& &1.us, :desc)
+    |> Enum.take(5)
+    |> Enum.map(fn timing ->
+      timing
+      |> Map.update!(:view, &inspect/1)
+    end)
+  end
+
+  defp summarize_profile(entries) do
+    entries
+    |> Enum.filter(fn entry ->
+      entry.metric in [
+        :view_render_us,
+        :template_tree_us,
+        :build_tree_us,
+        :layout_us,
+        :render_with_dimensions_us,
+        :item_render_us,
+        :compose_us,
+        :render_children_us,
+        :container_render_self_us,
+        :container_layer_map_us,
+        :layer_maps_to_content_us
+      ]
+    end)
+    |> Enum.take(6)
+    |> Enum.map(fn %{label: label, metric: metric, value: value} ->
+      %{label: shorten_label(label), metric: metric, value: value}
+    end)
+  end
+
+  defp shorten_label(label) when is_binary(label) do
+    if String.length(label) > 28 do
+      String.slice(label, 0, 28)
+    else
+      label
+    end
+  end
+
+  defp root_view_module(%{children: _} = state) do
+    case Breeze.ChildServer.metadata(state.view_pid) do
+      %{view: view} -> view
+      _ -> nil
+    end
   end
 
   defp dispatch_input_hierarchy(state, key) do

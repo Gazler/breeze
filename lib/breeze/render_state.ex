@@ -4,25 +4,29 @@ defmodule Breeze.RenderState do
   alias Breeze.Viewport
 
   def build(term, acc) do
-    {implicits, implicit_meta, _current, _mod, _last_id, _root_attrs} =
-      acc.elements
-      |> Enum.sort()
-      |> Enum.reduce(initial_implicit_build_state(), fn item, state ->
-        reduce_implicit_item(item, state, term, map_size(acc.elements))
-      end)
+    sorted_elements = Enum.sort(acc.elements)
+    total = length(sorted_elements)
 
-    events =
-      acc.elements
-      |> Enum.sort()
-      |> Enum.reduce(%{}, fn {_idx, elem}, events ->
+    {implicit_build_state, events} =
+      Enum.reduce(sorted_elements, {initial_implicit_build_state(), %{}}, fn {_idx, elem} = item,
+                                                                             {implicit_state,
+                                                                              events} ->
+        next_implicit_state =
+          reduce_implicit_item(item, implicit_state, term, total)
+
         id = Keyword.get(elem, :id)
         change = Keyword.get(elem, :"br-change")
-        if change, do: Map.put(events, id, %{change: change}), else: events
+
+        next_events =
+          if change, do: Map.put(events, id, %{change: change}), else: events
+
+        {next_implicit_state, next_events}
       end)
 
-    raw_dimensions = build_dimensions(acc)
-    elements = Map.new(raw_dimensions, fn {id, dims} -> {id, Viewport.from_dimensions(dims)} end)
-    mouse_targets = build_mouse_targets(raw_dimensions)
+    {implicits, implicit_meta, _current, _mod, _last_id, _root_attrs} = implicit_build_state
+
+    raw_dimensions = build_dimensions(sorted_elements, acc.dimensions)
+    {elements, mouse_targets} = build_layout_maps(raw_dimensions)
 
     %{
       term
@@ -37,7 +41,11 @@ defmodule Breeze.RenderState do
   end
 
   def build_dimensions(acc) do
-    Enum.zip(Enum.sort(acc.elements), acc.dimensions)
+    build_dimensions(Enum.sort(acc.elements), acc.dimensions)
+  end
+
+  defp build_dimensions(sorted_elements, dimensions) do
+    Enum.zip(sorted_elements, dimensions)
     |> Enum.reduce(%{}, fn {{_idx, flags}, dims}, elements ->
       case Keyword.get(flags, :id) do
         nil -> elements
@@ -46,19 +54,24 @@ defmodule Breeze.RenderState do
     end)
   end
 
-  defp build_mouse_targets(raw_dimensions) do
-    Map.new(raw_dimensions, fn {id, dims} ->
+  defp build_layout_maps(raw_dimensions) do
+    Enum.reduce(raw_dimensions, {%{}, %{}}, fn {id, dims}, {elements, mouse_targets} ->
       width = Map.get(dims, :width) || Map.get(dims, :viewport_width) || 0
       height = Map.get(dims, :height) || Map.get(dims, :viewport_height) || 0
       left = Map.get(dims, :left, 0)
       top = Map.get(dims, :top, 0)
 
-      {id,
-       dims
-       |> Map.put(:left, left)
-       |> Map.put(:top, top)
-       |> Map.put(:right, left + max(width - 1, 0))
-       |> Map.put(:bottom, top + max(height - 1, 0))}
+      target =
+        dims
+        |> Map.put(:left, left)
+        |> Map.put(:top, top)
+        |> Map.put(:right, left + max(width - 1, 0))
+        |> Map.put(:bottom, top + max(height - 1, 0))
+
+      {
+        Map.put(elements, id, Viewport.from_dimensions(dims)),
+        Map.put(mouse_targets, id, target)
+      }
     end)
   end
 
@@ -68,22 +81,6 @@ defmodule Breeze.RenderState do
 
   def put_implicit_state(term, id, mod, implicit) do
     %{term | implicit_state: Map.put(term.implicit_state, id, {mod, implicit})}
-  end
-
-  def reconcile_implicits(implicit_state, dimensions) do
-    Enum.reduce(implicit_state, %{}, fn
-      {id, {mod, state}}, acc ->
-        next_state =
-          case {Map.get(dimensions, id), function_exported?(mod, :reconcile, 2)} do
-            {element, true} when not is_nil(element) -> mod.reconcile(element, state)
-            _ -> state
-          end
-
-        Map.put(acc, id, {mod, next_state})
-
-      {id, value}, acc ->
-        Map.put(acc, id, value)
-    end)
   end
 
   defp initial_implicit_build_state, do: {%{}, %{}, [], nil, nil, %{}}
