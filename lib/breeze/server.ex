@@ -37,6 +37,8 @@ defmodule Breeze.Server do
 
   @render_tracking_table __MODULE__.RenderTracking
   @flush_input_batch :flush_input_batch
+  @debug_window_size 20
+  @debug_rate_window_ms 1_000
 
   defstruct [
     :terminal,
@@ -191,19 +193,22 @@ defmodule Breeze.Server do
         stop(state)
 
       {:noreply, focused} ->
-        {:noreply, maybe_render_base(%{state | focused: focused})}
+        {:noreply, maybe_render_base(%{state | focused: focused}, :resize)}
     end
   end
 
   def handle_info(:child_invalidated, state) do
-    {:noreply, maybe_render_base(state)}
+    state = increment_debug_stat(state, :child_invalidated_count)
+    {:noreply, maybe_render_base(state, :child_invalidated)}
   end
 
   def handle_info({:child_invalidated, _id}, state) do
-    {:noreply, maybe_render_base(state)}
+    state = increment_debug_stat(state, :child_invalidated_count)
+    {:noreply, maybe_render_base(state, :child_invalidated)}
   end
 
   def handle_info(@flush_input_batch, state) do
+    state = increment_debug_stat(state, :flush_input_batch_count)
     state = %{state | input_flush_scheduled?: false}
 
     case flush_input_batch(state) do
@@ -221,11 +226,13 @@ defmodule Breeze.Server do
   end
 
   def handle_info(:animation_tick, %{decorations: []} = state) do
+    state = increment_debug_stat(state, :animation_tick_count)
     {:noreply, %{state | animation_timer: nil, next_tick_at: nil}}
   end
 
   def handle_info(:animation_tick, state) do
     started_at = System.monotonic_time(:microsecond)
+    state = increment_debug_stat(state, :animation_tick_count)
 
     state =
       state
@@ -262,7 +269,7 @@ defmodule Breeze.Server do
           |> Map.put(:pending_ref, nil)
           |> Map.put(:pending_started_at, nil)
           |> Map.put(:focused, focused)
-          |> maybe_render_base()
+          |> maybe_render_base(:event_reply)
 
         {:noreply, state}
 
@@ -272,7 +279,7 @@ defmodule Breeze.Server do
           |> Map.put(:pending_ref, nil)
           |> Map.put(:pending_started_at, nil)
           |> Map.put(:focused, focused)
-          |> maybe_render_base()
+          |> maybe_render_base(:event_reply)
 
         {:noreply, state}
     end
@@ -458,9 +465,9 @@ defmodule Breeze.Server do
     |> apply_input_reply(Breeze.ChildServer.dispatch_input(state.view_pid, %{"mouse" => event}))
   end
 
-  defp render_base(state, attempts \\ 1)
+  defp render_base(state, cause \\ :unknown, attempts \\ 1)
 
-  defp render_base(state, attempts) do
+  defp render_base(state, cause, attempts) do
     tracking_ref = begin_render_tracking()
     started_at = System.monotonic_time(:microsecond)
     profile_scope = make_ref()
@@ -497,11 +504,11 @@ defmodule Breeze.Server do
     {state, started?} = ensure_children(state, missing)
 
     if started? do
-      render_base(state, attempts)
+      render_base(state, cause, attempts)
     else
       cond do
         attempts > 0 and focused != state.focused ->
-          render_base(%{state | focused: focused}, attempts - 1)
+          render_base(%{state | focused: focused}, cause, attempts - 1)
 
         true ->
           decorations = decorations ++ child_decorations
@@ -509,22 +516,34 @@ defmodule Breeze.Server do
           prep_started_at = System.monotonic_time(:microsecond)
           {base_output, decorations} = prepare_decorations(box.content, decorations, state)
           prepare_decorations_us = System.monotonic_time(:microsecond) - prep_started_at
+          render_base_us = System.monotonic_time(:microsecond) - started_at
+
+          debug_live_child_us = debug_live_child_us(child_timings)
+          app_live_children = non_debug_child_timings(child_timings)
 
           state
+          |> increment_debug_stat(:render_base_count)
           |> Map.put(:base_output, base_output)
           |> Map.put(:decorations, decorations)
           |> Map.put(:focused, focused)
           |> Map.put(:last_render_at, System.monotonic_time(:millisecond))
+          |> put_debug_stat(:last_render_cause, cause)
           |> put_debug_stat(:last_root_snapshot_us, root_snapshot_us)
+          |> put_debug_stat(
+            :last_root_snapshot_app_us,
+            max(root_snapshot_us - debug_live_child_us, 0)
+          )
           |> put_debug_stat(:last_live_children_us, sum_timing_us(child_timings))
-          |> put_debug_stat(:last_live_children, normalize_child_timings(child_timings))
+          |> put_debug_stat(:last_live_children_app_us, sum_timing_us(app_live_children))
+          |> put_debug_stat(:last_live_children, normalize_child_timings(app_live_children))
           |> put_debug_stat(:last_render_profile, summarize_profile(profile_entries))
           |> put_debug_stat(:last_reconcile_passes, 0)
           |> put_debug_stat(:last_reconcile_changed_ids, nil)
           |> put_debug_stat(:last_prepare_decorations_us, prepare_decorations_us)
+          |> put_debug_stat(:last_render_base_us, render_base_us)
           |> put_debug_stat(
-            :last_render_base_us,
-            System.monotonic_time(:microsecond) - started_at
+            :last_render_base_app_us,
+            max(render_base_us - debug_live_child_us, 0)
           )
           |> render_frame()
           |> schedule_animation()
@@ -532,12 +551,12 @@ defmodule Breeze.Server do
     end
   end
 
-  defp maybe_render_base(%{view_pid: pid} = state) do
-    if Process.alive?(pid), do: render_base(state), else: state
+  defp maybe_render_base(%{view_pid: pid} = state, cause) do
+    if Process.alive?(pid), do: render_base(state, cause), else: state
   end
 
   defp maybe_render_after_input(%{pending_ref: ref} = state) when not is_nil(ref), do: state
-  defp maybe_render_after_input(state), do: maybe_render_base(state)
+  defp maybe_render_after_input(state), do: maybe_render_base(state, :input_flush)
 
   defp render_live_child(attrs, opts, state, profile_scope, tracking_ref) do
     id = fetch_live_attr!(attrs, :id)
@@ -872,7 +891,93 @@ defmodule Breeze.Server do
   defp put_debug_stat(state, key, value) do
     state
     |> Map.update(:debug_stats, %{key => value}, &Map.put(&1, key, value))
+    |> maybe_record_debug_sample(key, value)
     |> schedule_debug_push()
+  end
+
+  defp increment_debug_stat(state, key) do
+    now = System.monotonic_time(:millisecond)
+
+    state
+    |> Map.update(:debug_stats, %{key => 1}, &Map.update(&1, key, 1, fn value -> value + 1 end))
+    |> update_debug_rate(key, now)
+    |> schedule_debug_push()
+  end
+
+  defp maybe_record_debug_sample(state, key, value) when is_integer(value) do
+    if tracked_timing_key?(key) do
+      state
+      |> update_debug_history(key, value)
+      |> update_debug_summary(key)
+    else
+      state
+    end
+  end
+
+  defp maybe_record_debug_sample(state, _key, _value), do: state
+
+  defp tracked_timing_key?(key) do
+    key in [
+      :last_root_snapshot_app_us,
+      :last_live_children_app_us,
+      :last_render_base_app_us,
+      :last_prepare_decorations_us,
+      :last_frame_compose_us,
+      :last_terminal_write_us,
+      :last_frame_us,
+      :last_animation_us
+    ]
+  end
+
+  defp update_debug_history(state, key, value) do
+    history_key = {:history, key}
+
+    Map.update(state, :debug_stats, %{history_key => [value]}, fn stats ->
+      history =
+        stats
+        |> Map.get(history_key, [])
+        |> Kernel.++([value])
+        |> Enum.take(-@debug_window_size)
+
+      Map.put(stats, history_key, history)
+    end)
+  end
+
+  defp update_debug_summary(state, key) do
+    history_key = {:history, key}
+    avg_key = {:avg, key}
+    max_key = {:max, key}
+
+    Map.update!(state, :debug_stats, fn stats ->
+      history = Map.get(stats, history_key, [])
+
+      if history == [] do
+        stats
+      else
+        avg = div(Enum.sum(history), length(history))
+        max_value = Enum.max(history)
+
+        stats
+        |> Map.put(avg_key, avg)
+        |> Map.put(max_key, max_value)
+      end
+    end)
+  end
+
+  defp update_debug_rate(state, key, now) do
+    rate_key = {:rate, key}
+
+    Map.update(state, :debug_stats, %{rate_key => 1}, fn stats ->
+      timestamps =
+        stats
+        |> Map.get({:rate_window, key}, [])
+        |> Kernel.++([now])
+        |> Enum.filter(fn timestamp -> now - timestamp <= @debug_rate_window_ms end)
+
+      stats
+      |> Map.put({:rate_window, key}, timestamps)
+      |> Map.put(rate_key, length(timestamps))
+    end)
   end
 
   defp push_debug_stats_now(state) do
@@ -985,6 +1090,8 @@ defmodule Breeze.Server do
 
   defp schedule_input_flush(%{input_flush_scheduled?: true} = state), do: state
 
+  defp schedule_input_flush(%{queued_input: []} = state), do: state
+
   defp schedule_input_flush(state) do
     send(self(), @flush_input_batch)
     %{state | input_flush_scheduled?: true}
@@ -993,6 +1100,19 @@ defmodule Breeze.Server do
   defp sum_timing_us(child_timings) do
     Enum.reduce(child_timings, 0, fn %{us: us}, acc -> acc + us end)
   end
+
+  defp debug_live_child_us(child_timings) do
+    child_timings
+    |> Enum.filter(&debug_child_timing?/1)
+    |> sum_timing_us()
+  end
+
+  defp non_debug_child_timings(child_timings) do
+    Enum.reject(child_timings, &debug_child_timing?/1)
+  end
+
+  defp debug_child_timing?(%{id: "debug"}), do: true
+  defp debug_child_timing?(_timing), do: false
 
   defp normalize_child_timings(child_timings) do
     child_timings

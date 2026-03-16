@@ -47,6 +47,41 @@ defmodule PostingTest do
     assert %{focused: "method"} = Breeze.ChildServer.metadata(pid)
   end
 
+  defmodule FakeAdapter do
+    @behaviour Termite.Terminal.Adapter
+
+    def start(_opts) do
+      {:ok, %{ref: make_ref(), size: %{width: 80, height: 24}}}
+    end
+
+    def reader(term), do: {:ok, term.ref}
+    def write(term, _str), do: {:ok, term}
+    def resize(term), do: term.size
+  end
+
+  test "server input flush loop settles after a focus change" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: Posting,
+        terminal: terminal,
+        reader: reader,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    send(pid, {reader, {:data, "\t"}})
+    Process.sleep(100)
+
+    state = :sys.get_state(pid)
+
+    refute state.input_flush_scheduled?
+    assert state.queued_input == []
+
+    Process.exit(pid, :normal)
+  end
+
   defp visible(content) do
     String.replace(content, ~r/\e\[[0-9;]*m/u, "")
   end

@@ -217,8 +217,8 @@ defmodule Posting do
           <box>Toggle debug panel</box>
         </box>
       </.modal>
-      <box :if={@show_debug} style="fixed right-0 bottom-0 width-34 height-24">
-        <live id="debug" view={Breeze.Debug} start_opts={[width: 34, height: 24]}>
+      <box :if={@show_debug} style="fixed right-0 bottom-0 width-42 height-24">
+        <live id="debug" view={Breeze.Debug} start_opts={[width: 42, height: 24]}>
         </live>
       </box>
     </box>
