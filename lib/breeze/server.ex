@@ -44,7 +44,11 @@ defmodule Breeze.Server do
     :terminal,
     :reader,
     :view_pid,
+    :view,
+    :start_opts,
+    :mouse_mode,
     :focused,
+    :crash,
     :base_output,
     :last_frame_payload,
     :pending_ref,
@@ -139,6 +143,9 @@ defmodule Breeze.Server do
       terminal: terminal,
       reader: Keyword.get(opts, :reader, terminal.reader),
       view_pid: view_pid,
+      view: view,
+      start_opts: start_opts,
+      mouse_mode: Keyword.get(opts, :mouse, false),
       focused: focused,
       global_keybindings: Keyword.get(opts, :global_keybindings, []),
       busy_delay_ms: Keyword.get(opts, :busy_delay_ms, 120),
@@ -187,26 +194,44 @@ defmodule Breeze.Server do
   end
 
   def handle_info({reader, {:signal, :winch}}, %{reader: reader} = state) do
-    terminal = Termite.Terminal.resize(state.terminal)
-    state = %{state | terminal: terminal}
+    if crashed?(state) do
+      terminal = Termite.Terminal.resize(state.terminal)
+      {:noreply, render_crash(%{state | terminal: terminal})}
+    else
+      terminal = Termite.Terminal.resize(state.terminal)
+      state = %{state | terminal: terminal}
 
-    case Breeze.ChildServer.dispatch_info(state.view_pid, :resize, terminal) do
-      {:stop, _focused} ->
-        stop(state)
+      case safe_call(fn ->
+             Breeze.ChildServer.dispatch_info(state.view_pid, :resize, terminal)
+           end) do
+        {:ok, {:stop, _focused}} ->
+          stop(state)
 
-      {:noreply, focused} ->
-        {:noreply, maybe_render_base(%{state | focused: focused}, :resize)}
+        {:ok, {:noreply, focused}} ->
+          {:noreply, maybe_render_base(%{state | focused: focused}, :resize)}
+
+        {:crash, crash} ->
+          {:noreply, enter_crash_state(state, crash)}
+      end
     end
   end
 
   def handle_info(:child_invalidated, state) do
-    state = increment_debug_stat(state, :child_invalidated_count)
-    {:noreply, maybe_render_base(state, :child_invalidated)}
+    if crashed?(state) do
+      {:noreply, state}
+    else
+      state = increment_debug_stat(state, :child_invalidated_count)
+      {:noreply, maybe_render_base(state, :child_invalidated)}
+    end
   end
 
   def handle_info({:child_invalidated, child_id}, state) do
-    state = increment_debug_stat(state, :child_invalidated_count)
-    {:noreply, maybe_render_invalidated_child(state, child_id)}
+    if crashed?(state) do
+      {:noreply, state}
+    else
+      state = increment_debug_stat(state, :child_invalidated_count)
+      {:noreply, maybe_render_invalidated_child(state, child_id)}
+    end
   end
 
   def handle_info(@flush_input_batch, state) do
@@ -259,6 +284,9 @@ defmodule Breeze.Server do
 
   def handle_info({:event_reply, ref, reply}, %{pending_ref: ref} = state) do
     case reply do
+      {:crash, crash} ->
+        {:noreply, enter_crash_state(state, crash)}
+
       {:stop, _focused} ->
         stop(state)
 
@@ -292,7 +320,18 @@ defmodule Breeze.Server do
   def handle_info(message, state) do
     case message do
       {:DOWN, _, :process, pid, _reason} when pid == state.view_pid ->
-        stop(state)
+        reason = elem(message, 4)
+
+        cond do
+          crashed?(state) ->
+            {:noreply, state}
+
+          reason == :normal ->
+            stop(state)
+
+          true ->
+            {:noreply, enter_crash_state(state, crash_info(:exit, reason, []))}
+        end
 
       {:DOWN, ref, :process, _pid, _reason} ->
         cond do
@@ -358,20 +397,28 @@ defmodule Breeze.Server do
   end
 
   defp handle_decoded_sync_input({:mouse, event}, state) do
-    handle_mouse(event, state)
+    if crashed?(state), do: {:noreply, state}, else: handle_mouse(event, state)
   end
 
   defp handle_decoded_sync_input({:key, key}, state) do
-    case key do
-      key when key in ["\t", "ShiftTab"] ->
-        state
-        |> touch_interaction()
-        |> apply_input_reply(Breeze.ChildServer.dispatch_input(state.view_pid, key))
+    if crashed?(state) do
+      {:noreply, dispatch_crash_input({:key, key}, touch_interaction(state))}
+    else
+      case key do
+        key when key in ["\t", "ShiftTab"] ->
+          state
+          |> touch_interaction()
+          |> safe_apply_input_reply(fn state ->
+            Breeze.ChildServer.dispatch_input(state.view_pid, key)
+          end)
 
-      key ->
-        state
-        |> touch_interaction()
-        |> apply_input_reply(dispatch_input_hierarchy(state, key))
+        key ->
+          state
+          |> touch_interaction()
+          |> safe_apply_input_reply(fn state ->
+            dispatch_input_hierarchy(state, key)
+          end)
+      end
     end
   end
 
@@ -380,13 +427,19 @@ defmodule Breeze.Server do
   end
 
   defp handle_deferred_input({:key, key}, state) do
-    {:noreply, start_async_dispatch(touch_interaction(state), key)}
+    if crashed?(state) do
+      {:noreply, dispatch_crash_input({:key, key}, touch_interaction(state))}
+    else
+      {:noreply, start_async_dispatch(touch_interaction(state), key)}
+    end
   end
 
   defp handle_deferred_input(_decoded, state), do: {:noreply, state}
 
   defp sync_input_message?({:mouse, _event}, %{pending_ref: nil}), do: true
   defp sync_input_message?({:mouse, _event}, _state), do: false
+
+  defp sync_input_message?({:key, _key}, %{crash: crash}) when not is_nil(crash), do: true
 
   defp sync_input_message?({:key, key}, state) do
     stop_global_key?(key, state) or
@@ -451,117 +504,144 @@ defmodule Breeze.Server do
   defp focused_implicit?(state) do
     case focused_child_chain(state) do
       [{_child_id, %{pid: pid}} | _] ->
-        match?(%{focused_implicit_id: id} when not is_nil(id), Breeze.ChildServer.metadata(pid))
+        case safe_call(fn -> Breeze.ChildServer.metadata(pid) end) do
+          {:ok, metadata} -> match?(%{focused_implicit_id: id} when not is_nil(id), metadata)
+          {:crash, _crash} -> false
+        end
 
       [] ->
-        match?(
-          %{focused_implicit_id: id} when not is_nil(id),
-          Breeze.ChildServer.metadata(state.view_pid)
-        )
+        case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
+          {:ok, metadata} -> match?(%{focused_implicit_id: id} when not is_nil(id), metadata)
+          {:crash, _crash} -> false
+        end
     end
   end
 
   defp handle_mouse(event, state) do
     state
     |> touch_interaction()
-    |> apply_input_reply(Breeze.ChildServer.dispatch_input(state.view_pid, %{"mouse" => event}))
+    |> safe_apply_input_reply(fn state ->
+      Breeze.ChildServer.dispatch_input(state.view_pid, %{"mouse" => event})
+    end)
   end
 
   defp render_base(state, cause \\ :unknown, attempts \\ 1)
 
   defp render_base(state, cause, attempts) do
-    tracking_ref = begin_render_tracking()
-    started_at = System.monotonic_time(:microsecond)
-    profile_scope = make_ref()
-    Breeze.DebugProfiler.reset(profile_scope)
-    root_started_at = System.monotonic_time(:microsecond)
-
-    {:ok, acc, box, decorations} =
-      Breeze.ChildServer.render_snapshot(state.view_pid,
-        implicit_state: %{},
-        terminal: state.terminal,
-        render_tracking_ref: tracking_ref,
-        profile_scope: profile_scope,
-        profile_label: inspect(root_view_module(state)),
-        live_view: fn attrs, opts ->
-          render_live_child(attrs, opts, state, profile_scope, tracking_ref)
-        end
-      )
-
-    root_snapshot_us = System.monotonic_time(:microsecond) - root_started_at
-
-    focused =
-      case Breeze.ChildServer.metadata(state.view_pid) do
-        %{focused: focused} -> focused
-        _ -> state.focused
-      end
-
-    %{
-      missing: missing,
-      decorations: child_decorations,
-      child_timings: child_timings
-    } = finish_render_tracking(tracking_ref)
-
-    profile_entries = Breeze.DebugProfiler.snapshot(profile_scope)
-    {state, started?} = ensure_children(state, missing)
-
-    if started? do
-      render_base(state, cause, attempts)
+    if crashed?(state) do
+      state
     else
-      cond do
-        attempts > 0 and focused != state.focused ->
-          render_base(%{state | focused: focused}, cause, attempts - 1)
+      try do
+        tracking_ref = begin_render_tracking()
+        started_at = System.monotonic_time(:microsecond)
+        profile_scope = make_ref()
+        Breeze.DebugProfiler.reset(profile_scope)
+        root_started_at = System.monotonic_time(:microsecond)
 
-        true ->
-          decorations = decorations ++ child_decorations
-          state = %{state | focused: focused}
-          prep_started_at = System.monotonic_time(:microsecond)
-          {base_output, decorations} = prepare_decorations(box.content, decorations, state)
-          prepare_decorations_us = System.monotonic_time(:microsecond) - prep_started_at
-          render_base_us = System.monotonic_time(:microsecond) - started_at
+        {:ok, acc, box, decorations} =
+          case safe_call(fn ->
+                 Breeze.ChildServer.render_snapshot(state.view_pid,
+                   implicit_state: %{},
+                   terminal: state.terminal,
+                   render_tracking_ref: tracking_ref,
+                   profile_scope: profile_scope,
+                   profile_label: inspect(root_view_module(state)),
+                   live_view: fn attrs, opts ->
+                     render_live_child(attrs, opts, state, profile_scope, tracking_ref)
+                   end
+                 )
+               end) do
+            {:ok, result} ->
+              result
 
-          debug_live_child_us = debug_live_child_us(child_timings)
-          app_live_children = non_debug_child_timings(child_timings)
+            {:crash, crash} ->
+              throw({:crash_state, enter_crash_state(state, crash)})
+          end
 
-          state
-          |> increment_debug_stat(:render_base_count)
-          |> Map.put(:base_output, base_output)
-          |> Map.put(:rendered_elements, viewports_from_acc(acc))
-          |> Map.put(:rendered_boxes, acc.boxes)
-          |> Map.put(:decorations, decorations)
-          |> Map.put(:focused, focused)
-          |> Map.put(:last_render_at, System.monotonic_time(:millisecond))
-          |> put_debug_stat(:last_render_cause, cause)
-          |> put_debug_stat(:last_root_snapshot_us, root_snapshot_us)
-          |> put_debug_stat(
-            :last_root_snapshot_app_us,
-            max(root_snapshot_us - debug_live_child_us, 0)
-          )
-          |> put_debug_stat(:last_live_children_us, sum_timing_us(child_timings))
-          |> put_debug_stat(:last_live_children_app_us, sum_timing_us(app_live_children))
-          |> put_debug_stat(:last_live_children, normalize_child_timings(app_live_children))
-          |> put_debug_stat(:last_render_profile, summarize_profile(profile_entries))
-          |> put_debug_stat(:last_reconcile_passes, 0)
-          |> put_debug_stat(:last_reconcile_changed_ids, nil)
-          |> put_debug_stat(:last_prepare_decorations_us, prepare_decorations_us)
-          |> put_debug_stat(:last_render_base_us, render_base_us)
-          |> put_debug_stat(
-            :last_render_base_app_us,
-            max(render_base_us - debug_live_child_us, 0)
-          )
-          |> render_frame()
-          |> schedule_animation()
+        root_snapshot_us = System.monotonic_time(:microsecond) - root_started_at
+
+        focused =
+          case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
+            {:ok, %{focused: focused}} -> focused
+            {:ok, _} -> state.focused
+            {:crash, crash} -> throw({:crash_state, enter_crash_state(state, crash)})
+          end
+
+        %{
+          missing: missing,
+          decorations: child_decorations,
+          child_timings: child_timings
+        } = finish_render_tracking(tracking_ref)
+
+        profile_entries = Breeze.DebugProfiler.snapshot(profile_scope)
+        {state, started?} = ensure_children(state, missing)
+
+        if started? do
+          render_base(state, cause, attempts)
+        else
+          cond do
+            attempts > 0 and focused != state.focused ->
+              render_base(%{state | focused: focused}, cause, attempts - 1)
+
+            true ->
+              decorations = decorations ++ child_decorations
+              state = %{state | focused: focused}
+              prep_started_at = System.monotonic_time(:microsecond)
+              {base_output, decorations} = prepare_decorations(box.content, decorations, state)
+              prepare_decorations_us = System.monotonic_time(:microsecond) - prep_started_at
+              render_base_us = System.monotonic_time(:microsecond) - started_at
+
+              debug_live_child_us = debug_live_child_us(child_timings)
+              app_live_children = non_debug_child_timings(child_timings)
+
+              state
+              |> increment_debug_stat(:render_base_count)
+              |> Map.put(:base_output, base_output)
+              |> Map.put(:rendered_elements, viewports_from_acc(acc))
+              |> Map.put(:rendered_boxes, acc.boxes)
+              |> Map.put(:decorations, decorations)
+              |> Map.put(:focused, focused)
+              |> Map.put(:last_render_at, System.monotonic_time(:millisecond))
+              |> put_debug_stat(:last_render_cause, cause)
+              |> put_debug_stat(:last_root_snapshot_us, root_snapshot_us)
+              |> put_debug_stat(
+                :last_root_snapshot_app_us,
+                max(root_snapshot_us - debug_live_child_us, 0)
+              )
+              |> put_debug_stat(:last_live_children_us, sum_timing_us(child_timings))
+              |> put_debug_stat(:last_live_children_app_us, sum_timing_us(app_live_children))
+              |> put_debug_stat(:last_live_children, normalize_child_timings(app_live_children))
+              |> put_debug_stat(:last_render_profile, summarize_profile(profile_entries))
+              |> put_debug_stat(:last_reconcile_passes, 0)
+              |> put_debug_stat(:last_reconcile_changed_ids, nil)
+              |> put_debug_stat(:last_prepare_decorations_us, prepare_decorations_us)
+              |> put_debug_stat(:last_render_base_us, render_base_us)
+              |> put_debug_stat(
+                :last_render_base_app_us,
+                max(render_base_us - debug_live_child_us, 0)
+              )
+              |> render_frame()
+              |> schedule_animation()
+          end
+        end
+      catch
+        {:crash_state, crash_state} -> crash_state
       end
     end
   end
 
   defp maybe_render_base(%{view_pid: pid} = state, cause) do
-    if Process.alive?(pid), do: render_base(state, cause), else: state
+    if crashed?(state) do
+      state
+    else
+      if Process.alive?(pid), do: render_base(state, cause), else: state
+    end
   end
 
   defp maybe_render_invalidated_child(state, child_id) do
     case render_invalidated_child(state, child_id) do
       {:ok, state} -> state
+      {:crash, state} -> state
       :error -> maybe_render_base(state, :child_invalidated)
     end
   end
@@ -587,18 +667,29 @@ defmodule Breeze.Server do
           child_started_at = System.monotonic_time(:microsecond)
 
           {:ok, child_acc, child_box, child_decorations} =
-            Breeze.ChildServer.render_snapshot(pid,
-              focused: local_focused,
-              implicit_state: %{},
-              terminal: state.terminal,
-              live_prefix: full_id,
-              render_tracking_ref: tracking_ref,
-              profile_scope: profile_scope,
-              profile_label: "#{full_id} #{inspect(state.children[full_id].view)}",
-              live_view: fn child_attrs, child_opts ->
-                render_live_child(child_attrs, child_opts, state, profile_scope, tracking_ref)
-              end
-            )
+            case safe_call(fn ->
+                   Breeze.ChildServer.render_snapshot(pid,
+                     focused: local_focused,
+                     implicit_state: %{},
+                     terminal: state.terminal,
+                     live_prefix: full_id,
+                     render_tracking_ref: tracking_ref,
+                     profile_scope: profile_scope,
+                     profile_label: "#{full_id} #{inspect(state.children[full_id].view)}",
+                     live_view: fn child_attrs, child_opts ->
+                       render_live_child(
+                         child_attrs,
+                         child_opts,
+                         state,
+                         profile_scope,
+                         tracking_ref
+                       )
+                     end
+                   )
+                 end) do
+              {:ok, result} -> result
+              {:crash, crash} -> throw({:crash_state, enter_crash_state(state, crash)})
+            end
 
           track_child_timing(tracking_ref, %{
             id: full_id,
@@ -616,82 +707,97 @@ defmodule Breeze.Server do
   end
 
   defp render_invalidated_child(state, child_id) do
-    with true <- patchable_live_child?(child_id),
-         %{pid: pid, view: view} <- Map.get(state.children, child_id),
-         %Breeze.Viewport{} = viewport <- Map.get(state.rendered_elements, child_id) do
-      tracking_ref = begin_render_tracking()
-      profile_scope = make_ref()
-      Breeze.DebugProfiler.reset(profile_scope)
-      started_at = System.monotonic_time(:microsecond)
+    try do
+      with true <- patchable_live_child?(child_id),
+           %{pid: pid, view: view} <- Map.get(state.children, child_id),
+           %Breeze.Viewport{} = viewport <- Map.get(state.rendered_elements, child_id) do
+        tracking_ref = begin_render_tracking()
+        profile_scope = make_ref()
+        Breeze.DebugProfiler.reset(profile_scope)
+        started_at = System.monotonic_time(:microsecond)
 
-      {:ok, _child_acc, child_box, child_decorations} =
-        Breeze.ChildServer.render_snapshot(pid,
-          focused: strip_live_prefix(state.focused, child_id),
-          implicit_state: %{},
-          terminal: state.terminal,
-          live_prefix: child_id,
-          render_tracking_ref: tracking_ref,
-          profile_scope: profile_scope,
-          profile_label: "#{child_id} #{inspect(view)}",
-          live_view: fn child_attrs, child_opts ->
-            render_live_child(child_attrs, child_opts, state, profile_scope, tracking_ref)
+        {:ok, _child_acc, child_box, child_decorations} =
+          case safe_call(fn ->
+                 Breeze.ChildServer.render_snapshot(pid,
+                   focused: strip_live_prefix(state.focused, child_id),
+                   implicit_state: %{},
+                   terminal: state.terminal,
+                   live_prefix: child_id,
+                   render_tracking_ref: tracking_ref,
+                   profile_scope: profile_scope,
+                   profile_label: "#{child_id} #{inspect(view)}",
+                   live_view: fn child_attrs, child_opts ->
+                     render_live_child(
+                       child_attrs,
+                       child_opts,
+                       state,
+                       profile_scope,
+                       tracking_ref
+                     )
+                   end
+                 )
+               end) do
+            {:ok, result} -> result
+            {:crash, crash} -> throw({:crash_state, enter_crash_state(state, crash)})
           end
-        )
 
-      child_render_us = System.monotonic_time(:microsecond) - started_at
+        child_render_us = System.monotonic_time(:microsecond) - started_at
 
-      %{missing: missing, decorations: tracked_decorations, child_timings: child_timings} =
-        finish_render_tracking(tracking_ref)
+        %{missing: missing, decorations: tracked_decorations, child_timings: child_timings} =
+          finish_render_tracking(tracking_ref)
 
-      cond do
-        missing != [] ->
-          :error
+        cond do
+          missing != [] ->
+            :error
 
-        child_decorations != [] or tracked_decorations != [] or child_timings != [] ->
-          :error
+          child_decorations != [] or tracked_decorations != [] or child_timings != [] ->
+            :error
 
-        true ->
-          fragment =
-            child_box
-            |> wrap_child_fragment(viewport)
-            |> BackBreeze.Box.render(terminal: state.terminal)
-            |> Map.fetch!(:content)
+          true ->
+            fragment =
+              child_box
+              |> wrap_child_fragment(viewport)
+              |> BackBreeze.Box.render(terminal: state.terminal)
+              |> Map.fetch!(:content)
 
-          composed_at = System.monotonic_time(:microsecond)
-          payload = child_patch_payload(fragment, viewport)
-          terminal = Termite.Terminal.write(state.terminal, payload)
-          written_at = System.monotonic_time(:microsecond)
-          total_us = written_at - started_at
-          write_us = written_at - composed_at
-          profile_entries = Breeze.DebugProfiler.snapshot(profile_scope)
+            composed_at = System.monotonic_time(:microsecond)
+            payload = child_patch_payload(fragment, viewport)
+            terminal = Termite.Terminal.write(state.terminal, payload)
+            written_at = System.monotonic_time(:microsecond)
+            total_us = written_at - started_at
+            write_us = written_at - composed_at
+            profile_entries = Breeze.DebugProfiler.snapshot(profile_scope)
 
-          {:ok,
-           state
-           |> Map.put(:terminal, terminal)
-           |> Map.put(:last_frame_payload, nil)
-           |> put_debug_stat(:last_render_cause, :child_patch)
-           |> put_debug_stat(:last_root_snapshot_us, 0)
-           |> put_debug_stat(:last_root_snapshot_app_us, 0)
-           |> put_debug_stat(:last_live_children_us, child_render_us)
-           |> put_debug_stat(:last_live_children_app_us, child_render_us)
-           |> put_debug_stat(
-             :last_live_children,
-             normalize_child_timings([%{id: child_id, view: view, us: child_render_us}])
-           )
-           |> put_debug_stat(:last_render_profile, summarize_profile(profile_entries))
-           |> put_debug_stat(:last_reconcile_passes, 1)
-           |> put_debug_stat(:last_reconcile_changed_ids, [child_id])
-           |> put_debug_stat(:last_prepare_decorations_us, 0)
-           |> put_debug_stat(:last_render_base_us, total_us)
-           |> put_debug_stat(:last_render_base_app_us, total_us)
-           |> put_debug_stat(:last_frame_compose_us, composed_at - started_at)
-           |> put_debug_stat(:last_terminal_write_us, write_us)
-           |> put_debug_stat(:last_frame_us, total_us)
-           |> put_debug_stat(:last_frame_bytes, byte_size(fragment))
-           |> put_debug_stat(:overlay_count, 0)}
+            {:ok,
+             state
+             |> Map.put(:terminal, terminal)
+             |> Map.put(:last_frame_payload, nil)
+             |> put_debug_stat(:last_render_cause, :child_patch)
+             |> put_debug_stat(:last_root_snapshot_us, 0)
+             |> put_debug_stat(:last_root_snapshot_app_us, 0)
+             |> put_debug_stat(:last_live_children_us, child_render_us)
+             |> put_debug_stat(:last_live_children_app_us, child_render_us)
+             |> put_debug_stat(
+               :last_live_children,
+               normalize_child_timings([%{id: child_id, view: view, us: child_render_us}])
+             )
+             |> put_debug_stat(:last_render_profile, summarize_profile(profile_entries))
+             |> put_debug_stat(:last_reconcile_passes, 1)
+             |> put_debug_stat(:last_reconcile_changed_ids, [child_id])
+             |> put_debug_stat(:last_prepare_decorations_us, 0)
+             |> put_debug_stat(:last_render_base_us, total_us)
+             |> put_debug_stat(:last_render_base_app_us, total_us)
+             |> put_debug_stat(:last_frame_compose_us, composed_at - started_at)
+             |> put_debug_stat(:last_terminal_write_us, write_us)
+             |> put_debug_stat(:last_frame_us, total_us)
+             |> put_debug_stat(:last_frame_bytes, byte_size(fragment))
+             |> put_debug_stat(:overlay_count, 0)}
+        end
+      else
+        _ -> :error
       end
-    else
-      _ -> :error
+    catch
+      {:crash_state, crash_state} -> {:crash, crash_state}
     end
   end
 
@@ -984,6 +1090,162 @@ defmodule Breeze.Server do
 
     Termite.Terminal.write(terminal, "\r")
     System.halt()
+  end
+
+  defp crashed?(%{crash: crash}), do: not is_nil(crash)
+
+  defp safe_apply_input_reply(state, fun) do
+    case safe_call(fn -> fun.(state) end) do
+      {:ok, {:crash, crash}} -> {:noreply, enter_crash_state(state, crash)}
+      {:ok, reply} -> apply_input_reply(state, reply)
+      {:crash, crash} -> {:noreply, enter_crash_state(state, crash)}
+    end
+  end
+
+  defp safe_call(fun) when is_function(fun, 0) do
+    try do
+      {:ok, fun.()}
+    rescue
+      exception ->
+        {:crash, crash_info(:error, exception, __STACKTRACE__)}
+    catch
+      :exit, reason ->
+        {:crash, crash_info(:exit, reason, __STACKTRACE__)}
+
+      kind, reason ->
+        {:crash, crash_info(kind, reason, __STACKTRACE__)}
+    end
+  end
+
+  defp crash_info(kind, reason, stacktrace) do
+    %{
+      kind: kind,
+      reason: reason,
+      stacktrace: stacktrace,
+      selected_index: nil,
+      focused: "error-stacktrace",
+      implicit_state: %{}
+    }
+  end
+
+  defp enter_crash_state(state, crash) do
+    cancel_timer(state.animation_timer)
+    terminal = apply_mouse_mode(state.terminal, false)
+    crash = Breeze.ErrorView.prepare_crash(state.view, crash, terminal.size)
+
+    state
+    |> Map.put(:terminal, terminal)
+    |> Map.put(:crash, crash)
+    |> Map.put(:pending_ref, nil)
+    |> Map.put(:pending_started_at, nil)
+    |> Map.put(:input_flush_scheduled?, false)
+    |> Map.put(:queued_input, [])
+    |> Map.put(:animation_timer, nil)
+    |> Map.put(:next_tick_at, nil)
+    |> Map.put(:decorations, [])
+    |> put_debug_stat(:last_render_cause, :crash)
+    |> render_crash()
+  end
+
+  defp cancel_timer(nil), do: :ok
+  defp cancel_timer(timer), do: Process.cancel_timer(timer)
+
+  defp render_crash(state) do
+    crash = Breeze.ErrorView.prepare_crash(state.view, state.crash, state.terminal.size)
+
+    content =
+      Breeze.ErrorView.render_assigns(state.view, crash, state.terminal.size)
+      |> then(
+        &Breeze.Renderer.render_to_string(Breeze.ErrorView, &1,
+          terminal: state.terminal,
+          focused: crash.focused,
+          implicit_state: crash.implicit_state
+        )
+      )
+
+    state
+    |> Map.put(:crash, crash)
+    |> Map.put(:base_output, content)
+    |> Map.put(:last_frame_payload, nil)
+    |> render_frame()
+  end
+
+  defp dispatch_crash_input(input, %{crash: crash} = state) do
+    case Breeze.ErrorView.handle_input(state.view, crash, input, state.terminal.size) do
+      :restart ->
+        restart_after_crash(state)
+
+      {:update, updated_crash} ->
+        state |> Map.put(:crash, updated_crash) |> render_crash()
+    end
+  end
+
+  defp restart_after_crash(state) do
+    state = %{state | terminal: apply_mouse_mode(state.terminal, state.mouse_mode)}
+
+    case start_root_view(state) do
+      {:ok, pid, focused} ->
+        state
+        |> Map.put(:view_pid, pid)
+        |> Map.put(:focused, focused)
+        |> Map.put(:crash, nil)
+        |> Map.put(:children, %{})
+        |> Map.put(:decorations, [])
+        |> Map.put(:base_output, "")
+        |> Map.put(:last_frame_payload, nil)
+        |> Map.put(:pending_ref, nil)
+        |> Map.put(:pending_started_at, nil)
+        |> Map.put(:queued_input, [])
+        |> Map.put(:input_flush_scheduled?, false)
+        |> maybe_render_base(:restart)
+
+      {:error, crash} ->
+        enter_crash_state(state, crash)
+    end
+  end
+
+  defp apply_mouse_mode(terminal, false), do: Termite.Screen.disable_mouse(terminal)
+  defp apply_mouse_mode(terminal, nil), do: Termite.Screen.disable_mouse(terminal)
+  defp apply_mouse_mode(terminal, true), do: Termite.Screen.enable_mouse(terminal)
+
+  defp apply_mouse_mode(terminal, opts) when is_list(opts),
+    do: Termite.Screen.enable_mouse(terminal, opts)
+
+  defp start_root_view(state) do
+    session = self()
+
+    case safe_call(fn ->
+           Breeze.ChildServer.start(
+             view: state.view,
+             start_opts: state.start_opts || [],
+             terminal: state.terminal,
+             server: self(),
+             global_keybindings: state.global_keybindings || [],
+             invalidate: fn -> send(session, :child_invalidated) end
+           )
+         end) do
+      {:ok, {:ok, pid}} ->
+        Process.monitor(pid)
+
+        focused =
+          case safe_call(fn -> Breeze.ChildServer.metadata(pid) end) do
+            {:ok, %{focused: focused}} -> focused
+            _ -> nil
+          end
+
+        {:ok, pid, focused}
+
+      {:ok, other} ->
+        {:error,
+         crash_info(
+           :error,
+           RuntimeError.exception("unexpected child start result: #{inspect(other)}"),
+           []
+         )}
+
+      {:crash, crash} ->
+        {:error, crash}
+    end
   end
 
   defp ensure_children(state, missing) do
@@ -1281,8 +1543,8 @@ defmodule Breeze.Server do
   end
 
   defp root_view_module(%{children: _} = state) do
-    case Breeze.ChildServer.metadata(state.view_pid) do
-      %{view: view} -> view
+    case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
+      {:ok, %{view: view}} -> view
       _ -> nil
     end
   end
@@ -1292,16 +1554,34 @@ defmodule Breeze.Server do
       state
       |> focused_child_chain()
       |> Enum.reduce_while(nil, fn {child_id, %{pid: pid}}, _acc ->
-        reply = Breeze.ChildServer.dispatch_input(pid, key) |> namespace_child_reply(child_id)
+        case safe_call(fn -> Breeze.ChildServer.dispatch_input(pid, key) end) do
+          {:ok, reply} ->
+            reply = namespace_child_reply(reply, child_id)
 
-        case reply do
-          {:noreply, _focused, true} -> {:halt, reply}
-          {:stop, _focused, _consumed} -> {:halt, reply}
-          _ -> {:cont, nil}
+            case reply do
+              {:noreply, _focused, true} -> {:halt, reply}
+              {:stop, _focused, _consumed} -> {:halt, reply}
+              _ -> {:cont, nil}
+            end
+
+          {:crash, crash} ->
+            {:halt, {:crash, crash}}
         end
       end)
 
-    child_reply || Breeze.ChildServer.dispatch_input(state.view_pid, key)
+    case child_reply do
+      {:crash, _crash} = crash ->
+        crash
+
+      nil ->
+        case safe_call(fn -> Breeze.ChildServer.dispatch_input(state.view_pid, key) end) do
+          {:ok, reply} -> reply
+          {:crash, crash} -> {:crash, crash}
+        end
+
+      reply ->
+        reply
+    end
   end
 
   defp focused_child_chain(%{focused: nil}), do: []

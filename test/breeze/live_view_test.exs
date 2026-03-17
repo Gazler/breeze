@@ -4,6 +4,7 @@ defmodule Breeze.LiveViewTest do
   alias Breeze.ChildServer
   alias Breeze.Renderer
   alias Breeze.Template
+  import ExUnit.CaptureLog
 
   defmodule FakeAdapter do
     @behaviour Termite.Terminal.Adapter
@@ -123,6 +124,27 @@ defmodule Breeze.LiveViewTest do
       <box id="spinner" implicit={Breeze.Implicit.AsyncSpinner} style="width-1">
       </box>
       """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule CrashingView do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok, term |> assign(label: "ready") |> focus("boom")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box id="boom" focusable>{@label}</box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "c"}, _term) do
+      raise "boom"
     end
 
     def handle_event(_, _, term), do: {:noreply, term}
@@ -421,13 +443,135 @@ defmodule Breeze.LiveViewTest do
       )
 
     send(pid, {reader, {:data, "\eOQ"}})
-    Process.sleep(50)
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      Map.has_key?(state.children, "debug") and state.base_output =~ "Count: 1"
+    end)
 
     state = :sys.get_state(pid)
     assert Map.has_key?(state.children, "debug")
     assert state.base_output =~ "Count: 1"
 
     Process.exit(pid, :normal)
+  end
+
+  test "server renders a crash screen instead of tearing down the terminal on view exceptions" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+      reader = terminal.reader
+
+      {:ok, pid} =
+        Breeze.Server.start_app_link(
+          view: CrashingView,
+          terminal: terminal,
+          reader: reader,
+          global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+        )
+
+      send(pid, {reader, {:data, "c"}})
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+
+        state.crash &&
+          state.base_output =~ "Breeze Error" &&
+          state.base_output =~ "CrashingView" &&
+          state.base_output =~ "RuntimeError"
+      end)
+
+      state = :sys.get_state(pid)
+
+      assert state.crash
+      assert state.base_output =~ "Breeze Error"
+      assert state.base_output =~ "CrashingView"
+      assert state.base_output =~ "RuntimeError"
+      assert state.base_output =~ "Crash Details"
+      assert state.base_output =~ "Selected Frame"
+      assert state.base_output =~ "Stacktrace"
+      assert state.base_output =~ "boom"
+
+      Process.exit(pid, :normal)
+    end)
+  end
+
+  test "crash screen tab switches focus between panes" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+      reader = terminal.reader
+
+      {:ok, pid} =
+        Breeze.Server.start_app_link(
+          view: CrashingView,
+          terminal: terminal,
+          reader: reader,
+          global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+        )
+
+      send(pid, {reader, {:data, "c"}})
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+        state.crash && state.crash.focused == "error-stacktrace"
+      end)
+
+      initial_state = :sys.get_state(pid)
+      assert initial_state.crash
+      assert initial_state.crash.focused == "error-stacktrace"
+
+      send(pid, {reader, {:data, "\t"}})
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+        state.crash && state.crash.focused == "error-history"
+      end)
+
+      next_state = :sys.get_state(pid)
+      assert next_state.crash.focused == "error-history"
+
+      Process.exit(pid, :normal)
+    end)
+  end
+
+  test "server restarts from a clean slate after a crash when r is pressed" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+      reader = terminal.reader
+
+      {:ok, pid} =
+        Breeze.Server.start_app_link(
+          view: CrashingView,
+          terminal: terminal,
+          reader: reader,
+          global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+        )
+
+      send(pid, {reader, {:data, "c"}})
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+        not is_nil(state.crash)
+      end)
+
+      crashed_state = :sys.get_state(pid)
+      assert crashed_state.crash
+
+      send(pid, {reader, {:data, "r"}})
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+
+        is_nil(state.crash) and state.base_output =~ "ready" and
+          not String.contains?(state.base_output, "Breeze Error")
+      end)
+
+      restarted_state = :sys.get_state(pid)
+      refute restarted_state.crash
+      assert restarted_state.base_output =~ "ready"
+      refute restarted_state.base_output =~ "Breeze Error"
+
+      Process.exit(pid, :normal)
+    end)
   end
 
   test "server patches fixed live child invalidations without rerendering the root" do
@@ -455,7 +599,11 @@ defmodule Breeze.LiveViewTest do
 
     child = state.children["debug"]
     assert {:noreply, "button", true} = Breeze.ChildServer.dispatch_input(child.pid, "+")
-    Process.sleep(100)
+
+    wait_until(fn ->
+      next_state = :sys.get_state(pid)
+      next_state.debug_stats[:last_render_cause] == :child_patch
+    end)
 
     writes = drain_terminal_writes()
     next_state = :sys.get_state(pid)
@@ -486,7 +634,11 @@ defmodule Breeze.LiveViewTest do
     drain_terminal_writes()
 
     assert {:noreply, "button", true} = Breeze.ChildServer.dispatch_input(child.pid, "+")
-    Process.sleep(100)
+
+    wait_until(fn ->
+      next_state = :sys.get_state(pid)
+      next_state.debug_stats[:render_base_count] > initial_render_count
+    end)
 
     next_state = :sys.get_state(pid)
 
@@ -518,4 +670,17 @@ defmodule Breeze.LiveViewTest do
       10 -> Enum.reverse(writes)
     end
   end
+
+  defp wait_until(fun, attempts \\ 20)
+
+  defp wait_until(fun, attempts) when attempts > 0 do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(10)
+      wait_until(fun, attempts - 1)
+    end
+  end
+
+  defp wait_until(_fun, 0), do: flunk("condition not met")
 end

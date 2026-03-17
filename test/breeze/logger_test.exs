@@ -105,6 +105,31 @@ defmodule Breeze.LoggerTest do
     end)
   end
 
+  test "logger can disable the clear shortcut" do
+    {:ok, pid} =
+      ChildServer.start(
+        view: Breeze.Logger,
+        start_opts: [height: 6, max_lines: 20, clear_key: nil]
+      )
+
+    {:ok, _acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+
+    Logger.info("dont-clear-me-#{System.unique_integer([:positive])}")
+    Logger.flush()
+
+    wait_until(fn ->
+      {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+      box.content =~ "dont-clear-me-"
+    end)
+
+    assert {:noreply, "logger", false} =
+             ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "c"})
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+    assert box.content =~ "dont-clear-me-"
+    refute box.content =~ "Press c to clear."
+  end
+
   test "logger autoscrolls while pinned to the bottom" do
     lines =
       for index <- 1..8 do
