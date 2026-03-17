@@ -247,6 +247,15 @@ defmodule Breeze.HTMLFormatter do
 
   defp denormalize_assign_refs(ast) do
     Macro.prewalk(ast, fn
+      {:__breeze_assign__, name} when is_atom(name) ->
+        {:@, [], [{name, [], nil}]}
+
+      {:__breeze_var__, name} when is_atom(name) ->
+        {name, [], nil}
+
+      {:__breeze_literal__, value} ->
+        value
+
       {{:., _, [{:__aliases__, _, [:Map]}, :get]}, _, [{:assigns, _, _}, name]}
       when is_atom(name) ->
         {:@, [], [{name, [], nil}]}

@@ -216,6 +216,11 @@ defmodule Breeze.Implicit.InputTest do
              Input.handle_event(nil, %{"key" => "\n"}, %{value: "hello", cursor: 2})
   end
 
+  test "non-binary keys are ignored" do
+    assert {:noreply, %{value: "hello", cursor: 2}} =
+             Input.handle_event(nil, %{"key" => %{"key" => "F2"}}, %{value: "hello", cursor: 2})
+  end
+
   test "delete removes the grapheme under the cursor" do
     assert {{:change, %{value: "helo", cursor: 2}}, %{value: "helo", cursor: 2}} =
              Input.handle_event(nil, %{"key" => "Delete"}, %{value: "hello", cursor: 2})

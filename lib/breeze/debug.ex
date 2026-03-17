@@ -34,14 +34,69 @@ defmodule Breeze.Debug do
       assign(assigns,
         root_style: root_style(assigns),
         input_label: fmt_us(stats[:last_input_us]),
-        root_label: fmt_us(stats[:last_root_snapshot_us]),
-        live_label: fmt_us(stats[:last_live_children_us]),
-        base_label: fmt_us(stats[:last_render_base_us]),
-        prep_label: fmt_us(stats[:last_prepare_decorations_us]),
-        compose_label: fmt_us(stats[:last_frame_compose_us]),
-        write_label: fmt_us(stats[:last_terminal_write_us]),
-        frame_label: fmt_us(stats[:last_frame_us]),
-        anim_label: fmt_us(stats[:last_animation_us]),
+        cause_label: fmt_atom(stats[:last_render_cause]),
+        root_label:
+          fmt_window(
+            stats[:last_root_snapshot_app_us] || stats[:last_root_snapshot_us],
+            stats[{:avg, :last_root_snapshot_app_us}] || stats[{:avg, :last_root_snapshot_us}],
+            stats[{:max, :last_root_snapshot_app_us}] || stats[{:max, :last_root_snapshot_us}]
+          ),
+        live_label:
+          fmt_window(
+            stats[:last_live_children_app_us] || stats[:last_live_children_us],
+            stats[{:avg, :last_live_children_app_us}] || stats[{:avg, :last_live_children_us}],
+            stats[{:max, :last_live_children_app_us}] || stats[{:max, :last_live_children_us}]
+          ),
+        base_label:
+          fmt_window(
+            stats[:last_render_base_app_us] || stats[:last_render_base_us],
+            stats[{:avg, :last_render_base_app_us}] || stats[{:avg, :last_render_base_us}],
+            stats[{:max, :last_render_base_app_us}] || stats[{:max, :last_render_base_us}]
+          ),
+        prep_label:
+          fmt_window(
+            stats[:last_prepare_decorations_us],
+            stats[{:avg, :last_prepare_decorations_us}],
+            stats[{:max, :last_prepare_decorations_us}]
+          ),
+        compose_label:
+          fmt_window(
+            stats[:last_frame_compose_us],
+            stats[{:avg, :last_frame_compose_us}],
+            stats[{:max, :last_frame_compose_us}]
+          ),
+        write_label:
+          fmt_window(
+            stats[:last_terminal_write_us],
+            stats[{:avg, :last_terminal_write_us}],
+            stats[{:max, :last_terminal_write_us}]
+          ),
+        frame_label:
+          fmt_window(
+            stats[:last_frame_us],
+            stats[{:avg, :last_frame_us}],
+            stats[{:max, :last_frame_us}]
+          ),
+        anim_label:
+          fmt_window(
+            stats[:last_animation_us],
+            stats[{:avg, :last_animation_us}],
+            stats[{:max, :last_animation_us}]
+          ),
+        render_count_label:
+          fmt_rate(stats[:render_base_count] || 0, stats[{:rate, :render_base_count}] || 0),
+        flush_count_label:
+          fmt_rate(
+            stats[:flush_input_batch_count] || 0,
+            stats[{:rate, :flush_input_batch_count}] || 0
+          ),
+        invalidation_count_label:
+          fmt_rate(
+            stats[:child_invalidated_count] || 0,
+            stats[{:rate, :child_invalidated_count}] || 0
+          ),
+        animation_count_label:
+          fmt_rate(stats[:animation_tick_count] || 0, stats[{:rate, :animation_tick_count}] || 0),
         bytes_label: stats[:last_frame_bytes] || 0,
         overlays_label: stats[:overlay_count] || 0,
         focus_label: stats[:focused] || "-",
@@ -60,14 +115,19 @@ defmodule Breeze.Debug do
       <box style="bg-0 width-full height-full">
         <box style="bold bg-0 width-full">Debug</box>
         <box style="bg-0 width-full">input: {@input_label}</box>
-        <box style="bg-0 width-full">root: {@root_label}</box>
-        <box style="bg-0 width-full">live: {@live_label}</box>
-        <box style="bg-0 width-full">base: {@base_label}</box>
-        <box style="bg-0 width-full">prep: {@prep_label}</box>
-        <box style="bg-0 width-full">compose: {@compose_label}</box>
-        <box style="bg-0 width-full">write: {@write_label}</box>
-        <box style="bg-0 width-full">frame: {@frame_label}</box>
-        <box style="bg-0 width-full">anim: {@anim_label}</box>
+        <box style="bg-0 width-full">cause: {@cause_label}</box>
+        <box style="bg-0 width-full">root l/a/m: {@root_label}</box>
+        <box style="bg-0 width-full">live l/a/m: {@live_label}</box>
+        <box style="bg-0 width-full">base l/a/m: {@base_label}</box>
+        <box style="bg-0 width-full">prep l/a/m: {@prep_label}</box>
+        <box style="bg-0 width-full">comp l/a/m: {@compose_label}</box>
+        <box style="bg-0 width-full">write l/a/m: {@write_label}</box>
+        <box style="bg-0 width-full">frame l/a/m: {@frame_label}</box>
+        <box style="bg-0 width-full">anim l/a/m: {@anim_label}</box>
+        <box style="bg-0 width-full">renders: {@render_count_label}</box>
+        <box style="bg-0 width-full">flushes: {@flush_count_label}</box>
+        <box style="bg-0 width-full">invalid: {@invalidation_count_label}</box>
+        <box style="bg-0 width-full">ticks: {@animation_count_label}</box>
         <box style="bg-0 width-full">bytes: {@bytes_label} overlays: {@overlays_label}</box>
         <box style="bg-0 width-full">focus: {@focus_label} pending: {@pending_label}</box>
         <box style="bg-0 width-full">hot: {@hottest_child_label}</box>
@@ -90,6 +150,17 @@ defmodule Breeze.Debug do
 
   defp fmt_us(nil), do: "-"
   defp fmt_us(value) when is_integer(value), do: "#{Float.round(value / 1000, 2)}ms"
+  defp fmt_atom(nil), do: "-"
+  defp fmt_atom(value) when is_atom(value), do: Atom.to_string(value)
+  defp fmt_atom(value), do: to_string(value)
+
+  defp fmt_window(last, avg, max_value) do
+    "#{fmt_us(last)}/#{fmt_us(avg)}/#{fmt_us(max_value)}"
+  end
+
+  defp fmt_rate(total, rate) do
+    "#{total} (#{rate}/s)"
+  end
 
   defp fmt_screen(%{width: width, height: height}), do: "#{width}x#{height}"
   defp fmt_screen(_screen), do: "-"

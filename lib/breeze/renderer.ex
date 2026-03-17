@@ -2,6 +2,7 @@ defmodule Breeze.Renderer do
   @moduledoc false
 
   alias BackBreeze.Box
+  alias BackBreeze.RenderCache
   alias BackBreeze.Style
 
   def render_to_string(mod, assigns, opts \\ []) do
@@ -311,7 +312,7 @@ defmodule Breeze.Renderer do
 
     %{
       acc
-      | id: child_offset + child_last_id,
+      | id: child_offset + child_last_id + 1,
         elements: elements,
         boxes: Map.merge(Map.get(acc, :boxes, %{}), Map.get(child_acc, :boxes, %{})),
         ids: Enum.reverse(child_acc.ids) ++ acc.ids,
@@ -329,6 +330,9 @@ defmodule Breeze.Renderer do
     |> Map.put(:focusables, namespace_ids(acc.focusables, prefix))
     |> Map.put(:boxes, namespace_box_map(Map.get(acc, :boxes, %{}), prefix))
     |> Map.put(:elements, namespace_elements(acc.elements, prefix))
+    |> Map.update(:elements, %{0 => [id: prefix]}, fn elements ->
+      Map.update(elements, 0, [id: prefix], &Keyword.put(&1, :id, prefix))
+    end)
   end
 
   defp inherit_implicit_owner(child_flags, flags) do
@@ -402,28 +406,37 @@ defmodule Breeze.Renderer do
   end
 
   defp string_to_styles(str, opts) do
-    str =
-      case Keyword.get_values(opts, :style) do
-        [] -> str
-        other -> str <> " " <> Enum.join(other, " ")
-      end
+    extra_styles = Keyword.get_values(opts, :style)
+    focus? = Keyword.get(opts, :focus, false)
+    selected? = Keyword.get(opts, :selected, false)
 
-    {bb_style, attributes} =
-      String.split(str, " ")
-      |> Enum.map(&String.split(&1, ":"))
-      |> Enum.sort_by(&length/1)
-      |> Enum.reduce({%Style{}, %{}}, fn style, acc ->
-        style =
-          Enum.reduce_while(style, nil, fn
-            "focus", _ -> if Keyword.get(opts, :focus), do: {:cont, nil}, else: {:halt, nil}
-            "selected", _ -> if Keyword.get(opts, :selected), do: {:cont, nil}, else: {:halt, nil}
-            other, _ -> {:halt, other}
+    RenderCache.fetch_stable(
+      {:breeze_string_to_styles, str, extra_styles, focus?, selected?},
+      fn ->
+        str =
+          case extra_styles do
+            [] -> str
+            other -> str <> " " <> Enum.join(other, " ")
+          end
+
+        {bb_style, attributes} =
+          String.split(str, " ")
+          |> Enum.map(&String.split(&1, ":"))
+          |> Enum.sort_by(&length/1)
+          |> Enum.reduce({%Style{}, %{}}, fn style, acc ->
+            style =
+              Enum.reduce_while(style, nil, fn
+                "focus", _ -> if focus?, do: {:cont, nil}, else: {:halt, nil}
+                "selected", _ -> if selected?, do: {:cont, nil}, else: {:halt, nil}
+                other, _ -> {:halt, other}
+              end)
+
+            apply_style(style, acc)
           end)
 
-        apply_style(style, acc)
-      end)
-
-    struct(Breeze.Element, %{style: Map.from_struct(bb_style), attributes: attributes})
+        struct(Breeze.Element, %{style: Map.from_struct(bb_style), attributes: attributes})
+      end
+    )
   end
 
   defp apply_style("border", {style, attrs}), do: {Style.border(style), attrs}
@@ -486,6 +499,39 @@ defmodule Breeze.Renderer do
   defp apply_style("absolute", {style, attrs}), do: {style, Map.put(attrs, :position, :absolute)}
   defp apply_style("fixed", {style, attrs}), do: {style, Map.put(attrs, :position, :fixed)}
 
+  defp apply_style("center", {style, attrs}) do
+    {style, attrs |> Map.put(:left, :center) |> Map.put(:top, :center)}
+  end
+
+  defp apply_style("center-x", {style, attrs}) do
+    {style, Map.put(attrs, :left, :center)}
+  end
+
+  defp apply_style("center-y", {style, attrs}) do
+    {style, Map.put(attrs, :top, :center)}
+  end
+
+  defp apply_style("inset-x-" <> num, {style, attrs}) do
+    inset = String.to_integer(num)
+    {style, attrs |> Map.put(:left, inset) |> Map.put(:right, inset)}
+  end
+
+  defp apply_style("inset-y-" <> num, {style, attrs}) do
+    inset = String.to_integer(num)
+    {style, attrs |> Map.put(:top, inset) |> Map.put(:bottom, inset)}
+  end
+
+  defp apply_style("inset-" <> num, {style, attrs}) do
+    inset = String.to_integer(num)
+
+    {style,
+     attrs
+     |> Map.put(:left, inset)
+     |> Map.put(:right, inset)
+     |> Map.put(:top, inset)
+     |> Map.put(:bottom, inset)}
+  end
+
   defp apply_style("left-" <> num, {style, attrs}),
     do: {style, Map.put(attrs, :left, String.to_integer(num))}
 
@@ -511,6 +557,25 @@ defmodule Breeze.Renderer do
 
   defp apply_style("height-" <> num, {style, attrs}),
     do: {Style.height(style, String.to_integer(num)), attrs}
+
+  defp apply_style("padding-top-" <> num, {style, attrs}),
+    do: {Style.padding_top(style, String.to_integer(num)), attrs}
+
+  defp apply_style("padding-right-" <> num, {style, attrs}),
+    do: {Style.padding_right(style, String.to_integer(num)), attrs}
+
+  defp apply_style("padding-bottom-" <> num, {style, attrs}),
+    do: {Style.padding_bottom(style, String.to_integer(num)), attrs}
+
+  defp apply_style("padding-left-" <> num, {style, attrs}),
+    do: {Style.padding_left(style, String.to_integer(num)), attrs}
+
+  defp apply_style("padding-" <> num, {style, attrs}),
+    do: {Style.padding(style, String.to_integer(num)), attrs}
+
+  defp apply_style("text-left", {style, attrs}), do: {Style.text_align(style, :left), attrs}
+  defp apply_style("text-center", {style, attrs}), do: {Style.text_align(style, :center), attrs}
+  defp apply_style("text-right", {style, attrs}), do: {Style.text_align(style, :right), attrs}
 
   defp apply_style("text-" <> num, {style, attrs}),
     do: {Style.foreground_color(style, String.to_integer(num)), attrs}

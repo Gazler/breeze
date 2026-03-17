@@ -17,6 +17,28 @@ defmodule Breeze.LiveViewTest do
     def resize(term), do: term.size
   end
 
+  defmodule RecordingAdapter do
+    @behaviour Termite.Terminal.Adapter
+
+    def start(opts) do
+      {:ok,
+       %{
+         ref: make_ref(),
+         size: %{width: 80, height: 24},
+         owner: Keyword.fetch!(opts, :owner)
+       }}
+    end
+
+    def reader(term), do: {:ok, term.ref}
+
+    def write(term, str) do
+      send(term.owner, {:terminal_write, str})
+      {:ok, term}
+    end
+
+    def resize(term), do: term.size
+  end
+
   defmodule CounterChild do
     use Breeze.View
 
@@ -126,6 +148,49 @@ defmodule Breeze.LiveViewTest do
 
     def handle_event(_, %{"key" => "F2"}, term) do
       {:noreply, assign(term, show_debug: !term.assigns.show_debug)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule DecoratedDebugChild do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, assign(term, count: 1)}
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box id="spinner" implicit={Breeze.Implicit.AsyncSpinner} style="width-1">
+        </box>
+        <box id="button" focusable>Count: {@count}</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "+"}, term) do
+      {:noreply, assign(term, count: term.assigns.count + 1)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule DecoratedDebugRoot do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box style="fixed right-0 bottom-0 width-18 height-6">
+          <live id="debug" view={DecoratedDebugChild} start_opts={[]}>
+          </live>
+        </box>
+      </box>
+      """
     end
 
     def handle_event(_, _, term), do: {:noreply, term}
@@ -365,6 +430,72 @@ defmodule Breeze.LiveViewTest do
     Process.exit(pid, :normal)
   end
 
+  test "server patches fixed live child invalidations without rerendering the root" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: DebugToggleRoot,
+        terminal: terminal,
+        reader: reader,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    drain_terminal_writes()
+
+    send(pid, {reader, {:data, "\eOQ"}})
+    Process.sleep(100)
+
+    state = :sys.get_state(pid)
+    initial_render_count = state.debug_stats[:render_base_count]
+    assert Map.has_key?(state.children, "debug")
+
+    drain_terminal_writes()
+
+    child = state.children["debug"]
+    assert {:noreply, "button", true} = Breeze.ChildServer.dispatch_input(child.pid, "+")
+    Process.sleep(100)
+
+    writes = drain_terminal_writes()
+    next_state = :sys.get_state(pid)
+
+    assert next_state.debug_stats[:render_base_count] == initial_render_count
+    assert next_state.debug_stats[:last_render_cause] == :child_patch
+    assert Enum.any?(writes, &String.contains?(&1, "Count: 2"))
+
+    Process.exit(pid, :normal)
+  end
+
+  test "server falls back to a full rerender when a debug child has decorations" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: DecoratedDebugRoot,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    Process.sleep(100)
+
+    state = :sys.get_state(pid)
+    initial_render_count = state.debug_stats[:render_base_count]
+    child = state.children["debug"]
+
+    drain_terminal_writes()
+
+    assert {:noreply, "button", true} = Breeze.ChildServer.dispatch_input(child.pid, "+")
+    Process.sleep(100)
+
+    next_state = :sys.get_state(pid)
+
+    assert next_state.debug_stats[:render_base_count] > initial_render_count
+    assert next_state.debug_stats[:last_render_cause] == :child_invalidated
+
+    Process.exit(pid, :normal)
+  end
+
   test "global keybindings are dispatched before focused event handling" do
     event = %{"key" => "q"}
 
@@ -378,5 +509,13 @@ defmodule Breeze.LiveViewTest do
 
     assert {:noreply, %Breeze.Term{assigns: %{handled?: true}}} =
              Breeze.GlobalKeybindings.dispatch(event, term)
+  end
+
+  defp drain_terminal_writes(writes \\ []) do
+    receive do
+      {:terminal_write, str} -> drain_terminal_writes([str | writes])
+    after
+      10 -> Enum.reverse(writes)
+    end
   end
 end

@@ -1,24 +1,24 @@
-[1mModal example[0m                                                                   
-Press Enter or m to open the modal.                                             
+[1mModal example[0m
+Press Enter, m, or 1/2/3 to open a modal.                                       
 Tab should stay inside the modal until it closes.                               
 Escape closes the modal. q quits the example.                                   
-                                                                                
-[38;5;4m╭──────────────────────────╮[0m                                                    
-[38;5;4m│[0m[1mOpen modal[0m                [38;5;4m│[0m                                                    
-[38;5;4m│[0m                          [38;5;4m│[0m                                                    
-[38;5;4m│[0m                          [38;5;4m│[0m                                                    
-[38;5;4m╰──────────────────────────╯[0m                                                    
-                                                                                
-╭──────────────────────────╮                                                    
-│[1mBackground panel[0m          │                                                    
-│Last action: confirm      │                                                    
-│                          │                                                    
-│                          │                                                    
-╰──────────────────────────╯                                                    
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
+
+[1mModal sizes[0m
+[38;5;4m╭──────────────────╮[0m
+[38;5;4m│[0m[1mCentered[0m          [38;5;4m│[0m
+[38;5;4m│[0m                  [38;5;4m│[0m
+[38;5;4m│[0m                  [38;5;4m│[0m
+[38;5;4m╰──────────────────╯[0m
+╭──────────────────╮
+│[1mWide[0m              │
+│                  │
+│                  │
+╰──────────────────╯
+╭──────────────────╮
+│[1mInset[0m             │
+│                  │
+│                  │
+╰──────────────────╯
+
+╭──────────────────────────╮
+│[1mBackground panel[0m          │

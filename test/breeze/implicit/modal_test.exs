@@ -4,18 +4,8 @@ defmodule Breeze.Implicit.ModalTest do
   alias Breeze.Implicit.Modal
 
   describe "init/3" do
-    test "centers the modal from root dimensions" do
-      state =
-        Modal.init(
-          [],
-          %{:width => 20, :height => 6, :"screen-width" => 80, :"screen-height" => 24},
-          %{}
-        )
-
-      assert state.frame_width == 22
-      assert state.frame_height == 8
-      assert state.left == 29
-      assert state.top == 8
+    test "preserves the previous state" do
+      assert Modal.init([], %{}, %{open: true}) == %{open: true}
     end
   end
 
@@ -29,9 +19,8 @@ defmodule Breeze.Implicit.ModalTest do
   end
 
   describe "handle_modifiers/3" do
-    test "root modifiers position the modal absolutely" do
-      assert Modal.handle_modifiers(:root, [], %{left: 12, top: 4}) ==
-               [style: "absolute left-12 top-4"]
+    test "root modifiers do not override modal positioning" do
+      assert Modal.handle_modifiers(:root, [], %{}) == []
     end
   end
 end

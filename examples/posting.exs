@@ -28,6 +28,7 @@ defmodule Posting do
     url = "https://jsonplaceholder.typicode.com/posts"
     method = "POST"
     method_index = Enum.find_index(@methods, &(&1 == method)) || 0
+    user_host = current_user_host()
 
     term =
       term
@@ -41,6 +42,7 @@ defmodule Posting do
         collection: @collection,
         screen_width: screen_width,
         screen_height: screen_height,
+        user_host: user_host,
         url_width: screen_width - 18,
         request_tab: "headers",
         response_tab: "body",
@@ -63,7 +65,11 @@ defmodule Posting do
     <box style="width-screen height-screen">
       <box style="grid grid-cols-1 width-screen height-full">
         <box style="height-3">
-          <box style="height-1">Hello</box>
+          <box style="inline width-screen height-1">
+            <box style="bold">Req It Ralph</box>
+            <box> 0.0.1</box>
+            <box style="width-full text-right">{@user_host}</box>
+          </box>
           <box style="height-1">
           </box>
           <box style="grid grid-cols-3 height-1">
@@ -217,8 +223,8 @@ defmodule Posting do
           <box>Toggle debug panel</box>
         </box>
       </.modal>
-      <box :if={@show_debug} style="fixed right-0 bottom-0 width-34 height-18">
-        <live id="debug" view={Breeze.Debug} start_opts={[width: 34, height: 18]}>
+      <box :if={@show_debug} style="fixed right-0 bottom-0 width-42 height-24">
+        <live id="debug" view={Breeze.Debug} start_opts={[width: 42, height: 24]}>
         </live>
       </box>
     </box>
@@ -282,6 +288,24 @@ defmodule Posting do
   end
 
   def handle_info(_, term), do: {:noreply, term}
+
+  defp current_user_host do
+    case Application.get_env(:breeze, :example_user_host) do
+      value when is_binary(value) and value != "" ->
+        value
+
+      _ ->
+        user = System.get_env("USER") || System.get_env("USERNAME") || "unknown"
+
+        host =
+          case :inet.gethostname() do
+            {:ok, hostname} -> to_string(hostname)
+            _ -> "localhost"
+          end
+
+        "#{user}@#{host}"
+    end
+  end
 end
 
 Breeze.Example.run(

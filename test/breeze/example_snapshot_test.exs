@@ -46,6 +46,7 @@ defmodule Breeze.ExampleSnapshotTest do
 
   setup_all do
     Application.put_env(:breeze, :example_mode, :load_only)
+    Application.put_env(:breeze, :example_user_host, "gazler@gazler-arch")
 
     for file <- ~w(counter.exs docs.exs modal.exs posting.exs snake.exs tabs.exs) do
       Code.require_file(Path.expand("../../examples/#{file}", __DIR__))
@@ -53,6 +54,7 @@ defmodule Breeze.ExampleSnapshotTest do
 
     on_exit(fn ->
       Application.delete_env(:breeze, :example_mode)
+      Application.delete_env(:breeze, :example_user_host)
     end)
 
     :ok
@@ -96,6 +98,17 @@ defmodule Breeze.ExampleSnapshotTest do
     assert {:noreply, _focused, true} = Breeze.Test.input(session, "Enter")
 
     assert_snapshot(Breeze.Test.render!(session), "examples/modal/confirmed.ansi",
+      snapshot_dir: "../__snapshots__"
+    )
+  end
+
+  test "modal example snapshots opening the inset modal" do
+    session = Breeze.Test.start!(ModalExample, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert {:noreply, _focused, true} = Breeze.Test.input(session, "3")
+
+    assert_snapshot(Breeze.Test.render!(session), "examples/modal/inset-open.ansi",
       snapshot_dir: "../__snapshots__"
     )
   end
