@@ -2,11 +2,13 @@ Application.put_env(:breeze, :example_mode, :load_only)
 Code.require_file("../examples/posting.exs", __DIR__)
 
 defmodule BreezeBench.PostingServerBenchmark do
+  @terminal_size %{width: 250, height: 70}
+
   defmodule FakeAdapter do
     @behaviour Termite.Terminal.Adapter
 
     def start(_opts) do
-      {:ok, %{ref: make_ref(), size: %{width: 80, height: 24}}}
+      {:ok, %{ref: make_ref(), size: BreezeBench.PostingServerBenchmark.terminal_size()}}
     end
 
     def reader(term), do: {:ok, term.ref}
@@ -22,9 +24,12 @@ defmodule BreezeBench.PostingServerBenchmark do
 
   @iterations 30
 
+  def terminal_size, do: @terminal_size
+
   def run do
     IO.puts("posting_server_benchmark")
     IO.puts("  iterations: #{@iterations}")
+    IO.puts("  terminal: #{@terminal_size.width}x#{@terminal_size.height}")
     IO.puts("")
 
     Enum.each(@interactions, fn {label, key} ->

@@ -85,6 +85,33 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule LiveCounterChild do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, assign(term, count: 1)}
+
+    def render(assigns) do
+      ~H"""
+      <box id="panel">
+        <box id="button" focusable>Count: {@count}</box>
+      </box>
+      """
+    end
+  end
+
+  defmodule ParentLiveExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <live id="child" view={LiveCounterChild} start_opts={@start_opts}>
+        </live>
+      </box>
+      """
+    end
+  end
+
   defmodule CenteredFixedPositionExample do
     use Breeze.View
 
@@ -235,6 +262,22 @@ defmodule Breeze.RendererTest do
                │CCCC  │
                └──────┘\
                """
+    end
+
+    test "tracks the namespaced live child root element id" do
+      {:ok, pid} = Breeze.ChildServer.start(view: LiveCounterChild, start_opts: [])
+
+      {acc, _box} =
+        Renderer.render(ParentLiveExample, %{start_opts: []},
+          live_view: fn %{id: "child"}, _opts ->
+            {:ok, child_acc, child_box} =
+              Breeze.ChildServer.render(pid, focused: "button", implicit_state: %{})
+
+            {:rendered, "child", child_acc, child_box}
+          end
+        )
+
+      assert Enum.any?(acc.elements, fn {_idx, flags} -> Keyword.get(flags, :id) == "child" end)
     end
 
     test "supports fixed positioning with right and bottom offsets" do

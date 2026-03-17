@@ -290,15 +290,21 @@ defmodule Posting do
   def handle_info(_, term), do: {:noreply, term}
 
   defp current_user_host do
-    user = System.get_env("USER") || System.get_env("USERNAME") || "unknown"
+    case Application.get_env(:breeze, :example_user_host) do
+      value when is_binary(value) and value != "" ->
+        value
 
-    host =
-      case :inet.gethostname() do
-        {:ok, hostname} -> to_string(hostname)
-        _ -> "localhost"
-      end
+      _ ->
+        user = System.get_env("USER") || System.get_env("USERNAME") || "unknown"
 
-    "#{user}@#{host}"
+        host =
+          case :inet.gethostname() do
+            {:ok, hostname} -> to_string(hostname)
+            _ -> "localhost"
+          end
+
+        "#{user}@#{host}"
+    end
   end
 end
 

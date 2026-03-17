@@ -29,6 +29,26 @@ defmodule Breeze.TemplateTest do
     end
   end
 
+  defmodule IgnoreBindingForView do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"<box>
+  <box :for={{_, right} <- @pairs}>{right}{123}</box>
+</box>"
+    end
+  end
+
+  defmodule MapPatternForView do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"<box>
+  <box :for={%{label: label} <- @items}>{label}</box>
+</box>"
+    end
+  end
+
   defmodule AttributeView do
     use Breeze.View
 
@@ -99,6 +119,16 @@ defmodule Breeze.TemplateTest do
     test "supports :for directive with pattern matching" do
       assert render(ForView, %{pairs: [{1, "a"}, {2, "b"}]}) ==
                "<box><box>1:a</box><box>2:b</box></box>"
+    end
+
+    test "supports compiled simple :for patterns with ignored bindings and literals" do
+      assert render(IgnoreBindingForView, %{pairs: [{1, "a"}, {2, "b"}]}) ==
+               "<box><box>a123</box><box>b123</box></box>"
+    end
+
+    test "falls back to eval for unsupported :for patterns" do
+      assert render(MapPatternForView, %{items: [%{label: "a"}, %{label: "b"}]}) ==
+               "<box><box>a</box><box>b</box></box>"
     end
 
     test "supports dynamic/boolean/spread attributes" do

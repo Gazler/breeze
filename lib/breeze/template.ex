@@ -448,21 +448,42 @@ defmodule Breeze.Template do
   end
 
   defp bind_for_pattern(pattern_expr, value, ctx) do
-    binding = Map.to_list(ctx.vars) ++ [assigns: ctx.assigns, breeze_value: value]
+    case pattern_expr do
+      {:__breeze_pattern__, pattern} ->
+        case bind_compiled_pattern(pattern, value, %{}) do
+          {:ok, new_vars} -> {:ok, Map.merge(ctx.vars, new_vars)}
+          :error -> :error
+        end
 
-    case Code.eval_quoted(pattern_expr, binding, ctx.env) do
-      {{:ok, new_vars}, _} ->
-        {:ok, Map.merge(ctx.vars, new_vars)}
+      _ ->
+        binding = Map.to_list(ctx.vars) ++ [assigns: ctx.assigns, breeze_value: value]
 
-      {:error, _} ->
-        :error
+        case Code.eval_quoted(pattern_expr, binding, ctx.env) do
+          {{:ok, new_vars}, _} ->
+            {:ok, Map.merge(ctx.vars, new_vars)}
+
+          {:error, _} ->
+            :error
+        end
     end
   end
 
   defp eval_expr(expr, ctx) do
-    binding = Map.to_list(ctx.vars) ++ [assigns: ctx.assigns]
-    {value, _binding} = Code.eval_quoted(expr, binding, ctx.env)
-    value
+    case expr do
+      {:__breeze_assign__, name} ->
+        Map.get(ctx.assigns, name)
+
+      {:__breeze_var__, name} ->
+        Map.get(ctx.vars, name)
+
+      {:__breeze_literal__, value} ->
+        value
+
+      _ ->
+        binding = Map.to_list(ctx.vars) ++ [assigns: ctx.assigns]
+        {value, _binding} = Code.eval_quoted(expr, binding, ctx.env)
+        value
+    end
   end
 
   defp normalize_output(nil), do: ""
@@ -713,20 +734,112 @@ defmodule Breeze.Template do
 
   defp compile_for_pattern(pattern_string, env) do
     pattern_ast = Code.string_to_quoted!(pattern_string, file: env.file, line: env.line)
-    vars = collect_pattern_vars(pattern_ast)
-    result_map = {:%{}, [], Enum.map(vars, fn name -> {name, {name, [], nil}} end)}
 
-    {:case, [],
-     [
-       {:breeze_value, [], nil},
-       [
-         do: [
-           {:->, [], [[pattern_ast], {:ok, result_map}]},
-           {:->, [], [[{:_, [], nil}], :error]}
-         ]
-       ]
-     ]}
+    case compile_simple_pattern(pattern_ast) do
+      {:ok, pattern} ->
+        {:__breeze_pattern__, pattern}
+
+      :error ->
+        vars = collect_pattern_vars(pattern_ast)
+        result_map = {:%{}, [], Enum.map(vars, fn name -> {name, {name, [], nil}} end)}
+
+        {:case, [],
+         [
+           {:breeze_value, [], nil},
+           [
+             do: [
+               {:->, [], [[pattern_ast], {:ok, result_map}]},
+               {:->, [], [[{:_, [], nil}], :error]}
+             ]
+           ]
+         ]}
+    end
   end
+
+  defp compile_simple_pattern({name, _meta, ctx}) when is_atom(name) and is_atom(ctx),
+    do: {:ok, {:var, name}}
+
+  defp compile_simple_pattern({:_, _, _}), do: {:ok, :ignore}
+
+  defp compile_simple_pattern({left, right}) do
+    with {:ok, left_pattern} <- compile_simple_pattern(left),
+         {:ok, right_pattern} <- compile_simple_pattern(right) do
+      {:ok, {:tuple2, [left_pattern, right_pattern]}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp compile_simple_pattern({:{}, _, values}) when is_list(values) do
+    values
+    |> Enum.reduce_while({:ok, []}, fn value, {:ok, acc} ->
+      case compile_simple_pattern(value) do
+        {:ok, compiled} -> {:cont, {:ok, [compiled | acc]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, compiled} -> {:ok, {:tuple, Enum.reverse(compiled)}}
+      :error -> :error
+    end
+  end
+
+  defp compile_simple_pattern(list) when is_list(list) do
+    list
+    |> Enum.reduce_while({:ok, []}, fn value, {:ok, acc} ->
+      case compile_simple_pattern(value) do
+        {:ok, compiled} -> {:cont, {:ok, [compiled | acc]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, compiled} -> {:ok, {:list, Enum.reverse(compiled)}}
+      :error -> :error
+    end
+  end
+
+  defp compile_simple_pattern(_ast), do: :error
+
+  defp bind_compiled_pattern({:var, name}, value, acc), do: {:ok, Map.put(acc, name, value)}
+  defp bind_compiled_pattern(:ignore, _value, acc), do: {:ok, acc}
+
+  defp bind_compiled_pattern({:tuple2, [left, right]}, {left_value, right_value}, acc) do
+    with {:ok, acc} <- bind_compiled_pattern(left, left_value, acc),
+         {:ok, acc} <- bind_compiled_pattern(right, right_value, acc) do
+      {:ok, acc}
+    end
+  end
+
+  defp bind_compiled_pattern({:tuple, patterns}, value, acc) when is_tuple(value) do
+    if tuple_size(value) == length(patterns) do
+      patterns
+      |> Enum.with_index()
+      |> Enum.reduce_while({:ok, acc}, fn {pattern, index}, {:ok, acc} ->
+        case bind_compiled_pattern(pattern, elem(value, index), acc) do
+          {:ok, acc} -> {:cont, {:ok, acc}}
+          :error -> {:halt, :error}
+        end
+      end)
+    else
+      :error
+    end
+  end
+
+  defp bind_compiled_pattern({:list, patterns}, value, acc) when is_list(value) do
+    if length(value) == length(patterns) do
+      Enum.zip(patterns, value)
+      |> Enum.reduce_while({:ok, acc}, fn {pattern, item}, {:ok, acc} ->
+        case bind_compiled_pattern(pattern, item, acc) do
+          {:ok, acc} -> {:cont, {:ok, acc}}
+          :error -> {:halt, :error}
+        end
+      end)
+    else
+      :error
+    end
+  end
+
+  defp bind_compiled_pattern(_pattern, _value, _acc), do: :error
 
   defp collect_pattern_vars(ast), do: do_collect_vars(ast, []) |> Enum.uniq()
 
@@ -757,7 +870,27 @@ defmodule Breeze.Template do
     expr
     |> Code.string_to_quoted!(file: env.file, line: env.line)
     |> normalize_assign_refs()
+    |> simplify_expr()
   end
+
+  defp simplify_expr(
+         {{:., [], [{:__aliases__, [alias: false], [:Map]}, :get]}, [],
+          [{:assigns, _, nil}, name]}
+       )
+       when is_atom(name) do
+    {:__breeze_assign__, name}
+  end
+
+  defp simplify_expr({name, _meta, ctx}) when is_atom(name) and is_atom(ctx) do
+    {:__breeze_var__, name}
+  end
+
+  defp simplify_expr(literal)
+       when is_binary(literal) or is_number(literal) or is_atom(literal) do
+    {:__breeze_literal__, literal}
+  end
+
+  defp simplify_expr(other), do: other
 
   defp normalize_assign_refs(ast) do
     Macro.prewalk(ast, fn

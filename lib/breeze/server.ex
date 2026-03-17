@@ -55,6 +55,7 @@ defmodule Breeze.Server do
     input_flush_scheduled?: false,
     decorations: [],
     children: %{},
+    rendered_boxes: %{},
     animation_timer: nil,
     next_tick_at: nil,
     global_keybindings: [],
@@ -63,7 +64,8 @@ defmodule Breeze.Server do
     debug_push_timer: nil,
     debug_push_interval_ms: 250,
     busy_delay_ms: 120,
-    frame_delay_ms: 80
+    frame_delay_ms: 80,
+    rendered_elements: %{}
   ]
 
   @type option ::
@@ -202,9 +204,9 @@ defmodule Breeze.Server do
     {:noreply, maybe_render_base(state, :child_invalidated)}
   end
 
-  def handle_info({:child_invalidated, _id}, state) do
+  def handle_info({:child_invalidated, child_id}, state) do
     state = increment_debug_stat(state, :child_invalidated_count)
-    {:noreply, maybe_render_base(state, :child_invalidated)}
+    {:noreply, maybe_render_invalidated_child(state, child_id)}
   end
 
   def handle_info(@flush_input_batch, state) do
@@ -474,7 +476,7 @@ defmodule Breeze.Server do
     Breeze.DebugProfiler.reset(profile_scope)
     root_started_at = System.monotonic_time(:microsecond)
 
-    {:ok, _acc, box, decorations} =
+    {:ok, acc, box, decorations} =
       Breeze.ChildServer.render_snapshot(state.view_pid,
         implicit_state: %{},
         terminal: state.terminal,
@@ -524,6 +526,8 @@ defmodule Breeze.Server do
           state
           |> increment_debug_stat(:render_base_count)
           |> Map.put(:base_output, base_output)
+          |> Map.put(:rendered_elements, viewports_from_acc(acc))
+          |> Map.put(:rendered_boxes, acc.boxes)
           |> Map.put(:decorations, decorations)
           |> Map.put(:focused, focused)
           |> Map.put(:last_render_at, System.monotonic_time(:millisecond))
@@ -553,6 +557,13 @@ defmodule Breeze.Server do
 
   defp maybe_render_base(%{view_pid: pid} = state, cause) do
     if Process.alive?(pid), do: render_base(state, cause), else: state
+  end
+
+  defp maybe_render_invalidated_child(state, child_id) do
+    case render_invalidated_child(state, child_id) do
+      {:ok, state} -> state
+      :error -> maybe_render_base(state, :child_invalidated)
+    end
   end
 
   defp maybe_render_after_input(%{pending_ref: ref} = state) when not is_nil(ref), do: state
@@ -604,6 +615,86 @@ defmodule Breeze.Server do
     end
   end
 
+  defp render_invalidated_child(state, child_id) do
+    with true <- patchable_live_child?(child_id),
+         %{pid: pid, view: view} <- Map.get(state.children, child_id),
+         %Breeze.Viewport{} = viewport <- Map.get(state.rendered_elements, child_id) do
+      tracking_ref = begin_render_tracking()
+      profile_scope = make_ref()
+      Breeze.DebugProfiler.reset(profile_scope)
+      started_at = System.monotonic_time(:microsecond)
+
+      {:ok, _child_acc, child_box, child_decorations} =
+        Breeze.ChildServer.render_snapshot(pid,
+          focused: strip_live_prefix(state.focused, child_id),
+          implicit_state: %{},
+          terminal: state.terminal,
+          live_prefix: child_id,
+          render_tracking_ref: tracking_ref,
+          profile_scope: profile_scope,
+          profile_label: "#{child_id} #{inspect(view)}",
+          live_view: fn child_attrs, child_opts ->
+            render_live_child(child_attrs, child_opts, state, profile_scope, tracking_ref)
+          end
+        )
+
+      child_render_us = System.monotonic_time(:microsecond) - started_at
+
+      %{missing: missing, decorations: tracked_decorations, child_timings: child_timings} =
+        finish_render_tracking(tracking_ref)
+
+      cond do
+        missing != [] ->
+          :error
+
+        child_decorations != [] or tracked_decorations != [] or child_timings != [] ->
+          :error
+
+        true ->
+          fragment =
+            child_box
+            |> wrap_child_fragment(viewport)
+            |> BackBreeze.Box.render(terminal: state.terminal)
+            |> Map.fetch!(:content)
+
+          composed_at = System.monotonic_time(:microsecond)
+          payload = child_patch_payload(fragment, viewport)
+          terminal = Termite.Terminal.write(state.terminal, payload)
+          written_at = System.monotonic_time(:microsecond)
+          total_us = written_at - started_at
+          write_us = written_at - composed_at
+          profile_entries = Breeze.DebugProfiler.snapshot(profile_scope)
+
+          {:ok,
+           state
+           |> Map.put(:terminal, terminal)
+           |> Map.put(:last_frame_payload, nil)
+           |> put_debug_stat(:last_render_cause, :child_patch)
+           |> put_debug_stat(:last_root_snapshot_us, 0)
+           |> put_debug_stat(:last_root_snapshot_app_us, 0)
+           |> put_debug_stat(:last_live_children_us, child_render_us)
+           |> put_debug_stat(:last_live_children_app_us, child_render_us)
+           |> put_debug_stat(
+             :last_live_children,
+             normalize_child_timings([%{id: child_id, view: view, us: child_render_us}])
+           )
+           |> put_debug_stat(:last_render_profile, summarize_profile(profile_entries))
+           |> put_debug_stat(:last_reconcile_passes, 1)
+           |> put_debug_stat(:last_reconcile_changed_ids, [child_id])
+           |> put_debug_stat(:last_prepare_decorations_us, 0)
+           |> put_debug_stat(:last_render_base_us, total_us)
+           |> put_debug_stat(:last_render_base_app_us, total_us)
+           |> put_debug_stat(:last_frame_compose_us, composed_at - started_at)
+           |> put_debug_stat(:last_terminal_write_us, write_us)
+           |> put_debug_stat(:last_frame_us, total_us)
+           |> put_debug_stat(:last_frame_bytes, byte_size(fragment))
+           |> put_debug_stat(:overlay_count, 0)}
+      end
+    else
+      _ -> :error
+    end
+  end
+
   defp render_frame(state) do
     started_at = System.monotonic_time(:microsecond)
     {output, decorations} = apply_decorations(state.base_output, state.decorations, state)
@@ -612,10 +703,11 @@ defmodule Breeze.Server do
     overlay_output = Breeze.TerminalOverlay.render_overlays(overlays)
 
     screen_height = state.terminal.size.height
-    output_lines = length(String.split(output, "\n"))
+    lines = :binary.split(output, "\n", [:global])
+    output_lines = max(length(lines), 1)
     trailing = String.duplicate("\n\e[K", max(screen_height - output_lines, 0))
-    output = "\e[K" <> String.replace(output, "\n", "\n\e[K") <> trailing
-    frame_payload = "\e[H" <> output <> overlay_output
+    output = IO.iodata_to_binary(["\e[K", Enum.intersperse(lines, "\n\e[K"), trailing])
+    frame_payload = IO.iodata_to_binary(["\e[H", output, overlay_output])
     composed_at = System.monotonic_time(:microsecond)
 
     {terminal, write_duration} =
@@ -843,6 +935,39 @@ defmodule Breeze.Server do
 
   defp normalize_animation_result(%BackBreeze.Box{} = box) do
     {box, %{}}
+  end
+
+  defp viewports_from_acc(acc) do
+    acc
+    |> Breeze.RenderState.build_dimensions()
+    |> Map.new(fn {id, dims} -> {id, Breeze.Viewport.from_dimensions(dims)} end)
+  end
+
+  defp patchable_live_child?("debug"), do: true
+  defp patchable_live_child?(_child_id), do: false
+
+  defp wrap_child_fragment(child_box, viewport) do
+    BackBreeze.Box.new(
+      style: %{width: viewport.width, height: viewport.height, overflow: :hidden},
+      children: [child_box]
+    )
+  end
+
+  defp child_patch_payload(fragment, viewport) do
+    fragment
+    |> :binary.split("\n", [:global])
+    |> Enum.with_index()
+    |> Enum.map(fn {line, row_offset} ->
+      [
+        "\e[",
+        Integer.to_string(viewport.top + row_offset + 1),
+        ";",
+        Integer.to_string(viewport.left + 1),
+        "H",
+        line
+      ]
+    end)
+    |> IO.iodata_to_binary()
   end
 
   defp stop(state) do
