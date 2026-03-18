@@ -26,6 +26,12 @@ defmodule Breeze.Logger do
        width: Keyword.get(opts, :width, 80),
        height: Keyword.get(opts, :height, 18),
        min_level: Keyword.get(opts, :min_level, :debug),
+       clear_key: Keyword.get(opts, :clear_key, "c"),
+       helper_text:
+         helper_text(
+           Keyword.get(opts, :min_level, :debug),
+           Keyword.get(opts, :clear_key, "c")
+         ),
        max_lines: Keyword.get(opts, :max_lines, @default_max_lines),
        lines: []
      )}
@@ -35,7 +41,7 @@ defmodule Breeze.Logger do
     ~H"""
     <box style={"width-#{@width}"}>
       <box style="bold">{@title}</box>
-      <box>Showing {@min_level}+ logs. Use j/k or arrows to scroll. Press c to clear.</box>
+      <box>{@helper_text}</box>
       <box
         id="logger"
         focusable
@@ -49,7 +55,8 @@ defmodule Breeze.Logger do
     """
   end
 
-  def handle_event(_, %{"key" => "c"}, term) do
+  def handle_event(_, %{"key" => key}, %{assigns: %{clear_key: key}} = term)
+      when is_binary(key) do
     :ok = Breeze.LoggerCollector.clear()
     {:noreply, assign(term, lines: [])}
   end
@@ -102,4 +109,13 @@ defmodule Breeze.Logger do
   defp level_style(:alert), do: "text-1 bold"
   defp level_style(:emergency), do: "text-1 bold bg-11"
   defp level_style(_), do: "text-7"
+
+  defp helper_text(min_level, nil), do: "Showing #{min_level}+ logs. Use j/k or arrows to scroll."
+
+  defp helper_text(min_level, false),
+    do: "Showing #{min_level}+ logs. Use j/k or arrows to scroll."
+
+  defp helper_text(min_level, clear_key) do
+    "Showing #{min_level}+ logs. Use j/k or arrows to scroll. Press #{clear_key} to clear."
+  end
 end
