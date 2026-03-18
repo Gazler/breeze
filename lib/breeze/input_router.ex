@@ -13,24 +13,20 @@ defmodule Breeze.InputRouter do
   def init(opts) do
     hide_cursor? = Keyword.get(opts, :hide_cursor, true)
     mouse = Keyword.get(opts, :mouse, false)
-    terminal_opts = Keyword.get(opts, :terminal_opts, [])
-
-    terminal = Termite.Terminal.start(terminal_opts)
+    terminal = build_terminal(opts)
+    reader = terminal.reader
     terminal = if hide_cursor?, do: Termite.Screen.hide_cursor(terminal), else: terminal
     terminal = enable_mouse(terminal, mouse)
     terminal = Termite.Screen.clear_screen(terminal)
 
-    server_opts =
-      opts
-      |> Keyword.put(:terminal, terminal)
-      |> Keyword.put(:reader, terminal.reader)
+    server_opts = Keyword.put(opts, :terminal, terminal)
 
     {:ok, server_pid} = Breeze.Server.start_app_link(server_opts)
     Process.monitor(server_pid)
 
     state = %__MODULE__{
       terminal: terminal,
-      reader: terminal.reader,
+      reader: reader,
       server_pid: server_pid,
       halt_fun: Keyword.get(opts, :halt_fun, fn -> System.halt() end),
       global_keybindings: Keyword.get(opts, :global_keybindings, [])
@@ -61,6 +57,10 @@ defmodule Breeze.InputRouter do
     {:noreply, state}
   end
 
+  def handle_info({reader, {:signal, :hup}}, %{reader: reader} = state) do
+    stop(state)
+  end
+
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{server_pid: pid} = state) do
     stop(state)
   end
@@ -87,6 +87,16 @@ defmodule Breeze.InputRouter do
 
   defp enable_mouse(terminal, opts) when is_list(opts),
     do: Termite.Screen.enable_mouse(terminal, opts)
+
+  defp build_terminal(opts) do
+    case Keyword.get(opts, :terminal) do
+      %Termite.Terminal{} = terminal ->
+        terminal
+
+      nil ->
+        Termite.Terminal.start(Keyword.get(opts, :terminal_opts, []))
+    end
+  end
 
   defp stop(state) do
     if Process.alive?(state.server_pid) do

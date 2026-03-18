@@ -67,7 +67,6 @@ defmodule PostingTest do
       Breeze.Server.start_app_link(
         view: Posting,
         terminal: terminal,
-        reader: reader,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 

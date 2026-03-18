@@ -99,6 +99,53 @@ end
 
 More examples are available in the examples directory.
 
+## SSH
+
+Breeze apps can also be served over SSH. Each connecting client gets its own
+terminal session backed by `Termite.SSH`:
+
+```elixir
+:application.ensure_all_started(:ssh)
+
+defmodule DemoEntrypoint do
+  def start_link(opts) do
+    session = Keyword.fetch!(opts, :session)
+
+    Breeze.Server.start_link(
+      view: Demo,
+      terminal_opts: Termite.SSH.Session.terminal_opts(session)
+    )
+  end
+end
+
+{:ok, _daemon} = Termite.SSH.start_link(
+  port: 2222,
+  auth: [{"alice", "secret"}],
+  entrypoint: {DemoEntrypoint, []}
+)
+```
+
+Then connect with a normal SSH client:
+
+```bash
+ssh -p 2222 alice@localhost
+```
+
+There is also a runnable example:
+
+```bash
+mix run examples/ssh_counter.exs
+```
+
+For a fuller demo based on the posting example:
+
+```bash
+mix run examples/ssh_posting.exs
+```
+
+The authenticated username is injected into `mount/2` via `start_opts` as
+`opts[:username]`.
+
 ## Testing
 
 Breeze ships with `Breeze.Test` for deterministic view tests:

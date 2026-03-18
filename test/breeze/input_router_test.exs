@@ -60,4 +60,27 @@ defmodule Breeze.InputRouterTest do
     assert_receive :halted
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
   end
+
+  test "injected terminals use terminal.reader without an explicit reader option" do
+    parent = self()
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: BlockingView,
+        start_opts: [parent: parent],
+        hide_cursor: false,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    ref = Process.monitor(pid)
+    reader = terminal.reader
+
+    send(pid, {reader, {:data, "r"}})
+    assert_receive :started
+
+    send(pid, {reader, {:data, "q"}})
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+  end
 end

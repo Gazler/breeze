@@ -465,7 +465,6 @@ defmodule Breeze.LiveViewTest do
         Breeze.Server.start_app_link(
           view: CrashingView,
           terminal: terminal,
-          reader: reader,
           global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
         )
 
@@ -504,7 +503,6 @@ defmodule Breeze.LiveViewTest do
         Breeze.Server.start_app_link(
           view: CrashingView,
           terminal: terminal,
-          reader: reader,
           global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
         )
 
@@ -542,7 +540,6 @@ defmodule Breeze.LiveViewTest do
         Breeze.Server.start_app_link(
           view: CrashingView,
           terminal: terminal,
-          reader: reader,
           global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
         )
 
@@ -582,7 +579,6 @@ defmodule Breeze.LiveViewTest do
       Breeze.Server.start_app_link(
         view: DebugToggleRoot,
         terminal: terminal,
-        reader: reader,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 

@@ -141,7 +141,7 @@ defmodule Breeze.Server do
 
     state = %__MODULE__{
       terminal: terminal,
-      reader: Keyword.get(opts, :reader, terminal.reader),
+      reader: terminal.reader,
       view_pid: view_pid,
       view: view,
       start_opts: start_opts,
@@ -538,34 +538,18 @@ defmodule Breeze.Server do
         Breeze.DebugProfiler.reset(profile_scope)
         root_started_at = System.monotonic_time(:microsecond)
 
-        {:ok, acc, box, decorations} =
-          case safe_call(fn ->
-                 Breeze.ChildServer.render_snapshot(state.view_pid,
-                   implicit_state: %{},
-                   terminal: state.terminal,
-                   render_tracking_ref: tracking_ref,
-                   profile_scope: profile_scope,
-                   profile_label: inspect(root_view_module(state)),
-                   live_view: fn attrs, opts ->
-                     render_live_child(attrs, opts, state, profile_scope, tracking_ref)
-                   end
-                 )
-               end) do
-            {:ok, result} ->
-              result
+        {acc, box, decorations} =
+          case safe_render_snapshot(state, tracking_ref, profile_scope) do
+            {:ok, acc, box, decorations} ->
+              {acc, box, decorations}
 
-            {:crash, crash} ->
-              throw({:crash_state, enter_crash_state(state, crash)})
+            :stopped ->
+              throw({:stopped, state})
           end
 
         root_snapshot_us = System.monotonic_time(:microsecond) - root_started_at
 
-        focused =
-          case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
-            {:ok, %{focused: focused}} -> focused
-            {:ok, _} -> state.focused
-            {:crash, crash} -> throw({:crash_state, enter_crash_state(state, crash)})
-          end
+        focused = safe_focused_metadata(state) || state.focused
 
         %{
           missing: missing,
@@ -625,6 +609,7 @@ defmodule Breeze.Server do
           end
         end
       catch
+        {:stopped, state} -> state
         {:crash_state, crash_state} -> crash_state
       end
     end
@@ -644,6 +629,34 @@ defmodule Breeze.Server do
       {:crash, state} -> state
       :error -> maybe_render_base(state, :child_invalidated)
     end
+  end
+
+  defp safe_render_snapshot(state, tracking_ref, profile_scope) do
+    Breeze.ChildServer.render_snapshot(state.view_pid,
+      implicit_state: %{},
+      terminal: state.terminal,
+      render_tracking_ref: tracking_ref,
+      profile_scope: profile_scope,
+      profile_label: inspect(root_view_module(state)),
+      live_view: fn attrs, opts ->
+        render_live_child(attrs, opts, state, profile_scope, tracking_ref)
+      end
+    )
+    |> then(fn
+      {:ok, acc, box, decorations} -> {:ok, acc, box, decorations}
+      _ -> :stopped
+    end)
+  catch
+    :exit, _reason -> :stopped
+  end
+
+  defp safe_focused_metadata(state) do
+    case Breeze.ChildServer.metadata(state.view_pid) do
+      %{focused: focused} -> focused
+      _ -> nil
+    end
+  catch
+    :exit, _reason -> nil
   end
 
   defp maybe_render_after_input(%{pending_ref: ref} = state) when not is_nil(ref), do: state
@@ -1088,8 +1101,8 @@ defmodule Breeze.Server do
       |> Termite.Screen.show_cursor()
       |> Termite.Screen.exit_alt_screen()
 
-    Termite.Terminal.write(terminal, "\r")
-    System.halt()
+    terminal = Termite.Terminal.write(terminal, "\r")
+    {:stop, :normal, %{state | terminal: terminal}}
   end
 
   defp crashed?(%{crash: crash}), do: not is_nil(crash)
@@ -1547,6 +1560,8 @@ defmodule Breeze.Server do
       {:ok, %{view: view}} -> view
       _ -> nil
     end
+  catch
+    :exit, _reason -> nil
   end
 
   defp dispatch_input_hierarchy(state, key) do
