@@ -38,7 +38,7 @@ defmodule Breeze.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:termite, "~> 0.4.1"},
+      {:termite, github: "Gazler/termite", override: true},
       {:back_breeze, "~> 0.3.0"},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
       {:telemetry, "~> 1.0"},

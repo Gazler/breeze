@@ -49,4 +49,24 @@ defmodule Breeze.StyleTest do
     assert element.style.bold
     assert element.style.foreground_color == 2
   end
+
+  test "supports semantic aliases for default text, background, and border colors" do
+    theme =
+      Breeze.Theme.new(
+        defaults: %{
+          foreground_color: "#eeeeee",
+          background_color: "#111111",
+          border_color: "#666666"
+        }
+      )
+
+    element =
+      Style.empty()
+      |> Style.put_class("text bg border border-stroke")
+      |> Style.to_element(theme: theme)
+
+    assert element.style.foreground_color == {238, 238, 238}
+    assert element.style.background_color == {17, 17, 17}
+    assert element.style.border_color == {102, 102, 102}
+  end
 end

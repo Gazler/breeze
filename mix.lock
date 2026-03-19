@@ -8,5 +8,5 @@
   "makeup_erlang": {:hex, :makeup_erlang, "1.0.1", "c7f58c120b2b5aa5fd80d540a89fdf866ed42f1f3994e4fe189abebeab610839", [:mix], [{:makeup, "~> 1.0", [hex: :makeup, repo: "hexpm", optional: false]}], "hexpm", "8a89a1eeccc2d798d6ea15496a6e4870b75e014d1af514b1b71fa33134f57814"},
   "nimble_parsec": {:hex, :nimble_parsec, "1.4.2", "8efba0122db06df95bfaa78f791344a89352ba04baedd3849593bfce4d0dc1c6", [:mix], [], "hexpm", "4b21398942dda052b403bbe1da991ccd03a053668d147d53fb8c4e0efe09c973"},
   "telemetry": {:hex, :telemetry, "1.4.1", "ab6de178e2b29b58e8256b92b382ea3f590a47152ca3651ea857a6cae05ac423", [:rebar3], [], "hexpm", "2172e05a27531d3d31dd9782841065c50dd5c3c7699d95266b2edd54c2dafa1c"},
-  "termite": {:hex, :termite, "0.4.1", "dda157f659c93ff445553ba2642d2f8fd22c4e6cc9f87474f2a6286350557345", [:mix], [], "hexpm", "07fbf3f80b0edaba4c5807083619d498a3a4bb926548d7a415bef01bf5c58968"},
+  "termite": {:git, "https://github.com/Gazler/termite.git", "21731b9e373243ab5ed75141e5fc7c3297e7a0a0", []},
 }

@@ -1,6 +1,8 @@
 defmodule Breeze.Implicit.Input do
   @moduledoc false
 
+  alias Breeze.Theme
+
   @type state :: %{
           value: String.t(),
           cursor: non_neg_integer()
@@ -85,17 +87,21 @@ defmodule Breeze.Implicit.Input do
         box,
         _flags,
         state,
-        %{layout: layout, now: now, last_interaction_at: last_interaction_at}
+        %{layout: layout, now: now, last_interaction_at: last_interaction_at} = ctx
       )
       when is_map(layout) do
     layout = resolve_layout(layout, state)
     source = source_content(box.content, state)
     {content, display_cursor} = render_visible_content(source, state, layout)
+    theme = Map.get(ctx, :theme)
+    defaults = Theme.default_style(theme)
 
     overlay = %{
       x: layout.left + border_left_offset(box) + display_cursor,
       y: layout.top + border_top_offset(box),
       char: cursor_char(content, display_cursor),
+      foreground_color: Map.get(defaults, :background_color),
+      background_color: Theme.resolve_color(theme, :accent),
       visible?: Breeze.TerminalOverlay.visible?(now, last_interaction_at)
     }
 

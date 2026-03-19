@@ -10,6 +10,15 @@ defmodule Breeze.Renderer do
   end
 
   def render_tree(mod, assigns, opts \\ []) do
+    opts =
+      Keyword.put_new(
+        opts,
+        :apply_theme_defaults,
+        Breeze.Theme.defaults_enabled?(
+          Keyword.get(opts, :theme_source, Keyword.get(opts, :theme))
+        )
+      )
+
     rendered = mod.render(assigns)
 
     [{_tag, _, root_children}] =
@@ -20,6 +29,15 @@ defmodule Breeze.Renderer do
   end
 
   def render(mod, assigns, opts \\ []) do
+    opts =
+      Keyword.put_new(
+        opts,
+        :apply_theme_defaults,
+        Breeze.Theme.defaults_enabled?(
+          Keyword.get(opts, :theme_source, Keyword.get(opts, :theme))
+        )
+      )
+
     profile_scope = Keyword.get(opts, :profile_scope)
     profile_label = Keyword.get(opts, :profile_label, inspect(mod))
 
@@ -274,7 +292,13 @@ defmodule Breeze.Renderer do
     element =
       style_state
       |> RenderStyle.merge_modifiers(style_modifiers)
-      |> RenderStyle.to_element(style_flags)
+      |> RenderStyle.to_element(
+        Keyword.merge(style_flags,
+          theme: Keyword.get(opts, :theme),
+          terminal: Keyword.get(opts, :terminal),
+          apply_theme_defaults: Keyword.get(opts, :apply_theme_defaults, false)
+        )
+      )
 
     opts =
       element.attributes

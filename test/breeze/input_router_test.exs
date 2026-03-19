@@ -71,6 +71,7 @@ defmodule Breeze.InputRouterTest do
         start_opts: [parent: parent],
         hide_cursor: false,
         terminal: terminal,
+        halt_fun: fn -> send(parent, :halted) end,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -81,6 +82,7 @@ defmodule Breeze.InputRouterTest do
     assert_receive :started
 
     send(pid, {reader, {:data, "q"}})
+    assert_receive :halted
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
   end
 end

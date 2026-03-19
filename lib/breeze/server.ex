@@ -5,6 +5,7 @@ defmodule Breeze.Term do
     :view,
     :server,
     :terminal,
+    :theme,
     :reader,
     last_render_at: nil,
     last_interaction_at: nil,
@@ -24,7 +25,8 @@ defmodule Breeze.Term do
     mouse_targets: %{},
     children: %{},
     frame_delay_ms: 16,
-    render_timer: nil
+    render_timer: nil,
+    apply_theme_defaults?: false
   ]
 end
 
@@ -50,6 +52,8 @@ defmodule Breeze.Server do
     :reload_opts,
     :reloader_pid,
     :focused,
+    :theme,
+    :apply_theme_defaults?,
     :crash,
     :base_output,
     :last_frame_payload,
@@ -80,6 +84,7 @@ defmodule Breeze.Server do
           | {:hide_cursor, boolean()}
           | {:mouse, boolean() | keyword()}
           | {:reload, boolean() | keyword()}
+          | {:theme, Breeze.Theme.t() | map() | keyword() | atom()}
           | {:global_keybindings, list()}
           | {:frame_delay_ms, pos_integer()}
 
@@ -121,6 +126,9 @@ defmodule Breeze.Server do
     start_opts = Keyword.get(opts, :start_opts, [])
     frame_delay_ms = Keyword.get(opts, :frame_delay_ms, 80)
     terminal = Keyword.fetch!(opts, :terminal)
+    theme = Breeze.Theme.new(Keyword.get(opts, :theme), terminal: terminal)
+    theme_source = Keyword.get(opts, :theme)
+    apply_theme_defaults? = Breeze.Theme.defaults_enabled?(Keyword.get(opts, :theme))
 
     session = self()
 
@@ -129,6 +137,9 @@ defmodule Breeze.Server do
         view: view,
         start_opts: start_opts,
         terminal: terminal,
+        theme: theme,
+        theme_source: theme_source,
+        apply_theme_defaults?: apply_theme_defaults?,
         server: self(),
         global_keybindings: Keyword.get(opts, :global_keybindings, []),
         invalidate: fn -> send(session, :child_invalidated) end
@@ -136,10 +147,11 @@ defmodule Breeze.Server do
 
     Process.monitor(view_pid)
 
-    focused =
+    {focused, theme} =
       case Breeze.ChildServer.metadata(view_pid) do
-        %{focused: focused} -> focused
-        _ -> nil
+        %{focused: focused, theme: child_theme} -> {focused, child_theme}
+        %{focused: focused} -> {focused, theme}
+        _ -> {nil, theme}
       end
 
     state = %__MODULE__{
@@ -154,6 +166,8 @@ defmodule Breeze.Server do
           Keyword.get(opts, :reload, Application.get_env(:breeze, :reload, false))
         ),
       focused: focused,
+      theme: theme,
+      apply_theme_defaults?: apply_theme_defaults?,
       global_keybindings: Keyword.get(opts, :global_keybindings, []),
       busy_delay_ms: Keyword.get(opts, :busy_delay_ms, 120),
       frame_delay_ms: frame_delay_ms,
@@ -567,7 +581,8 @@ defmodule Breeze.Server do
 
         root_snapshot_us = System.monotonic_time(:microsecond) - root_started_at
 
-        focused = safe_focused_metadata(state) || state.focused
+        {metadata_focused, metadata_theme} = safe_focused_metadata(state)
+        focused = metadata_focused || state.focused
 
         %{
           missing: missing,
@@ -587,7 +602,7 @@ defmodule Breeze.Server do
 
             true ->
               decorations = decorations ++ child_decorations
-              state = %{state | focused: focused}
+              state = %{state | focused: focused, theme: metadata_theme}
               prep_started_at = System.monotonic_time(:microsecond)
               {base_output, decorations} = prepare_decorations(box.content, decorations, state)
               prepare_decorations_us = System.monotonic_time(:microsecond) - prep_started_at
@@ -655,6 +670,7 @@ defmodule Breeze.Server do
     Breeze.ChildServer.render_snapshot(state.view_pid,
       implicit_state: %{},
       terminal: state.terminal,
+      theme: state.theme,
       render_tracking_ref: tracking_ref,
       profile_scope: profile_scope,
       profile_label: inspect(root_view_module(state)),
@@ -672,11 +688,12 @@ defmodule Breeze.Server do
 
   defp safe_focused_metadata(state) do
     case Breeze.ChildServer.metadata(state.view_pid) do
-      %{focused: focused} -> focused
-      _ -> nil
+      %{focused: focused, theme: theme} -> {focused, theme}
+      %{focused: focused} -> {focused, state.theme}
+      _ -> {nil, state.theme}
     end
   catch
-    :exit, _reason -> nil
+    :exit, _reason -> {nil, state.theme}
   end
 
   defp maybe_render_after_input(%{pending_ref: ref} = state) when not is_nil(ref), do: state
@@ -710,6 +727,7 @@ defmodule Breeze.Server do
                      focused: local_focused,
                      implicit_state: %{},
                      terminal: state.terminal,
+                     theme: state.theme,
                      live_prefix: full_id,
                      render_tracking_ref: tracking_ref,
                      profile_scope: profile_scope,
@@ -765,6 +783,7 @@ defmodule Breeze.Server do
                    focused: strip_live_prefix(state.focused, child_id),
                    implicit_state: %{},
                    terminal: state.terminal,
+                   theme: state.theme,
                    live_prefix: child_id,
                    render_tracking_ref: tracking_ref,
                    profile_scope: profile_scope,
@@ -967,6 +986,7 @@ defmodule Breeze.Server do
       focused?: (decoration[:owner_id] || decoration.id) == state.focused,
       last_render_at: state.last_render_at,
       last_interaction_at: state.last_interaction_at,
+      theme: state.theme,
       id: decoration.id,
       layout: decoration[:layout]
     }
@@ -1243,10 +1263,11 @@ defmodule Breeze.Server do
     shutdown_root_view(state.view_pid)
 
     case start_root_view(state) do
-      {:ok, pid, focused} ->
+      {:ok, pid, focused, theme} ->
         state
         |> Map.put(:view_pid, pid)
         |> Map.put(:focused, focused)
+        |> Map.put(:theme, theme)
         |> Map.put(:crash, nil)
         |> Map.put(:children, %{})
         |> Map.put(:decorations, [])
@@ -1278,6 +1299,7 @@ defmodule Breeze.Server do
              view: state.view,
              start_opts: state.start_opts || [],
              terminal: state.terminal,
+             theme: state.theme,
              server: self(),
              global_keybindings: state.global_keybindings || [],
              invalidate: fn -> send(session, :child_invalidated) end
@@ -1286,13 +1308,14 @@ defmodule Breeze.Server do
       {:ok, {:ok, pid}} ->
         Process.monitor(pid)
 
-        focused =
+        {focused, theme} =
           case safe_call(fn -> Breeze.ChildServer.metadata(pid) end) do
-            {:ok, %{focused: focused}} -> focused
-            _ -> nil
+            {:ok, %{focused: focused, theme: child_theme}} -> {focused, child_theme}
+            {:ok, %{focused: focused}} -> {focused, state.theme}
+            _ -> {nil, state.theme}
           end
 
-        {:ok, pid, focused}
+        {:ok, pid, focused, theme}
 
       {:ok, other} ->
         {:error,
@@ -1466,12 +1489,13 @@ defmodule Breeze.Server do
           else
             ref = Map.get(child, :ref)
             if is_reference(ref), do: Process.demonitor(ref, [:flush])
-            child = start_child!(attrs, state.terminal)
+
+            child = start_child!(attrs, state.terminal, state.theme)
             {%{state | children: Map.put(state.children, id, child)}, true}
           end
 
         nil ->
-          child = start_child!(attrs, state.terminal)
+          child = start_child!(attrs, state.terminal, state.theme)
           {%{state | children: Map.put(state.children, id, child)}, true}
       end
     end)
@@ -1607,7 +1631,7 @@ defmodule Breeze.Server do
 
   defp schedule_debug_push(state), do: state
 
-  defp start_child!(attrs, terminal) do
+  defp start_child!(attrs, terminal, theme) do
     view = fetch_live_attr!(attrs, :view)
     start_opts = fetch_live_attr(attrs, :start_opts, [])
     persistent = fetch_live_attr(attrs, :persistent, false)
@@ -1621,6 +1645,7 @@ defmodule Breeze.Server do
         start_opts: start_opts,
         server: self(),
         terminal: terminal,
+        theme: theme,
         invalidate: invalidate
       )
 

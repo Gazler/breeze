@@ -39,6 +39,16 @@ defmodule Breeze.ChildServer do
   def init(opts) do
     view = Keyword.fetch!(opts, :view)
     terminal = Keyword.get(opts, :terminal)
+    theme_input = Keyword.get(opts, :theme_source, Keyword.get(opts, :theme))
+    theme = Breeze.Theme.new(theme_input, terminal: terminal)
+
+    apply_theme_defaults? =
+      Keyword.get(
+        opts,
+        :apply_theme_defaults?,
+        Breeze.Theme.defaults_enabled?(theme_input)
+      )
+
     start_opts = Keyword.get(opts, :start_opts, [])
     invalidate = Keyword.get(opts, :invalidate)
     global_keybindings = Keyword.get(opts, :global_keybindings, [])
@@ -47,6 +57,8 @@ defmodule Breeze.ChildServer do
       view: view,
       server: Keyword.get(opts, :server),
       terminal: terminal,
+      theme: theme,
+      apply_theme_defaults?: apply_theme_defaults?,
       global_keybindings: global_keybindings,
       assigns: %{__invalidate__: invalidate}
     }
@@ -61,6 +73,8 @@ defmodule Breeze.ChildServer do
      %{
        focused: term.focused,
        view: term.view,
+       theme: term.theme,
+       apply_theme_defaults?: term.apply_theme_defaults?,
        focused_implicit_id: focused_implicit_id(term, term.focused)
      }, term}
   end
@@ -127,6 +141,8 @@ defmodule Breeze.ChildServer do
   defp render_term(term, opts) do
     explicit_focus? = Keyword.has_key?(opts, :focused)
     term = maybe_put_terminal(term, Keyword.get(opts, :terminal))
+    theme = Breeze.Theme.new(term.theme || Keyword.get(opts, :theme), terminal: term.terminal)
+    term = %{term | theme: theme}
     term = %{term | focused: Keyword.get(opts, :focused, term.focused)}
     implicit_state = Keyword.get(opts, :implicit_state, %{}) |> Map.merge(term.implicit_state)
 
@@ -134,6 +150,9 @@ defmodule Breeze.ChildServer do
       opts
       |> Keyword.put(:implicit_state, implicit_state)
       |> Keyword.put(:previous_elements, term.elements)
+      |> Keyword.put(:theme, theme)
+      |> Keyword.put(:theme_source, term.theme)
+      |> Keyword.put(:apply_theme_defaults, term.apply_theme_defaults?)
 
     profile_scope = Keyword.get(opts, :profile_scope)
     profile_label = profile_label(term, opts)

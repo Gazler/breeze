@@ -364,6 +364,17 @@ defmodule Breeze.View do
   end
 
   @doc """
+  Set the active Breeze theme for the current term.
+  """
+  def put_theme(%{theme: _} = term, theme) do
+    %{
+      term
+      | theme: Breeze.Theme.new(theme, terminal: term.terminal),
+        apply_theme_defaults?: Breeze.Theme.defaults_enabled?(theme)
+    }
+  end
+
+  @doc """
   Reset the implicit state for the given element ID, causing it to reinitialise
   on the next render.
   """

@@ -80,6 +80,58 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule ScrollPanelExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.panel id="theme-demo" width={6} height={2} scroll>
+        <:title>Demo</:title>
+        <box>AAAAAA</box>
+        <box>BBBBBB</box>
+        <box>CCCCCC</box>
+      </.panel>
+      """
+    end
+  end
+
+  defmodule SemanticThemeExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="text-primary bg border border-stroke">Hello</box>
+      """
+    end
+  end
+
+  defmodule ThemeDefaultsExample do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <box class="border">Hello</box>
+      """
+    end
+  end
+
+  defmodule ThemeInheritanceExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="bg-surface border">
+        <box class="text-primary">Hello</box>
+      </box>
+      """
+    end
+  end
+
   defmodule ScrollImplicit do
     def init(_children, last_state), do: %{offset_y: last_state[:offset_y] || 0, offset_x: 0}
 
@@ -298,11 +350,71 @@ defmodule Breeze.RendererTest do
 
     test "forwards inline styles through block components" do
       assert Renderer.render_to_string(PanelStyleExample, %{}) ==
-               "\e[38;5;3m╭───────╮\e[0m\n\e[38;5;3m│\e[0m\e[48;5;0mHello  \e[0m\e[38;5;3m│\e[0m\n\e[38;5;3m╰───────╯\e[0m"
+               "\e[48;5;0;38;5;8m╭───────╮\e[0m\n\e[48;5;0;38;5;8m│\e[0m\e[48;5;0;38;5;3mHello  \e[0m\e[48;5;0;38;5;8m│\e[0m\n\e[48;5;0;38;5;8m╰───────╯\e[0m"
+    end
+
+    test "resolves semantic tokens against custom themes" do
+      theme = Breeze.Theme.new(primary: "#268bd2", background: "#002b36", border: "#586e75")
+
+      {_state, box} = Renderer.render(SemanticThemeExample, %{}, theme: theme)
+
+      assert box.style.foreground_color == {38, 139, 210}
+      assert box.style.background_color == {0, 43, 54}
+      assert box.style.border_color == {88, 110, 117}
+    end
+
+    test "theme: true enables default semantic text, background, and border colors" do
+      assert Renderer.render_to_string(ThemeDefaultsExample, %{}, theme: true) ==
+               "\e[48;5;0;38;5;8m┌─────┐\e[0m\n\e[48;5;0;38;5;8m│\e[0m\e[48;5;0;38;5;7mHello\e[0m\e[48;5;0;38;5;8m│\e[0m\n\e[48;5;0;38;5;8m└─────┘\e[0m"
+    end
+
+    test "theme defaults do not override parent backgrounds on nested content" do
+      theme =
+        Breeze.Theme.new(
+          defaults: %{
+            foreground_color: "#d6e7ff",
+            background_color: "#0d2137",
+            border_color: "#4a9cff"
+          },
+          palette: %{
+            primary: "#4a9cff",
+            surface: "#193549"
+          }
+        )
+
+      assert Renderer.render_to_string(ThemeInheritanceExample, %{}, theme: theme) ==
+               "\e[48;2;25;53;73;38;2;74;156;255m┌─────┐\e[0m\n" <>
+                 "\e[48;2;25;53;73;38;2;74;156;255m│Hello│\e[0m\n" <>
+                 "\e[48;2;25;53;73;38;2;74;156;255m└─────┘\e[0m"
+    end
+
+    test "theme: false preserves legacy unthemed defaults" do
+      assert Renderer.render_to_string(ThemeDefaultsExample, %{}, theme: false) ==
+               "┌─────┐\n│Hello│\n└─────┘"
     end
   end
 
   describe "render/3" do
+    test "scroll panels wire the scroll implicit" do
+      {:ok, pid} = Breeze.ChildServer.start(view: ScrollPanelExample, start_opts: [])
+      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+
+      {:ok, _acc, initial_box} =
+        Breeze.ChildServer.render(pid, focused: "theme-demo", implicit_state: %{})
+
+      assert initial_box.content =~ "AAAAA"
+      assert initial_box.content =~ "BBBBB"
+      refute initial_box.content =~ "CCCCC"
+
+      assert {:noreply, "theme-demo", true} = Breeze.ChildServer.dispatch_input(pid, "j")
+
+      {:ok, _acc, scrolled_box} =
+        Breeze.ChildServer.render(pid, focused: "theme-demo", implicit_state: %{})
+
+      assert scrolled_box.content =~ "BBBBB"
+      assert scrolled_box.content =~ "CCCCC"
+    end
+
     test "applies implicit scroll modifiers as structured values" do
       {_, box} =
         Renderer.render(ScrollExample, %{},

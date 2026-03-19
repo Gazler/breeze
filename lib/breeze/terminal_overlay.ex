@@ -26,9 +26,9 @@ defmodule Breeze.TerminalOverlay do
     position <> content <> position
   end
 
-  def render_overlay(%{x: x, y: y, char: char}) do
+  def render_overlay(%{x: x, y: y, char: char} = overlay) do
     position = cursor_position_code(x, y)
-    content = cursor_open_code() <> char <> Termite.Style.reset_code()
+    content = cursor_open_code(overlay) <> char <> Termite.Style.reset_code()
     position <> content <> position
   end
 
@@ -54,12 +54,21 @@ defmodule Breeze.TerminalOverlay do
 
   defp recent_interaction?(_now_ms, _last_interaction_at), do: false
 
-  defp cursor_open_code do
-    Termite.Style.ansi256()
-    |> Termite.Style.foreground(0)
-    |> Termite.Style.background(11)
+  defp cursor_open_code(overlay) do
+    style =
+      Termite.Style.ansi256()
+      |> maybe_put_foreground(Map.get(overlay, :foreground_color, 0))
+      |> maybe_put_background(Map.get(overlay, :background_color, 11))
+
+    style
     |> Termite.Style.open_code()
   end
+
+  defp maybe_put_foreground(style, nil), do: style
+  defp maybe_put_foreground(style, color), do: Termite.Style.foreground(style, color)
+
+  defp maybe_put_background(style, nil), do: style
+  defp maybe_put_background(style, color), do: Termite.Style.background(style, color)
 
   defp cursor_position_code(x, y), do: "\e[#{y + 1};#{x + 1}H"
 end
