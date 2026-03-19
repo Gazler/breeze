@@ -1011,6 +1011,32 @@ defmodule Breeze.LiveViewTest do
     Process.exit(pid, :normal)
   end
 
+  test "winch forces a full redraw to resync the compositor" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: CounterChild,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    drain_terminal_writes()
+
+    send(pid, {reader, {:signal, :winch}})
+
+    writes =
+      wait_until(fn ->
+        writes = drain_terminal_writes()
+        if writes == [], do: false, else: writes
+      end)
+
+    assert Enum.any?(writes, &String.starts_with?(&1, "\e[2J\e[H"))
+
+    Process.exit(pid, :normal)
+  end
+
   test "global keybindings are dispatched before focused event handling" do
     event = %{"key" => "q"}
 
@@ -1037,11 +1063,17 @@ defmodule Breeze.LiveViewTest do
   defp wait_until(fun, attempts \\ 20)
 
   defp wait_until(fun, attempts) when attempts > 0 do
-    if fun.() do
-      :ok
-    else
-      Process.sleep(10)
-      wait_until(fun, attempts - 1)
+    case fun.() do
+      false ->
+        Process.sleep(10)
+        wait_until(fun, attempts - 1)
+
+      nil ->
+        Process.sleep(10)
+        wait_until(fun, attempts - 1)
+
+      value ->
+        value
     end
   end
 

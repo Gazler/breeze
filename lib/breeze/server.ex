@@ -57,6 +57,8 @@ defmodule Breeze.Server do
     :crash,
     :base_output,
     :last_frame_payload,
+    :last_frame_lines,
+    :last_overlays,
     :pending_ref,
     :pending_started_at,
     :last_render_at,
@@ -174,7 +176,9 @@ defmodule Breeze.Server do
       base_output: "",
       pending_started_at: nil,
       last_render_at: System.monotonic_time(:millisecond),
-      last_interaction_at: nil
+      last_interaction_at: nil,
+      last_frame_lines: nil,
+      last_overlays: []
     }
 
     state = maybe_start_reloader(state)
@@ -231,7 +235,7 @@ defmodule Breeze.Server do
           stop(state)
 
         {:ok, {:noreply, focused}} ->
-          {:noreply, maybe_render_base(%{state | focused: focused}, :resize)}
+          {:noreply, force_full_redraw(%{state | focused: focused}, :resize)}
 
         {:crash, crash} ->
           {:noreply, enter_crash_state(state, crash)}
@@ -699,6 +703,14 @@ defmodule Breeze.Server do
   defp maybe_render_after_input(%{pending_ref: ref} = state) when not is_nil(ref), do: state
   defp maybe_render_after_input(state), do: maybe_render_base(state, :input_flush)
 
+  defp force_full_redraw(state, cause) do
+    state
+    |> Map.put(:last_frame_payload, nil)
+    |> Map.put(:last_frame_lines, nil)
+    |> Map.put(:last_overlays, [])
+    |> maybe_render_base(cause)
+  end
+
   defp render_live_child(attrs, opts, state, profile_scope, tracking_ref) do
     id = fetch_live_attr!(attrs, :id)
     full_id = live_id(Keyword.get(opts, :live_prefix), id)
@@ -834,6 +846,8 @@ defmodule Breeze.Server do
              state
              |> Map.put(:terminal, terminal)
              |> Map.put(:last_frame_payload, nil)
+             |> Map.put(:last_frame_lines, nil)
+             |> Map.put(:last_overlays, [])
              |> put_debug_stat(:last_render_cause, :child_patch)
              |> put_debug_stat(:last_root_snapshot_us, 0)
              |> put_debug_stat(:last_root_snapshot_app_us, 0)
@@ -868,14 +882,19 @@ defmodule Breeze.Server do
     {output, decorations} = apply_decorations(state.base_output, state.decorations, state)
     output = strip_private_use_chars(output)
     overlays = terminal_overlays(decorations, state)
-    overlay_output = Breeze.TerminalOverlay.render_overlays(overlays)
 
-    screen_height = state.terminal.size.height
-    lines = :binary.split(output, "\n", [:global])
-    output_lines = max(length(lines), 1)
-    trailing = String.duplicate("\n\e[K", max(screen_height - output_lines, 0))
-    output = IO.iodata_to_binary(["\e[K", Enum.intersperse(lines, "\n\e[K"), trailing])
-    frame_payload = IO.iodata_to_binary(["\e[H", output, overlay_output])
+    lines =
+      output
+      |> normalize_frame_lines(state.terminal.size.height)
+
+    frame_payload =
+      build_frame_payload(
+        state.last_frame_lines,
+        lines,
+        state.last_overlays || [],
+        overlays
+      )
+
     composed_at = System.monotonic_time(:microsecond)
 
     {terminal, write_duration} =
@@ -891,11 +910,101 @@ defmodule Breeze.Server do
     |> Map.put(:terminal, terminal)
     |> Map.put(:decorations, decorations)
     |> Map.put(:last_frame_payload, frame_payload)
+    |> Map.put(:last_frame_lines, lines)
+    |> Map.put(:last_overlays, overlays)
     |> put_debug_stat(:last_frame_compose_us, composed_at - started_at)
     |> put_debug_stat(:last_terminal_write_us, write_duration)
     |> put_debug_stat(:last_frame_us, System.monotonic_time(:microsecond) - started_at)
-    |> put_debug_stat(:last_frame_bytes, byte_size(output))
+    |> put_debug_stat(:last_frame_bytes, byte_size(frame_payload))
     |> put_debug_stat(:overlay_count, length(overlays))
+  end
+
+  defp normalize_frame_lines(output, screen_height) do
+    output
+    |> :binary.split("\n", [:global])
+    |> then(fn lines ->
+      lines = if lines == [], do: [""], else: lines
+      lines ++ List.duplicate("", max(screen_height - length(lines), 0))
+    end)
+    |> Enum.take(screen_height)
+  end
+
+  defp build_frame_payload(nil, lines, _prev_overlays, overlays) do
+    full_redraw_payload(lines, overlays)
+  end
+
+  defp build_frame_payload(prev_lines, lines, prev_overlays, overlays) do
+    changed_rows =
+      changed_base_rows(prev_lines, lines)
+      |> MapSet.union(changed_overlay_rows(prev_overlays, overlays))
+
+    if MapSet.size(changed_rows) == 0 do
+      ""
+    else
+      IO.iodata_to_binary([
+        row_patch_payload(lines, changed_rows),
+        overlay_patch_payload(overlays, changed_rows)
+      ])
+    end
+  end
+
+  defp full_redraw_payload(lines, overlays) do
+    output = IO.iodata_to_binary(["\e[K", Enum.intersperse(lines, "\n\e[K")])
+    overlay_output = Breeze.TerminalOverlay.render_overlays(overlays)
+    IO.iodata_to_binary(["\e[2J\e[H", output, overlay_output])
+  end
+
+  defp changed_base_rows(prev_lines, lines) do
+    lines
+    |> Enum.zip(prev_lines)
+    |> Enum.with_index()
+    |> Enum.reduce(MapSet.new(), fn
+      {{line, line}, _row}, acc -> acc
+      {_pair, row}, acc -> MapSet.put(acc, row)
+    end)
+  end
+
+  defp changed_overlay_rows(prev_overlays, overlays) do
+    prev_map = overlay_row_map(prev_overlays)
+    next_map = overlay_row_map(overlays)
+
+    Map.keys(prev_map)
+    |> Kernel.++(Map.keys(next_map))
+    |> MapSet.new()
+    |> Enum.reduce(MapSet.new(), fn row, acc ->
+      if Map.get(prev_map, row, MapSet.new()) == Map.get(next_map, row, MapSet.new()) do
+        acc
+      else
+        MapSet.put(acc, row)
+      end
+    end)
+  end
+
+  defp overlay_row_map(overlays) do
+    Enum.reduce(overlays, %{}, fn overlay, acc ->
+      row = Map.get(overlay, :y, 0)
+      sig = overlay_signature(overlay)
+      Map.update(acc, row, MapSet.new([sig]), &MapSet.put(&1, sig))
+    end)
+  end
+
+  defp overlay_signature(overlay) do
+    {Map.get(overlay, :x), Map.get(overlay, :y), Breeze.TerminalOverlay.render_overlay(overlay)}
+  end
+
+  defp row_patch_payload(lines, changed_rows) do
+    changed_rows
+    |> Enum.sort()
+    |> Enum.map(fn row ->
+      ["\e[", Integer.to_string(row + 1), ";1H\e[K", Enum.at(lines, row, "")]
+    end)
+    |> IO.iodata_to_binary()
+  end
+
+  defp overlay_patch_payload(overlays, changed_rows) do
+    overlays
+    |> Enum.filter(&MapSet.member?(changed_rows, Map.get(&1, :y, 0)))
+    |> Breeze.TerminalOverlay.render_overlays()
   end
 
   defp initialize_decorations(decorations) do
@@ -1230,6 +1339,8 @@ defmodule Breeze.Server do
     |> Map.put(:crash, crash)
     |> Map.put(:base_output, content)
     |> Map.put(:last_frame_payload, nil)
+    |> Map.put(:last_frame_lines, nil)
+    |> Map.put(:last_overlays, [])
     |> render_frame()
   end
 
@@ -1273,6 +1384,8 @@ defmodule Breeze.Server do
         |> Map.put(:decorations, [])
         |> Map.put(:base_output, "")
         |> Map.put(:last_frame_payload, nil)
+        |> Map.put(:last_frame_lines, nil)
+        |> Map.put(:last_overlays, [])
         |> Map.put(:pending_ref, nil)
         |> Map.put(:pending_started_at, nil)
         |> Map.put(:queued_input, [])
