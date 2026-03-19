@@ -2,7 +2,7 @@ defmodule Breeze.Example do
   @moduledoc false
 
   def run(server_opts, opts \\ []) do
-    unless load_only?() do
+    unless load_only?() or Breeze.ReloadContext.compiling?() do
       Breeze.Server.start_link(server_opts)
       keep_alive(Keyword.get(opts, :keep_alive, :infinity))
     end

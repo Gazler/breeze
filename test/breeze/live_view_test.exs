@@ -40,6 +40,37 @@ defmodule Breeze.LiveViewTest do
     def resize(term), do: term.size
   end
 
+  defmodule FakeWatcher do
+    use GenServer
+
+    def start_link(opts) do
+      GenServer.start_link(__MODULE__, opts)
+    end
+
+    def subscribe(pid) do
+      GenServer.call(pid, {:subscribe, self()})
+    end
+
+    def trigger(pid, path, events \\ [:modified]) do
+      GenServer.call(pid, {:trigger, path, events})
+    end
+
+    @impl true
+    def init(opts) do
+      {:ok, %{dirs: Keyword.fetch!(opts, :dirs), subscriber: nil}}
+    end
+
+    @impl true
+    def handle_call({:subscribe, subscriber}, _from, state) do
+      {:reply, :ok, %{state | subscriber: subscriber}}
+    end
+
+    def handle_call({:trigger, path, events}, _from, %{subscriber: subscriber} = state) do
+      send(subscriber, {:file_event, self(), {path, events}})
+      {:reply, :ok, state}
+    end
+  end
+
   defmodule CounterChild do
     use Breeze.View
 
@@ -211,6 +242,98 @@ defmodule Breeze.LiveViewTest do
           <live id="debug" view={DecoratedDebugChild} start_opts={[]}>
           </live>
         </box>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule ReloadableView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      send(Keyword.fetch!(opts, :parent), :reloadable_view_mounted)
+      {:ok, term |> assign(label: "ready") |> focus("root")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box id="root" focusable>{@label}</box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule ReloadConfigView do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok, term |> assign(count: 0) |> focus("root")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box id="root" focusable>Count: {@count}</box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule NestedReloadLeaf do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H'<box id="leaf" focusable>leaf</box>'
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule NestedReloadChild do
+    use Breeze.View
+    import Breeze.Router
+
+    def mount(_opts, term) do
+      {:ok,
+       term
+       |> Breeze.Router.init([inner: NestedReloadLeaf], current: :inner)
+       |> focus("child")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box id="child" focusable>
+        <.router routes={@router} id="nested"/>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule RootReloadWithNestedRouter do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok, term |> assign(count: 0) |> focus("nested:child")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box id="root" focusable>Count: {@count}</box>
+        <live id="nested" view={NestedReloadChild} start_opts={[]}>
+        </live>
       </box>
       """
     end
@@ -611,6 +734,250 @@ defmodule Breeze.LiveViewTest do
     Process.exit(pid, :normal)
   end
 
+  test "server rerenders the current root view when the code reloader detects changes" do
+    parent = self()
+    path = make_reload_fixture_path("reload")
+    File.write!(path, "initial\n")
+
+    on_exit(fn -> File.rm_rf!(Path.dirname(path)) end)
+
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: ReloadableView,
+        terminal: terminal,
+        start_opts: [parent: self()],
+        reload: [
+          force?: true,
+          paths: [Path.dirname(path)],
+          watcher_module: FakeWatcher,
+          compile_fun: fn files ->
+            send(parent, {:compiled_files, files})
+            :ok
+          end
+        ]
+      )
+
+    assert_receive :reloadable_view_mounted, 1_000
+
+    added_path = Path.join(Path.dirname(path), "changed.ex")
+    File.write!(added_path, "changed\n")
+    watcher_pid = :sys.get_state(:sys.get_state(pid).reloader_pid).watcher_pid
+    :ok = FakeWatcher.trigger(watcher_pid, added_path)
+
+    assert_receive {:compiled_files, files}, 1_000
+    assert added_path in files
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      state.debug_stats[:last_render_cause] == :reload and state.base_output =~ "ready"
+    end)
+
+    Process.exit(pid, :normal)
+  end
+
+  test "server enters the crash screen when reloading hits a compile error" do
+    capture_log(fn ->
+      parent = self()
+      path = make_reload_fixture_path("compile_error")
+      File.write!(path, "initial\n")
+
+      on_exit(fn -> File.rm_rf!(Path.dirname(path)) end)
+
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+      {:ok, pid} =
+        Breeze.Server.start_app_link(
+          view: ReloadableView,
+          terminal: terminal,
+          start_opts: [parent: self()],
+          reload: [
+            force?: true,
+            paths: [Path.dirname(path)],
+            watcher_module: FakeWatcher,
+            compile_fun: fn _files ->
+              send(parent, :reload_compile_attempted)
+              {:error, CompileError.exception(description: "reload failed")}
+            end
+          ]
+        )
+
+      assert_receive :reloadable_view_mounted, 1_000
+
+      broken_path = Path.join(Path.dirname(path), "broken.ex")
+      File.write!(broken_path, "broken\n")
+      watcher_pid = :sys.get_state(:sys.get_state(pid).reloader_pid).watcher_pid
+      :ok = FakeWatcher.trigger(watcher_pid, broken_path)
+      assert_receive :reload_compile_attempted, 1_000
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+        state.crash && state.base_output =~ "reload failed"
+      end)
+
+      state = :sys.get_state(pid)
+      assert state.crash
+      assert state.base_output =~ "Breeze Error"
+      assert state.base_output =~ "reload failed"
+
+      Process.exit(pid, :normal)
+    end)
+  end
+
+  test "server preserves state while refreshing example-style root global keybindings on reload" do
+    {:ok, config_pid} =
+      Agent.start_link(fn ->
+        [
+          view: ReloadConfigView,
+          global_keybindings: [
+            {"x",
+             fn _event, term ->
+               {:noreply, Breeze.View.assign(term, count: term.assigns.count + 1)}
+             end}
+          ]
+        ]
+      end)
+
+    refresh = fn ->
+      Agent.get(config_pid, & &1)
+    end
+
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: ReloadConfigView,
+        terminal: terminal,
+        reader: reader,
+        global_keybindings: refresh.()[:global_keybindings],
+        reload: [
+          force?: true,
+          watcher_module: FakeWatcher,
+          refresh_server_opts: {__MODULE__, :reload_config_server_opts, [refresh]}
+        ]
+      )
+
+    send(pid, {reader, {:data, "x"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      state.base_output =~ "Count: 1"
+    end)
+
+    Agent.update(config_pid, fn _opts ->
+      [
+        view: ReloadConfigView,
+        global_keybindings: [
+          {"y",
+           fn _event, term ->
+             {:noreply, Breeze.View.assign(term, count: term.assigns.count + 1)}
+           end}
+        ]
+      ]
+    end)
+
+    send(pid, {:reload, :code_changed, ["examples/router.exs"]})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      state.debug_stats[:last_render_cause] == :reload and state.base_output =~ "Count: 1"
+    end)
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      match?(
+        [{"y", _fun}],
+        state.global_keybindings
+      )
+    end)
+
+    send(pid, {reader, {:data, "y"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      state.base_output =~ "Count: 2"
+    end)
+
+    Process.exit(pid, :normal)
+  end
+
+  test "reloaded root global keybindings do not corrupt nested router child state" do
+    {:ok, config_pid} =
+      Agent.start_link(fn ->
+        [
+          view: RootReloadWithNestedRouter,
+          global_keybindings: [
+            {"x",
+             fn _event, term ->
+               {:noreply, Breeze.View.assign(term, count: term.assigns.count + 1)}
+             end}
+          ]
+        ]
+      end)
+
+    refresh = fn ->
+      Agent.get(config_pid, & &1)
+    end
+
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: RootReloadWithNestedRouter,
+        terminal: terminal,
+        reader: reader,
+        global_keybindings: refresh.()[:global_keybindings],
+        reload: [
+          force?: true,
+          watcher_module: FakeWatcher,
+          refresh_server_opts: {__MODULE__, :reload_config_server_opts, [refresh]}
+        ]
+      )
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      Map.has_key?(state.children, "nested")
+    end)
+
+    Agent.update(config_pid, fn _opts ->
+      [
+        view: RootReloadWithNestedRouter,
+        global_keybindings: [
+          {"4",
+           fn _event, term ->
+             {:noreply, Breeze.View.assign(term, count: term.assigns.count + 1)}
+           end}
+        ]
+      ]
+    end)
+
+    send(pid, {:reload, :code_changed, ["examples/router.exs"]})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      state.debug_stats[:last_render_cause] == :reload
+    end)
+
+    send(pid, {reader, {:data, "4"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      state.base_output =~ "Count: 1"
+    end)
+
+    nested = :sys.get_state(pid).children["nested"]
+    nested_term = :sys.get_state(nested.pid)
+
+    assert nested_term.assigns.router.current == :inner
+    assert Map.keys(nested_term.assigns.router.routes) == [:inner]
+
+    Process.exit(pid, :normal)
+  end
+
   test "server falls back to a full rerender when a debug child has decorations" do
     terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
 
@@ -679,4 +1046,16 @@ defmodule Breeze.LiveViewTest do
   end
 
   defp wait_until(_fun, 0), do: flunk("condition not met")
+
+  defp make_reload_fixture_path(label) do
+    dir =
+      Path.join(System.tmp_dir!(), "breeze-reload-#{label}-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(dir)
+    Path.join(dir, "watched.ex")
+  end
+
+  def reload_config_server_opts(refresh) when is_function(refresh, 0) do
+    refresh.()
+  end
 end
