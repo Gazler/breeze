@@ -2,8 +2,7 @@ defmodule Breeze.Renderer do
   @moduledoc false
 
   alias BackBreeze.Box
-  alias BackBreeze.RenderCache
-  alias BackBreeze.Style
+  alias Breeze.Style, as: RenderStyle
 
   def render_to_string(mod, assigns, opts \\ []) do
     {_, %{content: content}} = render(mod, assigns, opts)
@@ -55,7 +54,7 @@ defmodule Breeze.Renderer do
         children,
         %BackBreeze.Box{},
         [],
-        "",
+        RenderStyle.empty(),
         [],
         %{focusables: [], id: 0, elements: %{}, boxes: %{}, ids: [], flags: []},
         opts
@@ -71,53 +70,94 @@ defmodule Breeze.Renderer do
          [{:attribute, ["style", style]} | rest],
          box,
          children,
-         _style,
+         style_state,
          flags,
          acc,
          opts
        ) do
-    build_tree(rest, box, children, style, flags, acc, opts)
+    build_tree(rest, box, children, RenderStyle.put_style(style_state, style), flags, acc, opts)
   end
 
-  defp build_tree([{:attribute, ["id", box_id]} | rest], box, children, style, flags, acc, opts) do
+  defp build_tree(
+         [{:attribute, ["class", class]} | rest],
+         box,
+         children,
+         style_state,
+         flags,
+         acc,
+         opts
+       ) do
+    build_tree(rest, box, children, RenderStyle.put_class(style_state, class), flags, acc, opts)
+  end
+
+  defp build_tree(
+         [{:attribute, ["id", box_id]} | rest],
+         box,
+         children,
+         style_state,
+         flags,
+         acc,
+         opts
+       ) do
     ids = [box_id | acc.ids]
     acc = %{acc | ids: ids, flags: Keyword.put(acc.flags, :id, box_id)}
-    build_tree(rest, box, children, style, Keyword.put(flags, :id, box_id), acc, opts)
+    build_tree(rest, box, children, style_state, Keyword.put(flags, :id, box_id), acc, opts)
   end
 
   defp build_tree(
          [{:attribute, ["implicit", mod]} | rest],
          box,
          children,
-         style,
+         style_state,
          flags,
          acc,
          opts
        ) do
-    mod = String.to_atom(mod)
+    mod =
+      case mod do
+        value when is_atom(value) -> value
+        value -> String.to_atom(to_string(value))
+      end
+
     acc = %{acc | flags: Keyword.put(acc.flags, :implicit, mod)}
-    build_tree(rest, box, children, style, Keyword.put(flags, :implicit, mod), acc, opts)
+    build_tree(rest, box, children, style_state, Keyword.put(flags, :implicit, mod), acc, opts)
   end
 
-  defp build_tree([{:attribute, [flag, value]} | rest], box, children, style, flags, acc, opts) do
+  defp build_tree(
+         [{:attribute, [flag, value]} | rest],
+         box,
+         children,
+         style_state,
+         flags,
+         acc,
+         opts
+       ) do
     flag = String.to_atom(flag)
     acc = %{acc | flags: Keyword.put(acc.flags, flag, value)}
-    build_tree(rest, box, children, style, Keyword.put(flags, flag, value), acc, opts)
+    build_tree(rest, box, children, style_state, Keyword.put(flags, flag, value), acc, opts)
   end
 
-  defp build_tree([{:attribute_bool, [attr]} | rest], box, children, style, flags, acc, opts) do
+  defp build_tree(
+         [{:attribute_bool, [attr]} | rest],
+         box,
+         children,
+         style_state,
+         flags,
+         acc,
+         opts
+       ) do
     attr = String.to_atom(attr)
     acc = %{acc | flags: Keyword.put(acc.flags, attr, true)}
-    build_tree(rest, box, children, style, Keyword.put(flags, attr, true), acc, opts)
+    build_tree(rest, box, children, style_state, Keyword.put(flags, attr, true), acc, opts)
   end
 
-  defp build_tree([content | rest], box, children, style, flags, acc, opts)
+  defp build_tree([content | rest], box, children, style_state, flags, acc, opts)
        when is_binary(content) do
     box = %{box | content: String.trim_trailing(content, "\n  ")}
-    build_tree(rest, box, children, style, flags, acc, opts)
+    build_tree(rest, box, children, style_state, flags, acc, opts)
   end
 
-  defp build_tree([{:live, attrs} | rest], box, children, style, flags, acc, opts) do
+  defp build_tree([{:live, attrs} | rest], box, children, style_state, flags, acc, opts) do
     {acc, child} =
       case Keyword.get(opts, :live_view) do
         fun when is_function(fun, 2) ->
@@ -137,10 +177,10 @@ defmodule Breeze.Renderer do
       end
 
     children = if child, do: [child | children], else: children
-    build_tree(rest, box, children, style, flags, acc, opts)
+    build_tree(rest, box, children, style_state, flags, acc, opts)
   end
 
-  defp build_tree([{:box, _, nodes} | rest], box, children, style, flags, acc, opts) do
+  defp build_tree([{:box, _, nodes} | rest], box, children, style_state, flags, acc, opts) do
     child_flags =
       []
       |> inherit_implicit_owner(flags)
@@ -153,11 +193,13 @@ defmodule Breeze.Renderer do
         elements: Map.put(acc.elements, acc.id, acc.flags)
     }
 
-    {acc, child} = build_tree(nodes, %BackBreeze.Box{}, [], "", child_flags, acc, opts)
-    build_tree(rest, box, [child | children], style, flags, acc, opts)
+    {acc, child} =
+      build_tree(nodes, %BackBreeze.Box{}, [], RenderStyle.empty(), child_flags, acc, opts)
+
+    build_tree(rest, box, [child | children], style_state, flags, acc, opts)
   end
 
-  defp build_tree([], box, children, style, flags, acc, opts) do
+  defp build_tree([], box, children, style_state, flags, acc, opts) do
     %{focusables: focusables} = acc
 
     focused =
@@ -229,7 +271,10 @@ defmodule Breeze.Renderer do
         do: [Keyword.get(flags, :id) | focusables],
         else: focusables
 
-    element = string_to_styles(append_style_modifiers(style, style_modifiers), style_flags)
+    element =
+      style_state
+      |> RenderStyle.merge_modifiers(style_modifiers)
+      |> RenderStyle.to_element(style_flags)
 
     opts =
       element.attributes
@@ -255,7 +300,8 @@ defmodule Breeze.Renderer do
   defp parse_modifiers(modifiers, style_flags) when is_list(modifiers) do
     {style_flags, style_modifiers, scroll_modifier} =
       Enum.reduce(modifiers, {style_flags, [], %{top: nil, left: nil}}, fn
-        {:style, value}, {flags, styles, scroll} when is_binary(value) ->
+        {:style, value}, {flags, styles, scroll}
+        when is_binary(value) or is_map(value) or is_list(value) ->
           {flags, [value | styles], scroll}
 
         {:scroll_y, top}, {flags, styles, scroll} when is_integer(top) ->
@@ -280,15 +326,6 @@ defmodule Breeze.Renderer do
 
   defp parse_modifiers(_modifiers, style_flags),
     do: {style_flags, [], %{top: nil, left: nil}}
-
-  defp append_style_modifiers(style, []), do: style
-
-  defp append_style_modifiers(style, modifiers) do
-    [style | modifiers]
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join(" ")
-  end
 
   defp merge_scroll_modifier(attributes, %{top: nil, left: nil}), do: attributes
 
@@ -404,198 +441,6 @@ defmodule Breeze.Renderer do
     |> Map.keys()
     |> Enum.max(fn -> 0 end)
   end
-
-  defp string_to_styles(str, opts) do
-    extra_styles = Keyword.get_values(opts, :style)
-    focus? = Keyword.get(opts, :focus, false)
-    selected? = Keyword.get(opts, :selected, false)
-
-    RenderCache.fetch_stable(
-      {:breeze_string_to_styles, str, extra_styles, focus?, selected?},
-      fn ->
-        str =
-          case extra_styles do
-            [] -> str
-            other -> str <> " " <> Enum.join(other, " ")
-          end
-
-        {bb_style, attributes} =
-          String.split(str, " ")
-          |> Enum.map(&String.split(&1, ":"))
-          |> Enum.sort_by(&length/1)
-          |> Enum.reduce({%Style{}, %{}}, fn style, acc ->
-            style =
-              Enum.reduce_while(style, nil, fn
-                "focus", _ -> if focus?, do: {:cont, nil}, else: {:halt, nil}
-                "selected", _ -> if selected?, do: {:cont, nil}, else: {:halt, nil}
-                other, _ -> {:halt, other}
-              end)
-
-            apply_style(style, acc)
-          end)
-
-        struct(Breeze.Element, %{style: Map.from_struct(bb_style), attributes: attributes})
-      end
-    )
-  end
-
-  defp apply_style("border", {style, attrs}), do: {Style.border(style), attrs}
-  defp apply_style("bold", {style, attrs}), do: {Style.bold(style), attrs}
-  defp apply_style("italic", {style, attrs}), do: {Style.italic(style), attrs}
-  defp apply_style("inverse", {style, attrs}), do: {Style.reverse(style), attrs}
-  defp apply_style("reverse", {style, attrs}), do: {Style.reverse(style), attrs}
-  defp apply_style("inline", {style, attrs}), do: {style, Map.put(attrs, :display, :inline)}
-
-  defp apply_style("grid", {style, attrs}) do
-    display =
-      case Map.get(attrs, :display) do
-        %BackBreeze.Grid{} = grid -> grid
-        _ -> %BackBreeze.Grid{columns: 1}
-      end
-
-    {style, Map.put(attrs, :display, display)}
-  end
-
-  defp apply_style("grid-cols-" <> num, {style, attrs}) do
-    display =
-      case Map.get(attrs, :display) do
-        %BackBreeze.Grid{} = grid -> grid
-        _ -> %BackBreeze.Grid{}
-      end
-
-    {style, Map.put(attrs, :display, %{display | columns: String.to_integer(num)})}
-  end
-
-  defp apply_style("grid-rows-" <> num, {style, attrs}) do
-    display =
-      case Map.get(attrs, :display) do
-        %BackBreeze.Grid{} = grid -> grid
-        _ -> %BackBreeze.Grid{}
-      end
-
-    {style, Map.put(attrs, :display, %{display | rows: String.to_integer(num)})}
-  end
-
-  defp apply_style("layer-" <> num, {style, attrs}) do
-    {style, Map.put(attrs, :layer, String.to_integer(num))}
-  end
-
-  defp apply_style("overflow-scroll", {style, attrs}),
-    do: {Style.overflow(style, :scroll), attrs}
-
-  defp apply_style("overflow-" <> overflow, {style, attrs}),
-    do: {Style.overflow(style, String.to_existing_atom(overflow)), attrs}
-
-  defp apply_style("offset-top-" <> num, {style, attrs}) do
-    {_, left} = Map.get(attrs, :scroll, {0, 0})
-    {style, Map.put(attrs, :scroll, {String.to_integer(num), left})}
-  end
-
-  defp apply_style("offset-left-" <> num, {style, attrs}) do
-    {top, _} = Map.get(attrs, :scroll, {0, 0})
-    {style, Map.put(attrs, :scroll, {top, String.to_integer(num)})}
-  end
-
-  defp apply_style("absolute", {style, attrs}), do: {style, Map.put(attrs, :position, :absolute)}
-  defp apply_style("fixed", {style, attrs}), do: {style, Map.put(attrs, :position, :fixed)}
-
-  defp apply_style("center", {style, attrs}) do
-    {style, attrs |> Map.put(:left, :center) |> Map.put(:top, :center)}
-  end
-
-  defp apply_style("center-x", {style, attrs}) do
-    {style, Map.put(attrs, :left, :center)}
-  end
-
-  defp apply_style("center-y", {style, attrs}) do
-    {style, Map.put(attrs, :top, :center)}
-  end
-
-  defp apply_style("inset-x-" <> num, {style, attrs}) do
-    inset = String.to_integer(num)
-    {style, attrs |> Map.put(:left, inset) |> Map.put(:right, inset)}
-  end
-
-  defp apply_style("inset-y-" <> num, {style, attrs}) do
-    inset = String.to_integer(num)
-    {style, attrs |> Map.put(:top, inset) |> Map.put(:bottom, inset)}
-  end
-
-  defp apply_style("inset-" <> num, {style, attrs}) do
-    inset = String.to_integer(num)
-
-    {style,
-     attrs
-     |> Map.put(:left, inset)
-     |> Map.put(:right, inset)
-     |> Map.put(:top, inset)
-     |> Map.put(:bottom, inset)}
-  end
-
-  defp apply_style("left-" <> num, {style, attrs}),
-    do: {style, Map.put(attrs, :left, String.to_integer(num))}
-
-  defp apply_style("right-" <> num, {style, attrs}),
-    do: {style, Map.put(attrs, :right, String.to_integer(num))}
-
-  defp apply_style("top-" <> num, {style, attrs}),
-    do: {style, Map.put(attrs, :top, String.to_integer(num))}
-
-  defp apply_style("bottom-" <> num, {style, attrs}),
-    do: {style, Map.put(attrs, :bottom, String.to_integer(num))}
-
-  defp apply_style("width-auto", {style, attrs}), do: {Style.width(style, :auto), attrs}
-  defp apply_style("width-full", {style, attrs}), do: {Style.width(style, :full), attrs}
-  defp apply_style("width-screen", {style, attrs}), do: {Style.width(style, :screen), attrs}
-
-  defp apply_style("width-" <> num, {style, attrs}),
-    do: {Style.width(style, String.to_integer(num)), attrs}
-
-  defp apply_style("height-auto", {style, attrs}), do: {Style.height(style, :auto), attrs}
-  defp apply_style("height-screen", {style, attrs}), do: {Style.height(style, :screen), attrs}
-  defp apply_style("height-full", {style, attrs}), do: {Style.height(style, :full), attrs}
-
-  defp apply_style("height-" <> num, {style, attrs}),
-    do: {Style.height(style, String.to_integer(num)), attrs}
-
-  defp apply_style("padding-top-" <> num, {style, attrs}),
-    do: {Style.padding_top(style, String.to_integer(num)), attrs}
-
-  defp apply_style("padding-right-" <> num, {style, attrs}),
-    do: {Style.padding_right(style, String.to_integer(num)), attrs}
-
-  defp apply_style("padding-bottom-" <> num, {style, attrs}),
-    do: {Style.padding_bottom(style, String.to_integer(num)), attrs}
-
-  defp apply_style("padding-left-" <> num, {style, attrs}),
-    do: {Style.padding_left(style, String.to_integer(num)), attrs}
-
-  defp apply_style("padding-" <> num, {style, attrs}),
-    do: {Style.padding(style, String.to_integer(num)), attrs}
-
-  defp apply_style("text-left", {style, attrs}), do: {Style.text_align(style, :left), attrs}
-  defp apply_style("text-center", {style, attrs}), do: {Style.text_align(style, :center), attrs}
-  defp apply_style("text-right", {style, attrs}), do: {Style.text_align(style, :right), attrs}
-
-  defp apply_style("text-" <> num, {style, attrs}),
-    do: {Style.foreground_color(style, String.to_integer(num)), attrs}
-
-  defp apply_style("bg-" <> num, {style, attrs}),
-    do: {Style.background_color(style, String.to_integer(num)), attrs}
-
-  defp apply_style("scrollbar-none", {style, attrs}),
-    do: {Style.scrollbar(style, false), attrs}
-
-  defp apply_style("scrollbar-arrows", {style, attrs}),
-    do: {Style.scrollbar(style, %{arrows: true}), attrs}
-
-  defp apply_style("border-rounded", {style, attrs}),
-    do: {Style.border(style, :rounded), attrs}
-
-  defp apply_style("border-" <> num, {style, attrs}),
-    do: {Style.border_color(style, String.to_integer(num)), attrs}
-
-  defp apply_style(_, acc), do: acc
 
   defp profile(nil, _label, _metric, fun), do: fun.()
 

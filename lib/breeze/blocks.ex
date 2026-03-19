@@ -10,11 +10,11 @@ defmodule Breeze.Blocks do
         ...
       end
 
-  ## Style merging
+  ## Class merging
 
-  All components expose a `style` attribute (and where applicable an
-  `item_style` attribute) that are merged with the component's defaults using
-  `merge_style/2`.  Style tokens are grouped by their *property key*, everything
+  All components expose a `class` attribute (and where applicable an
+  `item_class` attribute) that are merged with the component's defaults using
+  `merge_class/2`. Style tokens are grouped by their *property key*, everything
   before the last `-` segment, so an override of `"width-32"` replaces the
   default `"width-24"` while leaving other properties intact (including `focus:`
   prefixes).
@@ -24,8 +24,10 @@ defmodule Breeze.Blocks do
 
   attr :id, :string, required: true
   attr :loop, :boolean, default: true
-  attr :style, :string, default: nil
-  attr :item_style, :string, default: nil
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :item_class, :string, default: nil
+  attr :item_style, :any, default: nil
   attr :rest, :global
 
   slot :item do
@@ -36,14 +38,18 @@ defmodule Breeze.Blocks do
     assigns =
       assigns
       |> assign(
-        style:
-          merge_style(
+        class:
+          merge_class(
             "border width-24 height-8 overflow-scroll scrollbar-arrows focus:border-3",
-            assigns[:style]
+            class_override(assigns)
           )
       )
       |> assign(
-        item_style: merge_style("selected:bg-4 selected:text-7 width-24", assigns[:item_style])
+        item_class:
+          merge_class(
+            "selected:bg-4 selected:text-7 width-24",
+            class_override(assigns, :item_class, :item_style)
+          )
       )
 
     ~H"""
@@ -53,19 +59,30 @@ defmodule Breeze.Blocks do
       list-loop={@loop}
       list-scroll-padding={1}
       focusable
-      style={@style}
+      class={@class}
+      style={inline_style(assigns)}
       {@rest}
     >
-      <box :for={item <- @item} value={item.value} style={@item_style}>{render_slot(item, %{})}</box>
+      <box
+        :for={item <- @item}
+        value={item.value}
+        class={@item_class}
+        style={inline_style(assigns, :item_class, :item_style)}
+      >
+        {render_slot(item, %{})}
+      </box>
     </box>
     """
   end
 
   attr :id, :string, required: true
   attr :selected, :string, default: nil
-  attr :style, :string, default: nil
-  attr :menu_style, :string, default: nil
-  attr :item_style, :string, default: nil
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :menu_class, :string, default: nil
+  attr :menu_style, :any, default: nil
+  attr :item_class, :string, default: nil
+  attr :item_style, :any, default: nil
   attr :width, :integer, default: nil
   attr :menu_width, :integer, default: nil
   attr :menu_top, :integer, default: 1
@@ -109,18 +126,18 @@ defmodule Breeze.Blocks do
       |> assign(menu_height: menu_height)
       |> assign(trigger_content: trigger_content)
       |> assign(
-        trigger_style:
-          merge_style(
+        trigger_class:
+          merge_class(
             "bg-4 text-7 bold width-#{width} height-1 focus:inverse",
-            assigns[:style]
+            class_override(assigns)
           )
       )
-      |> assign(menu_style: assigns[:menu_style])
+      |> assign(menu_class: class_override(assigns, :menu_class, :menu_style))
       |> assign(
-        item_style:
-          merge_style(
+        item_class:
+          merge_class(
             "width-#{menu_width} text-7 selected:bg-4 selected:text-7 focus:inverse",
-            assigns[:item_style]
+            class_override(assigns, :item_class, :item_style)
           )
       )
 
@@ -130,7 +147,7 @@ defmodule Breeze.Blocks do
           items_with_labels
           |> Enum.with_index()
           |> Enum.map(fn {{item, _label}, index} ->
-            {item, index, assigns.item_style}
+            {item, index, assigns.item_class}
           end)
       )
 
@@ -145,20 +162,28 @@ defmodule Breeze.Blocks do
       dropdown-menu-height={@menu_height}
       dropdown-menu-top={@menu_top}
       dropdown-menu-left={@menu_left}
-      style={@trigger_style}
+      class={@trigger_class}
+      style={inline_style(assigns)}
       {@rest}
     >
       {@trigger_content}
-      <box dropdown-indicator-closed="true" style={@trigger_style}>▼</box>
-      <box dropdown-indicator-open="true" style={@trigger_style}>▲</box>
-      <box dropdown-frame="true" style={@menu_style}>
+      <box dropdown-indicator-closed="true" class={@trigger_class} style={inline_style(assigns)}>
+        ▼
+      </box>
+      <box dropdown-indicator-open="true" class={@trigger_class} style={inline_style(assigns)}>▲</box>
+      <box
+        dropdown-frame="true"
+        class={@menu_class}
+        style={inline_style(assigns, :menu_class, :menu_style)}
+      >
       </box>
       <box
         :for={{item, index, item_style} <- @item_styles}
         dropdown-item="true"
         dropdown-item-index={index}
         value={item.value}
-        style={item_style}
+        class={item_style}
+        style={inline_style(assigns, :item_class, :item_style)}
       >
         {render_slot(item, %{})}
       </box>
@@ -174,8 +199,10 @@ defmodule Breeze.Blocks do
 
   attr :id, :string, required: true
   attr :selected, :string, default: nil
-  attr :style, :string, default: nil
-  attr :item_style, :string, default: nil
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :item_class, :string, default: nil
+  attr :item_style, :any, default: nil
   attr :rest, :global
 
   slot :tab do
@@ -191,17 +218,17 @@ defmodule Breeze.Blocks do
       assigns
       |> assign(active: active)
       |> assign(
-        style:
-          merge_style(
+        class:
+          merge_class(
             "border overflow-hidden focus:border-3 grid grid-cols-1 grid-rows-2",
-            assigns[:style]
+            class_override(assigns)
           )
       )
       |> assign(
-        item_style:
-          merge_style(
+        item_class:
+          merge_class(
             "selected:bold selected:text-4 focus:selected:bg-4 focus:selected:text-7 overflow-scroll",
-            assigns[:item_style]
+            class_override(assigns, :item_class, :item_style)
           )
       )
 
@@ -214,15 +241,22 @@ defmodule Breeze.Blocks do
       "#{@id}-panel-#{@active.value}"
     end}
       tab-selected={@active.value}
-      style={@style}
+      class={@class}
+      style={inline_style(assigns)}
       {@rest}
     >
-      <box style="inline height-1" tab-bar="true">
-        <box :for={t <- @tab} value={t.value} tab-label={t.label} style={@item_style}>
+      <box class="inline height-1" tab-bar="true">
+        <box
+          :for={t <- @tab}
+          value={t.value}
+          tab-label={t.label}
+          class={@item_class}
+          style={inline_style(assigns, :item_class, :item_style)}
+        >
           {" #{t.label} "}
         </box>
       </box>
-      <box style="height-full overflow-hidden">{render_slot(@active)}</box>
+      <box class="height-full overflow-hidden">{render_slot(@active)}</box>
     </box>
     """
   end
@@ -230,25 +264,29 @@ defmodule Breeze.Blocks do
   attr :id, :string, required: true
   attr :content, :string, required: true
   attr :width, :integer, required: true
-  attr :style, :string, default: nil
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
 
   def markdown(assigns) do
     assigns =
       assign(assigns,
-        style:
-          merge_style(
+        class:
+          merge_class(
             "height-full overflow-scroll scrollbar-arrows focus:scrollbar-3",
-            assigns[:style]
+            class_override(assigns)
           )
       )
 
     ~H"""
-    <.scroll id={@id} style={@style}>{Breeze.Markdown.render(@content, @width)}</.scroll>
+    <.scroll id={@id} class={@class} style={inline_style(assigns)}>
+      {Breeze.Markdown.render(@content, @width)}
+    </.scroll>
     """
   end
 
   attr :id, :string, required: true
-  attr :style, :string, default: nil
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
   attr :rest, :global
 
   slot :inner_block, required: true
@@ -256,15 +294,22 @@ defmodule Breeze.Blocks do
   def scroll(assigns) do
     assigns =
       assign(assigns,
-        style:
-          merge_style(
+        class:
+          merge_class(
             "height-full overflow-scroll scrollbar-arrows focus:scrollbar-3",
-            assigns[:style]
+            class_override(assigns)
           )
       )
 
     ~H"""
-    <box focusable id={@id} implicit={Breeze.Implicit.Scroll} style={@style} {@rest}>
+    <box
+      focusable
+      id={@id}
+      implicit={Breeze.Implicit.Scroll}
+      class={@class}
+      style={inline_style(assigns)}
+      {@rest}
+    >
       {render_slot(@inner_block)}
     </box>
     """
@@ -272,8 +317,10 @@ defmodule Breeze.Blocks do
 
   attr :width, :integer, required: true
   attr :height, :integer, required: true
-  attr :style, :string, default: nil
-  attr :title_style, :string, default: nil
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :title_class, :string, default: nil
+  attr :title_style, :any, default: nil
   attr :rest, :global
 
   slot :title
@@ -283,14 +330,18 @@ defmodule Breeze.Blocks do
     assigns =
       assigns
       |> assign(
-        style: merge_style("border-rounded border-7 bg-0", assigns[:style]),
-        title_style: merge_style("bold bg-0", assigns[:title_style])
+        class: merge_class("border-rounded border-7 bg-0", class_override(assigns)),
+        title_class: merge_class("bold bg-0", class_override(assigns, :title_class, :title_style))
       )
 
     ~H"""
-    <box style={"#{@style} width-#{@width} height-#{@height}"} {@rest}>
+    <box class={"#{@class} width-#{@width} height-#{@height}"} style={inline_style(assigns)} {@rest}>
       {render_slot(@inner_block)}
-      <box :if={assigns[:title]} style={"absolute left-2 top-0 #{@title_style}"}>
+      <box
+        :if={assigns[:title]}
+        class={"absolute left-2 top-0 #{@title_class}"}
+        style={inline_style(assigns, :title_class, :title_style)}
+      >
         {render_slot(@title)}
       </box>
     </box>
@@ -303,51 +354,53 @@ defmodule Breeze.Blocks do
   attr :inset, :integer, default: nil
   attr :inset_x, :integer, default: nil
   attr :inset_y, :integer, default: nil
-  attr :style, :string, default: nil
-  attr :frame_style, :string, default: nil
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :frame_class, :string, default: nil
+  attr :frame_style, :any, default: nil
   attr :rest, :global
 
   slot :title
   slot :inner_block
 
   def modal(assigns) do
-    {frame_style, panel_style} =
+    {frame_class, panel_class} =
       case {assigns[:width], assigns[:height], assigns[:inset], assigns[:inset_x],
             assigns[:inset_y]} do
         {width, height, nil, nil, nil} when is_integer(width) and is_integer(height) ->
           {
-            merge_style(
+            merge_class(
               "fixed center width-#{width + 2} height-#{height + 2} bg-0 layer-50",
-              assigns[:frame_style]
+              class_override(assigns, :frame_class, :frame_style)
             ),
-            merge_style(
+            merge_class(
               "absolute left-0 top-0 layer-51 width-#{width} height-#{height} border-rounded border-7 bg-0",
-              assigns[:style]
+              class_override(assigns)
             )
           }
 
         {nil, nil, inset, nil, nil} when is_integer(inset) ->
           {
-            merge_style(
+            merge_class(
               "fixed inset-#{inset} width-screen height-screen bg-0 layer-50",
-              assigns[:frame_style]
+              class_override(assigns, :frame_class, :frame_style)
             ),
-            merge_style(
+            merge_class(
               "absolute left-0 right-0 top-0 bottom-0 layer-51 width-full height-full border-rounded border-7 bg-0",
-              assigns[:style]
+              class_override(assigns)
             )
           }
 
         {nil, nil, nil, inset_x, inset_y}
         when is_integer(inset_x) and is_integer(inset_y) ->
           {
-            merge_style(
+            merge_class(
               "fixed inset-x-#{inset_x} inset-y-#{inset_y} width-screen height-screen bg-0 layer-50",
-              assigns[:frame_style]
+              class_override(assigns, :frame_class, :frame_style)
             ),
-            merge_style(
+            merge_class(
               "absolute left-0 right-0 top-0 bottom-0 layer-51 width-full height-full border-rounded border-7 bg-0",
-              assigns[:style]
+              class_override(assigns)
             )
           }
 
@@ -358,8 +411,8 @@ defmodule Breeze.Blocks do
 
     assigns =
       assigns
-      |> assign(frame_style: frame_style)
-      |> assign(panel_style: panel_style)
+      |> assign(frame_class: frame_class)
+      |> assign(panel_class: panel_class)
 
     ~H"""
     <box
@@ -367,11 +420,12 @@ defmodule Breeze.Blocks do
       focusable
       focus-scope="trap"
       implicit={Breeze.Implicit.Modal}
-      style={@frame_style}
+      class={@frame_class}
+      style={inline_style(assigns, :frame_class, :frame_style)}
       {@rest}
     >
-      <box style={@panel_style}>
-        <box :if={assigns[:title]} style="absolute left-2 top-0 bold bg-0">{render_slot(@title)}</box>
+      <box class={@panel_class} style={inline_style(assigns)}>
+        <box :if={assigns[:title]} class="absolute left-2 top-0 bold bg-0">{render_slot(@title)}</box>
         {render_slot(@inner_block)}
       </box>
     </box>
@@ -379,29 +433,29 @@ defmodule Breeze.Blocks do
   end
 
   @doc """
-  Merge two style strings, with `override` taking precedence over `default` for
+  Merge two class strings, with `override` taking precedence over `default` for
   matching style properties.
 
   The *property key* for each style token is everything before its final `-`
   segment, so tokens that share the same prefix override one another:
 
-      iex> Breeze.Blocks.merge_style("border width-24 height-8", "width-32")
+      iex> Breeze.Blocks.merge_class("border width-24 height-8", "width-32")
       "border width-32 height-8"
 
-      iex> Breeze.Blocks.merge_style("overflow-scroll", "overflow-hidden")
+      iex> Breeze.Blocks.merge_class("overflow-scroll", "overflow-hidden")
       "overflow-hidden"
 
   Tokens from `override` that do not match any default key are appended:
 
-      iex> Breeze.Blocks.merge_style("border width-24", "bg-4")
+      iex> Breeze.Blocks.merge_class("border width-24", "bg-4")
       "border width-24 bg-4"
 
   `nil` or an empty string override returns the default unchanged.
   """
-  @spec merge_style(String.t(), String.t() | nil) :: String.t()
-  def merge_style(default, override) when override in [nil, ""], do: default
+  @spec merge_class(String.t(), String.t() | nil) :: String.t()
+  def merge_class(default, override) when override in [nil, ""], do: default
 
-  def merge_style(default, override) do
+  def merge_class(default, override) do
     default_tokens = String.split(default, " ", trim: true)
     override_tokens = String.split(override, " ", trim: true)
 
@@ -414,6 +468,26 @@ defmodule Breeze.Blocks do
     new_tokens = Enum.reject(override_tokens, &MapSet.member?(default_key_set, style_key(&1)))
 
     Enum.join(merged ++ new_tokens, " ")
+  end
+
+  @spec merge_style(String.t(), String.t() | nil) :: String.t()
+  def merge_style(default, override), do: merge_class(default, override)
+
+  defp class_override(assigns, class_key \\ :class, style_key \\ :style) do
+    cond do
+      is_binary(assigns[class_key]) -> assigns[class_key]
+      is_binary(assigns[style_key]) -> assigns[style_key]
+      true -> nil
+    end
+  end
+
+  @doc false
+  def inline_style(assigns, class_key \\ :class, style_key \\ :style) do
+    cond do
+      not is_nil(assigns[class_key]) and not is_binary(assigns[class_key]) -> assigns[class_key]
+      not is_binary(assigns[style_key]) -> assigns[style_key]
+      true -> nil
+    end
   end
 
   defp style_key(token) do

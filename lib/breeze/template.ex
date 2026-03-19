@@ -184,7 +184,7 @@ defmodule Breeze.Template do
       |> eval_html_attrs(ctx)
       |> Enum.map(fn
         {attr_name, true} -> {:attribute_bool, [attr_name]}
-        {attr_name, value} -> {:attribute, [attr_name, to_string(value)]}
+        {attr_name, value} -> {:attribute, [attr_name, value]}
       end)
 
     child_nodes = nodes_to_tree(children, ctx) |> merge_text_nodes()

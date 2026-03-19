@@ -29,6 +29,57 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule ClassExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="text-3 bold">Hello</box>
+      """
+    end
+  end
+
+  defmodule BackCompatStyleExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box style="text-3 bold">Hello</box>
+      """
+    end
+  end
+
+  defmodule MapStyleExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box style={%{foreground_color: 3, background_color: 0}}>Hello</box>
+      """
+    end
+  end
+
+  defmodule StructStyleExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box style={BackBreeze.Style.border_color(3) |> BackBreeze.Style.border(:rounded)}>Hello</box>
+      """
+    end
+  end
+
+  defmodule PanelStyleExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <.panel width={7} height={1} class="text-3" style={%{background_color: 0}}>Hello</.panel>
+      """
+    end
+  end
+
   defmodule ScrollImplicit do
     def init(_children, last_state), do: %{offset_y: last_state[:offset_y] || 0, offset_x: 0}
 
@@ -226,6 +277,28 @@ defmodule Breeze.RendererTest do
                │\e[1mHello world\e[0m│
                └───────────┘\
                """
+    end
+
+    test "supports token classes" do
+      assert Renderer.render_to_string(ClassExample, %{}) == "\e[1;38;5;3mHello\e[0m"
+    end
+
+    test "keeps binary style values backwards compatible" do
+      assert Renderer.render_to_string(BackCompatStyleExample, %{}) == "\e[1;38;5;3mHello\e[0m"
+    end
+
+    test "accepts inline style maps" do
+      assert Renderer.render_to_string(MapStyleExample, %{}) == "\e[48;5;0;38;5;3mHello\e[0m"
+    end
+
+    test "accepts BackBreeze.Style structs" do
+      assert Renderer.render_to_string(StructStyleExample, %{}) ==
+               "\e[38;5;3m╭─────╮\e[0m\n\e[38;5;3m│\e[0mHello\e[38;5;3m│\e[0m\n\e[38;5;3m╰─────╯\e[0m"
+    end
+
+    test "forwards inline styles through block components" do
+      assert Renderer.render_to_string(PanelStyleExample, %{}) ==
+               "\e[38;5;3m╭───────╮\e[0m\n\e[38;5;3m│\e[0m\e[48;5;0mHello  \e[0m\e[38;5;3m│\e[0m\n\e[38;5;3m╰───────╯\e[0m"
     end
   end
 
