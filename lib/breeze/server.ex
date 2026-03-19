@@ -1015,7 +1015,7 @@ defmodule Breeze.Server do
     changed_rows
     |> Enum.sort()
     |> Enum.map(fn row ->
-      ["\e[", Integer.to_string(row + 1), ";1H\e[K", Enum.at(lines, row, "")]
+      ["\e[", Integer.to_string(row + 1), ";1H\e[2K", Enum.at(lines, row, "")]
     end)
     |> IO.iodata_to_binary()
   end
