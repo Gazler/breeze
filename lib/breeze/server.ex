@@ -47,6 +47,8 @@ defmodule Breeze.Server do
     :view,
     :start_opts,
     :mouse_mode,
+    :reload_opts,
+    :reloader_pid,
     :focused,
     :crash,
     :base_output,
@@ -77,6 +79,7 @@ defmodule Breeze.Server do
           | {:start_opts, keyword()}
           | {:hide_cursor, boolean()}
           | {:mouse, boolean() | keyword()}
+          | {:reload, boolean() | keyword()}
           | {:global_keybindings, list()}
           | {:frame_delay_ms, pos_integer()}
 
@@ -146,6 +149,10 @@ defmodule Breeze.Server do
       view: view,
       start_opts: start_opts,
       mouse_mode: Keyword.get(opts, :mouse, false),
+      reload_opts:
+        normalize_reload_opts(
+          Keyword.get(opts, :reload, Application.get_env(:breeze, :reload, false))
+        ),
       focused: focused,
       global_keybindings: Keyword.get(opts, :global_keybindings, []),
       busy_delay_ms: Keyword.get(opts, :busy_delay_ms, 120),
@@ -155,6 +162,8 @@ defmodule Breeze.Server do
       last_render_at: System.monotonic_time(:millisecond),
       last_interaction_at: nil
     }
+
+    state = maybe_start_reloader(state)
 
     {:ok, render_base(state)}
   end
@@ -280,6 +289,15 @@ defmodule Breeze.Server do
       |> push_debug_stats_now()
 
     {:noreply, state}
+  end
+
+  def handle_info({:reload, :code_changed, _files}, state) do
+    {:noreply, reload_after_code_change(state)}
+  end
+
+  def handle_info({:reload, :compile_error, reason, _files}, state) do
+    shutdown_root_view(state.view_pid)
+    {:noreply, enter_crash_state(state, crash_info(:error, reason, []))}
   end
 
   def handle_info({:event_reply, ref, reply}, %{pending_ref: ref} = state) do
@@ -631,6 +649,8 @@ defmodule Breeze.Server do
   end
 
   defp maybe_render_base(%{view_pid: pid} = state, cause) do
+    state = prune_dead_children(state)
+
     if crashed?(state) do
       state
     else
@@ -660,13 +680,18 @@ defmodule Breeze.Server do
         if preload_only, do: :preloaded, else: :missing
 
       %{pid: pid} ->
-        if preload_only do
-          :preloaded
-        else
-          local_focused = strip_live_prefix(state.focused, full_id)
-          child_started_at = System.monotonic_time(:microsecond)
+        cond do
+          not Process.alive?(pid) ->
+            track_missing_live_child(tracking_ref, {full_id, attrs})
+            if preload_only, do: :preloaded, else: :missing
 
-          {:ok, child_acc, child_box, child_decorations} =
+          preload_only ->
+            :preloaded
+
+          true ->
+            local_focused = strip_live_prefix(state.focused, full_id)
+            child_started_at = System.monotonic_time(:microsecond)
+
             case safe_call(fn ->
                    Breeze.ChildServer.render_snapshot(pid,
                      focused: local_focused,
@@ -687,21 +712,26 @@ defmodule Breeze.Server do
                      end
                    )
                  end) do
-              {:ok, result} -> result
-              {:crash, crash} -> throw({:crash_state, enter_crash_state(state, crash)})
+              {:ok, {:ok, child_acc, child_box, child_decorations}} ->
+                track_child_timing(tracking_ref, %{
+                  id: full_id,
+                  view: state.children[full_id].view,
+                  us: System.monotonic_time(:microsecond) - child_started_at
+                })
+
+                Enum.each(child_decorations, fn decoration ->
+                  track_render_decoration(tracking_ref, namespace_decoration(decoration, full_id))
+                end)
+
+                {:rendered, id, child_acc, child_box}
+
+              {:crash, %{reason: {:noproc, _}}} ->
+                track_missing_live_child(tracking_ref, {full_id, attrs})
+                if preload_only, do: :preloaded, else: :missing
+
+              {:crash, crash} ->
+                throw({:crash_state, enter_crash_state(state, crash)})
             end
-
-          track_child_timing(tracking_ref, %{
-            id: full_id,
-            view: state.children[full_id].view,
-            us: System.monotonic_time(:microsecond) - child_started_at
-          })
-
-          Enum.each(child_decorations, fn decoration ->
-            track_render_decoration(tracking_ref, namespace_decoration(decoration, full_id))
-          end)
-
-          {:rendered, id, child_acc, child_box}
         end
     end
   end
@@ -1173,15 +1203,31 @@ defmodule Breeze.Server do
   defp dispatch_crash_input(input, %{crash: crash} = state) do
     case Breeze.ErrorView.handle_input(state.view, crash, input, state.terminal.size) do
       :restart ->
-        restart_after_crash(state)
+        restart_root(state, :restart)
 
       {:update, updated_crash} ->
         state |> Map.put(:crash, updated_crash) |> render_crash()
     end
   end
 
-  defp restart_after_crash(state) do
+  defp reload_after_code_change(state) do
+    state = prune_dead_children(state)
+
+    case refresh_reload_state(state) do
+      {:ok, state} ->
+        maybe_render_base(state, :reload)
+
+      {:restart, state} ->
+        restart_root(state, :reload)
+
+      {:error, crash} ->
+        enter_crash_state(state, crash)
+    end
+  end
+
+  defp restart_root(state, cause) do
     state = %{state | terminal: apply_mouse_mode(state.terminal, state.mouse_mode)}
+    shutdown_root_view(state.view_pid)
 
     case start_root_view(state) do
       {:ok, pid, focused} ->
@@ -1197,7 +1243,7 @@ defmodule Breeze.Server do
         |> Map.put(:pending_started_at, nil)
         |> Map.put(:queued_input, [])
         |> Map.put(:input_flush_scheduled?, false)
-        |> maybe_render_base(:restart)
+        |> maybe_render_base(cause)
 
       {:error, crash} ->
         enter_crash_state(state, crash)
@@ -1248,13 +1294,172 @@ defmodule Breeze.Server do
     end
   end
 
+  defp shutdown_root_view(nil), do: :ok
+
+  defp shutdown_root_view(pid) do
+    if Process.alive?(pid) do
+      GenServer.stop(pid, :normal)
+    else
+      :ok
+    end
+  end
+
+  defp refresh_reload_state(state) do
+    case Keyword.get(state.reload_opts || [], :refresh_server_opts) do
+      nil ->
+        {:ok, state}
+
+      refresh ->
+        with {:ok, refreshed_opts} <- call_refresh_server_opts(refresh),
+             {:ok, state} <- apply_refreshed_server_opts(state, refreshed_opts) do
+          {:ok, state}
+        else
+          {:restart, state} -> {:restart, state}
+          {:error, crash} -> {:error, crash}
+        end
+    end
+  end
+
+  defp call_refresh_server_opts({module, function, args})
+       when is_atom(module) and is_atom(function) and is_list(args) do
+    case safe_call(fn -> apply(module, function, args) end) do
+      {:ok, opts} when is_list(opts) ->
+        {:ok, opts}
+
+      {:ok, other} ->
+        {:error,
+         crash_info(
+           :error,
+           RuntimeError.exception(
+             "refresh_server_opts must return a keyword list, got: #{inspect(other)}"
+           ),
+           []
+         )}
+
+      {:crash, crash} ->
+        {:error, crash}
+    end
+  end
+
+  defp apply_refreshed_server_opts(state, refreshed_opts) do
+    refreshed_view = Keyword.get(refreshed_opts, :view, state.view)
+    refreshed_start_opts = Keyword.get(refreshed_opts, :start_opts, state.start_opts)
+
+    if refreshed_view != state.view or refreshed_start_opts != state.start_opts do
+      {:restart,
+       state
+       |> Map.put(:view, refreshed_view)
+       |> Map.put(:start_opts, refreshed_start_opts)
+       |> Map.put(:mouse_mode, Keyword.get(refreshed_opts, :mouse, state.mouse_mode))
+       |> Map.put(
+         :global_keybindings,
+         Keyword.get(refreshed_opts, :global_keybindings, state.global_keybindings)
+       )}
+    else
+      global_keybindings =
+        Keyword.get(refreshed_opts, :global_keybindings, state.global_keybindings)
+
+      mouse_mode = Keyword.get(refreshed_opts, :mouse, state.mouse_mode)
+
+      terminal =
+        if mouse_mode == state.mouse_mode,
+          do: state.terminal,
+          else: apply_mouse_mode(state.terminal, mouse_mode)
+
+      case update_live_global_keybindings(state, global_keybindings) do
+        :ok ->
+          {:ok,
+           state
+           |> Map.put(:global_keybindings, global_keybindings)
+           |> Map.put(:mouse_mode, mouse_mode)
+           |> Map.put(:terminal, terminal)}
+
+        {:error, crash} ->
+          {:error, crash}
+      end
+    end
+  end
+
+  defp update_live_global_keybindings(state, global_keybindings) do
+    if is_pid(state.view_pid) and Process.alive?(state.view_pid) do
+      case safe_call(fn ->
+             Breeze.ChildServer.put_global_keybindings(state.view_pid, global_keybindings)
+           end) do
+        {:ok, :ok} ->
+          :ok
+
+        {:ok, other} ->
+          {:error,
+           crash_info(
+             :error,
+             RuntimeError.exception("unexpected child update result: #{inspect(other)}"),
+             []
+           )}
+
+        {:crash, crash} ->
+          {:error, crash}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp prune_dead_children(state) do
+    alive_children =
+      state.children
+      |> Enum.filter(fn {_id, child} -> is_pid(child.pid) and Process.alive?(child.pid) end)
+      |> Map.new()
+
+    %{state | children: alive_children}
+  end
+
+  defp maybe_start_reloader(%{reload_opts: nil} = state), do: state
+
+  defp maybe_start_reloader(state) do
+    {:ok, pid} =
+      Breeze.CodeReloader.start_link(Keyword.put(state.reload_opts, :server_pid, self()))
+
+    %{state | reloader_pid: pid}
+  end
+
+  defp normalize_reload_opts(false), do: nil
+  defp normalize_reload_opts(nil), do: nil
+
+  defp normalize_reload_opts(true) do
+    if reload_supported?(), do: [enabled?: true], else: nil
+  end
+
+  defp normalize_reload_opts(opts) when is_list(opts) do
+    enabled? = Keyword.get(opts, :enabled?, true)
+    force? = Keyword.get(opts, :force?, false)
+
+    if enabled? and (force? or reload_supported?()) do
+      opts
+    else
+      nil
+    end
+  end
+
+  defp reload_supported? do
+    Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0) and Mix.env() == :dev
+  end
+
   defp ensure_children(state, missing) do
     Enum.reduce(missing, {state, false}, fn {id, attrs}, {state, started?} ->
-      if Map.has_key?(state.children, id) do
-        {state, started?}
-      else
-        child = start_child!(attrs, state.terminal)
-        {%{state | children: Map.put(state.children, id, child)}, true}
+      case Map.get(state.children, id) do
+        %{pid: pid} = child when is_pid(pid) ->
+          if Process.alive?(pid) do
+            {state, started?}
+          else
+            ref = Map.get(child, :ref)
+            if is_reference(ref), do: Process.demonitor(ref, [:flush])
+            child = start_child!(attrs, state.terminal)
+            {%{state | children: Map.put(state.children, id, child)}, true}
+          end
+
+        nil ->
+          child = start_child!(attrs, state.terminal)
+          {%{state | children: Map.put(state.children, id, child)}, true}
       end
     end)
   end

@@ -310,6 +310,7 @@ end
 
 Breeze.Example.run(
   view: Posting,
+  reload: true,
   hide_cursor: true,
   global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
 )

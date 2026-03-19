@@ -31,6 +31,10 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, {:info, message, terminal})
   end
 
+  def put_global_keybindings(pid, keybindings) do
+    GenServer.call(pid, {:put_global_keybindings, keybindings})
+  end
+
   @impl true
   def init(opts) do
     view = Keyword.fetch!(opts, :view)
@@ -84,6 +88,10 @@ defmodule Breeze.ChildServer do
   def handle_call({:info, message, terminal}, _from, term) do
     term = maybe_put_terminal(term, terminal)
     reply_from_result(term.view.handle_info(message, term), term)
+  end
+
+  def handle_call({:put_global_keybindings, keybindings}, _from, term) do
+    {:reply, :ok, %{term | global_keybindings: keybindings}}
   end
 
   @impl true
