@@ -268,6 +268,31 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule DebugPaneRoot do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, term |> assign(count: 1) |> focus("button")}
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box id="button" focusable>Count: {@count}</box>
+        <box style="fixed right-0 bottom-0 width-18 height-8">
+          <live id="debug" view={Breeze.Debug} start_opts={[width: 18, height: 8]}>
+          </live>
+        </box>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "+"}, term) do
+      {:noreply, assign(term, count: term.assigns.count + 1)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule ReloadConfigView do
     use Breeze.View
 
@@ -708,7 +733,11 @@ defmodule Breeze.LiveViewTest do
     drain_terminal_writes()
 
     send(pid, {reader, {:data, "\eOQ"}})
-    Process.sleep(100)
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      if Map.has_key?(state.children, "debug"), do: state, else: false
+    end)
 
     state = :sys.get_state(pid)
     initial_render_count = state.debug_stats[:render_base_count]
@@ -719,16 +748,15 @@ defmodule Breeze.LiveViewTest do
     child = state.children["debug"]
     assert {:noreply, "button", true} = Breeze.ChildServer.dispatch_input(child.pid, "+")
 
-    wait_until(fn ->
-      next_state = :sys.get_state(pid)
-      next_state.debug_stats[:last_render_cause] == :child_patch
-    end)
+    writes =
+      wait_until(fn ->
+        writes = drain_terminal_writes()
+        if Enum.any?(writes, &String.contains?(&1, "Count: 2")), do: writes, else: false
+      end)
 
-    writes = drain_terminal_writes()
     next_state = :sys.get_state(pid)
 
     assert next_state.debug_stats[:render_base_count] == initial_render_count
-    assert next_state.debug_stats[:last_render_cause] == :child_patch
     assert Enum.any?(writes, &String.contains?(&1, "Count: 2"))
 
     Process.exit(pid, :normal)
@@ -773,6 +801,36 @@ defmodule Breeze.LiveViewTest do
       state = :sys.get_state(pid)
       state.debug_stats[:last_render_cause] == :reload and state.base_output =~ "ready"
     end)
+
+    Process.exit(pid, :normal)
+  end
+
+  test "debug pane does not flash an empty stats snapshot on first open" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: DebugToggleRoot,
+        terminal: terminal,
+        debug_push_interval_ms: 20,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    drain_terminal_writes()
+
+    send(pid, {reader, {:data, "\eOQ"}})
+
+    writes =
+      wait_until(fn ->
+        writes = drain_terminal_writes()
+        if writes == [], do: false, else: writes
+      end)
+
+    output = IO.iodata_to_binary(writes)
+
+    refute output =~ "cause: -"
+    refute output =~ "renders: 0 (0/s)"
 
     Process.exit(pid, :normal)
   end
@@ -978,6 +1036,41 @@ defmodule Breeze.LiveViewTest do
     Process.exit(pid, :normal)
   end
 
+  test "debug stats updates do not invalidate the parent just to refresh the pane" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: DebugToggleRoot,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    drain_terminal_writes()
+
+    send(pid, {reader, {:data, "\eOQ"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      Map.has_key?(state.children, "debug")
+    end)
+
+    Process.sleep(40)
+    drain_terminal_writes()
+
+    invalidations_before = :sys.get_state(pid).debug_stats[:child_invalidated_count] || 0
+
+    Process.sleep(40)
+    writes = drain_terminal_writes()
+    invalidations_after = :sys.get_state(pid).debug_stats[:child_invalidated_count] || 0
+
+    assert writes == []
+    assert invalidations_after == invalidations_before
+
+    Process.exit(pid, :normal)
+  end
+
   test "server falls back to a full rerender when a debug child has decorations" do
     terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
 
@@ -988,7 +1081,10 @@ defmodule Breeze.LiveViewTest do
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
-    Process.sleep(100)
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      if Map.has_key?(state.children, "debug"), do: state, else: false
+    end)
 
     state = :sys.get_state(pid)
     initial_render_count = state.debug_stats[:render_base_count]
@@ -1033,6 +1129,43 @@ defmodule Breeze.LiveViewTest do
       end)
 
     assert Enum.any?(writes, &String.starts_with?(&1, "\e[2J\e[H"))
+
+    Process.exit(pid, :normal)
+  end
+
+  test "debug pane invalidation settles instead of feeding back into its own stats stream" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: DebugPaneRoot,
+        terminal: terminal,
+        debug_push_interval_ms: 20,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    drain_terminal_writes()
+    initial_render_count = :sys.get_state(pid).debug_stats[:render_base_count] || 0
+
+    send(pid, {reader, {:data, "+"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      (state.debug_stats[:render_base_count] || 0) > initial_render_count
+    end)
+
+    Process.sleep(40)
+    drain_terminal_writes()
+
+    invalidations_before = :sys.get_state(pid).debug_stats[:child_invalidated_count] || 0
+
+    Process.sleep(40)
+    writes = drain_terminal_writes()
+    invalidations_after = :sys.get_state(pid).debug_stats[:child_invalidated_count] || 0
+
+    assert writes == []
+    assert invalidations_after == invalidations_before
 
     Process.exit(pid, :normal)
   end

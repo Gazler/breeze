@@ -71,7 +71,11 @@ defmodule PostingTest do
       )
 
     send(pid, {reader, {:data, "\t"}})
-    Process.sleep(100)
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      not state.input_flush_scheduled? and state.queued_input == []
+    end)
 
     state = :sys.get_state(pid)
 
@@ -84,4 +88,17 @@ defmodule PostingTest do
   defp visible(content) do
     String.replace(content, ~r/\e\[[0-9;]*m/u, "")
   end
+
+  defp wait_until(fun, attempts \\ 20)
+
+  defp wait_until(fun, attempts) when attempts > 0 do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(10)
+      wait_until(fun, attempts - 1)
+    end
+  end
+
+  defp wait_until(_fun, 0), do: flunk("condition not met")
 end

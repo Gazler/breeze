@@ -117,8 +117,16 @@ defmodule Breeze.ChildServer do
         notify_invalidate(next_term)
         {:noreply, next_term}
 
+      {:noreply, next_term, opts} ->
+        maybe_notify_invalidate(next_term, opts)
+        {:noreply, next_term}
+
       {:stop, next_term} ->
         notify_invalidate(next_term)
+        {:stop, :normal, next_term}
+
+      {:stop, next_term, opts} ->
+        maybe_notify_invalidate(next_term, opts)
         {:stop, :normal, next_term}
     end
   end
@@ -129,9 +137,21 @@ defmodule Breeze.ChildServer do
     {:reply, {:noreply, next_term.focused}, next_term}
   end
 
+  defp reply_from_result({:noreply, next_term, opts}, term) do
+    next_term = apply_focus_transitions(term, next_term)
+    maybe_notify_invalidate(next_term, opts)
+    {:reply, {:noreply, next_term.focused}, next_term}
+  end
+
   defp reply_from_result({:stop, next_term}, term) do
     next_term = apply_focus_transitions(term, next_term)
     notify_invalidate(next_term)
+    {:stop, :normal, {:stop, next_term.focused}, next_term}
+  end
+
+  defp reply_from_result({:stop, next_term, opts}, term) do
+    next_term = apply_focus_transitions(term, next_term)
+    maybe_notify_invalidate(next_term, opts)
     {:stop, :normal, {:stop, next_term.focused}, next_term}
   end
 
@@ -445,6 +465,14 @@ defmodule Breeze.ChildServer do
     case Map.get(term.assigns, :__invalidate__) do
       fun when is_function(fun, 0) -> fun.()
       _ -> :ok
+    end
+  end
+
+  defp maybe_notify_invalidate(term, opts) do
+    if Keyword.get(opts, :invalidate, true) do
+      notify_invalidate(term)
+    else
+      :ok
     end
   end
 
