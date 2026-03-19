@@ -47,5 +47,7 @@ defmodule Breeze.KeyDecoder do
   defp convert_csi("4~"), do: "End"
   defp convert_csi("5~"), do: "PageUp"
   defp convert_csi("6~"), do: "PageDown"
+  defp convert_csi("8;5u"), do: "\x17"
+  defp convert_csi("127;5u"), do: "\x17"
   defp convert_csi(key), do: key
 end

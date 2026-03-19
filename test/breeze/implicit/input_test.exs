@@ -238,6 +238,26 @@ defmodule Breeze.Implicit.InputTest do
              Input.handle_event(nil, %{"key" => "Delete"}, %{value: "hello", cursor: 2})
   end
 
+  test "ctrl-w deletes the previous word and surrounding gap" do
+    assert {{:change, %{value: "hello", cursor: 5}}, %{value: "hello", cursor: 5}} =
+             Input.handle_event(nil, %{"key" => "\x17"}, %{value: "hello   world", cursor: 13})
+  end
+
+  test "ctrl-backspace via ctrl-h deletes the previous word and surrounding gap" do
+    assert {{:change, %{value: "hello", cursor: 5}}, %{value: "hello", cursor: 5}} =
+             Input.handle_event(nil, %{"key" => "\x08"}, %{value: "hello   world", cursor: 13})
+  end
+
+  test "ctrl-w is a no-op at the start of the input" do
+    assert {:noreply, %{value: "hello", cursor: 0}} =
+             Input.handle_event(nil, %{"key" => "\x17"}, %{value: "hello", cursor: 0})
+  end
+
+  test "control characters are not treated as insertable input" do
+    assert {:noreply, %{value: "hello", cursor: 2}} =
+             Input.handle_event(nil, %{"key" => "\x01"}, %{value: "hello", cursor: 2})
+  end
+
   test "animate leaves unfocused content untouched" do
     assert %Box{content: "hello"} =
              Input.animate(:root, %Box{content: "hello"}, [], %{value: "hello", cursor: 2}, %{})

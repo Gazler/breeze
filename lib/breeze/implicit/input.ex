@@ -34,6 +34,22 @@ defmodule Breeze.Implicit.Input do
     change(%{state | value: value, cursor: cursor - 1} |> normalize_state())
   end
 
+  def handle_event(_, %{"key" => key}, %{cursor: cursor} = state)
+      when key in ["\x08", "\x17"] and cursor > 0 do
+    {before, rest} = split_value(state.value, cursor)
+
+    kept_before =
+      before
+      |> trim_trailing_whitespace()
+      |> drop_previous_word()
+      |> trim_trailing_whitespace()
+
+    value = kept_before <> rest
+    change(%{state | value: value, cursor: String.length(kept_before)} |> normalize_state())
+  end
+
+  def handle_event(_, %{"key" => key}, state) when key in ["\x08", "\x17"], do: {:noreply, state}
+
   def handle_event(_, %{"key" => "Delete"}, state) do
     {before, rest} = split_value(state.value, state.cursor)
 
@@ -150,6 +166,14 @@ defmodule Breeze.Implicit.Input do
     |> Enum.join()
   end
 
+  defp trim_trailing_whitespace(value) do
+    Regex.replace(~r/\s+$/u, value, "")
+  end
+
+  defp drop_previous_word(value) do
+    Regex.replace(~r/\S+$/u, value, "")
+  end
+
   defp display_cursor_index(content, %{value: value, cursor: cursor}) when is_binary(content) do
     prefix_len(content, value) + cursor
   end
@@ -241,11 +265,16 @@ defmodule Breeze.Implicit.Input do
 
   defp insertable_key?(key) when is_binary(key) do
     String.length(key) == 1 and
+      not control_character?(key) and
       String.printable?(key) and
       key not in ["\n", "\r", "\t", "\v", "\f"]
   end
 
   defp insertable_key?(_key), do: false
+
+  defp control_character?(<<codepoint::utf8>>) when codepoint < 32, do: true
+  defp control_character?(<<"\x7f">>), do: true
+  defp control_character?(_key), do: false
 
   defp border_left_offset(%{style: %{border: border}}), do: if(border.left, do: 1, else: 0)
   defp border_top_offset(%{style: %{border: border}}), do: if(border.top, do: 1, else: 0)
