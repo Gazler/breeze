@@ -911,7 +911,8 @@ defmodule Breeze.Server do
         state.last_frame_lines,
         lines,
         state.last_overlays || [],
-        overlays
+        overlays,
+        state.terminal.size.width
       )
 
     composed_at = System.monotonic_time(:microsecond)
@@ -948,11 +949,11 @@ defmodule Breeze.Server do
     |> Enum.take(screen_height)
   end
 
-  defp build_frame_payload(nil, lines, _prev_overlays, overlays) do
+  defp build_frame_payload(nil, lines, _prev_overlays, overlays, _screen_width) do
     full_redraw_payload(lines, overlays)
   end
 
-  defp build_frame_payload(prev_lines, lines, prev_overlays, overlays) do
+  defp build_frame_payload(prev_lines, lines, prev_overlays, overlays, screen_width) do
     changed_rows =
       changed_base_rows(prev_lines, lines)
       |> MapSet.union(changed_overlay_rows(prev_overlays, overlays))
@@ -961,7 +962,7 @@ defmodule Breeze.Server do
       ""
     else
       IO.iodata_to_binary([
-        row_patch_payload(lines, changed_rows),
+        row_patch_payload(lines, changed_rows, screen_width),
         overlay_patch_payload(overlays, changed_rows)
       ])
     end
@@ -1011,13 +1012,40 @@ defmodule Breeze.Server do
     {Map.get(overlay, :x), Map.get(overlay, :y), Breeze.TerminalOverlay.render_overlay(overlay)}
   end
 
-  defp row_patch_payload(lines, changed_rows) do
+  defp row_patch_payload(lines, changed_rows, screen_width) do
     changed_rows
     |> Enum.sort()
     |> Enum.map(fn row ->
-      ["\e[", Integer.to_string(row + 1), ";1H\e[2K", Enum.at(lines, row, "")]
+      line = Enum.at(lines, row, "")
+      visible_width = visible_width(line)
+
+      if visible_width >= screen_width do
+        ["\e[", Integer.to_string(row + 1), ";1H", line]
+      else
+        [
+          "\e[",
+          Integer.to_string(row + 1),
+          ";1H",
+          line,
+          "\e[",
+          Integer.to_string(row + 1),
+          ";",
+          Integer.to_string(visible_width + 1),
+          "H\e[K"
+        ]
+      end
     end)
     |> IO.iodata_to_binary()
+  end
+
+  defp visible_width(line) when is_binary(line) do
+    line
+    |> strip_ansi()
+    |> String.length()
+  end
+
+  defp strip_ansi(line) do
+    Regex.replace(~r/\e\[[0-9;?]*[ -\/]*[@-~]/u, line, "")
   end
 
   defp overlay_patch_payload(overlays, changed_rows) do
