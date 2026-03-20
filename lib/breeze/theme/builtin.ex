@@ -44,7 +44,8 @@ defmodule Breeze.Theme.Builtin do
         accent: "#FF79C6",
         surface: "#193549",
         panel: "#1F4662"
-      }
+      },
+      extras: %{cursor: "#FF79C6"}
     )
   end
 
@@ -53,20 +54,21 @@ defmodule Breeze.Theme.Builtin do
       name: "catppuccin-mocha",
       defaults: %{
         foreground_color: "#CDD6F4",
-        background_color: "#11111B",
+        background_color: "#181825",
         border_color: "#7F849C"
       },
       palette: %{
         muted: "#A6ADC8",
-        primary: "#89B4FA",
-        secondary: "#94E2D5",
-        warning: "#F9E2AF",
-        error: "#F38BA8",
-        success: "#A6E3A1",
-        accent: "#CBA6F7",
+        primary: "#F5C2E7",
+        secondary: "#CBA6F7",
+        warning: "#FAE3B0",
+        error: "#F28FAD",
+        success: "#ABE9B3",
+        accent: "#FAB387",
         surface: "#313244",
-        panel: "#1E1E2E"
-      }
+        panel: "#45475A"
+      },
+      extras: %{cursor: "#F5E0DC"}
     )
   end
 
@@ -88,7 +90,8 @@ defmodule Breeze.Theme.Builtin do
         accent: "#FF79C6",
         surface: "#44475A",
         panel: "#383A59"
-      }
+      },
+      extras: %{cursor: "#F8F8F2"}
     )
   end
 
@@ -110,7 +113,8 @@ defmodule Breeze.Theme.Builtin do
         accent: "#D3869B",
         surface: "#3C3836",
         panel: "#32302F"
-      }
+      },
+      extras: %{cursor: "#EBDBB2"}
     )
   end
 
@@ -132,7 +136,8 @@ defmodule Breeze.Theme.Builtin do
         accent: "#B48EAD",
         surface: "#3B4252",
         panel: "#2E3440"
-      }
+      },
+      extras: %{cursor: "#D8DEE9"}
     )
   end
 
@@ -154,7 +159,8 @@ defmodule Breeze.Theme.Builtin do
         accent: "#6C71C4",
         surface: "#EEE8D5",
         panel: "#FDF6E3"
-      }
+      },
+      extras: %{cursor: "#657B83"}
     )
   end
 
@@ -176,7 +182,8 @@ defmodule Breeze.Theme.Builtin do
         accent: "#6C71C4",
         surface: "#073642",
         panel: "#0A3A45"
-      }
+      },
+      extras: %{cursor: "#839496"}
     )
   end
 end

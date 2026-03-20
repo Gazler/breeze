@@ -58,12 +58,15 @@ defmodule Breeze.ChildServer do
       server: Keyword.get(opts, :server),
       terminal: terminal,
       theme: theme,
+      theme_source: theme_input,
       apply_theme_defaults?: apply_theme_defaults?,
       global_keybindings: global_keybindings,
       assigns: %{__invalidate__: invalidate}
     }
 
     {:ok, term} = view.mount(start_opts, term)
+    maybe_probe_system_theme(term.theme_source, term.terminal, term.server)
+    term = sync_theme_assigns(term)
     {:ok, term}
   end
 
@@ -109,6 +112,13 @@ defmodule Breeze.ChildServer do
   end
 
   @impl true
+  def handle_info({:breeze_theme_palette, _key, _status}, %{theme_source: :system} = term) do
+    theme = Breeze.Theme.new(:system, terminal: term.terminal)
+    next_term = %{term | theme: theme} |> sync_theme_assigns()
+    notify_invalidate(next_term)
+    {:noreply, next_term}
+  end
+
   def handle_info(message, term) do
     term = maybe_put_terminal(term, term.terminal)
 
@@ -132,25 +142,43 @@ defmodule Breeze.ChildServer do
   end
 
   defp reply_from_result({:noreply, next_term}, term) do
-    next_term = apply_focus_transitions(term, next_term)
+    next_term =
+      term
+      |> apply_focus_transitions(next_term)
+
+    maybe_probe_system_theme(next_term.theme_source, next_term.terminal, next_term.server)
+    next_term = sync_theme_assigns(next_term)
     notify_invalidate(next_term)
     {:reply, {:noreply, next_term.focused}, next_term}
   end
 
   defp reply_from_result({:noreply, next_term, opts}, term) do
-    next_term = apply_focus_transitions(term, next_term)
+    next_term =
+      term
+      |> apply_focus_transitions(next_term)
+
+    maybe_probe_system_theme(next_term.theme_source, next_term.terminal, next_term.server)
+    next_term = sync_theme_assigns(next_term)
     maybe_notify_invalidate(next_term, opts)
     {:reply, {:noreply, next_term.focused}, next_term}
   end
 
   defp reply_from_result({:stop, next_term}, term) do
-    next_term = apply_focus_transitions(term, next_term)
+    next_term =
+      term
+      |> apply_focus_transitions(next_term)
+      |> sync_theme_assigns()
+
     notify_invalidate(next_term)
     {:stop, :normal, {:stop, next_term.focused}, next_term}
   end
 
   defp reply_from_result({:stop, next_term, opts}, term) do
-    next_term = apply_focus_transitions(term, next_term)
+    next_term =
+      term
+      |> apply_focus_transitions(next_term)
+      |> sync_theme_assigns()
+
     maybe_notify_invalidate(next_term, opts)
     {:stop, :normal, {:stop, next_term.focused}, next_term}
   end
@@ -158,10 +186,37 @@ defmodule Breeze.ChildServer do
   defp maybe_put_terminal(term, nil), do: term
   defp maybe_put_terminal(term, terminal), do: %{term | terminal: terminal}
 
+  defp maybe_probe_system_theme(:system, terminal, server) do
+    if is_pid(server), do: send(server, {:ensure_runtime_palette, :system})
+    Breeze.Theme.ensure_runtime_palette_async(terminal, self())
+  end
+
+  defp maybe_probe_system_theme(_theme_input, _terminal, _server), do: :ok
+
+  defp sync_theme_assigns(%{theme: theme, assigns: assigns} = term) when is_map(assigns) do
+    assigns =
+      assigns
+      |> maybe_put_theme_assign(:theme_status, Breeze.Theme.probe_status(theme) || :ready)
+      |> maybe_put_theme_assign(:actual_theme_mode, theme.mode)
+
+    %{term | assigns: assigns}
+  end
+
+  defp sync_theme_assigns(term), do: term
+
+  defp maybe_put_theme_assign(assigns, key, value) do
+    if Map.has_key?(assigns, key), do: Map.put(assigns, key, value), else: assigns
+  end
+
   defp render_term(term, opts) do
     explicit_focus? = Keyword.has_key?(opts, :focused)
     term = maybe_put_terminal(term, Keyword.get(opts, :terminal))
-    theme = Breeze.Theme.new(term.theme || Keyword.get(opts, :theme), terminal: term.terminal)
+
+    theme =
+      Breeze.Theme.new(term.theme_source || term.theme || Keyword.get(opts, :theme),
+        terminal: term.terminal
+      )
+
     term = %{term | theme: theme}
     term = %{term | focused: Keyword.get(opts, :focused, term.focused)}
     implicit_state = Keyword.get(opts, :implicit_state, %{}) |> Map.merge(term.implicit_state)
@@ -171,7 +226,7 @@ defmodule Breeze.ChildServer do
       |> Keyword.put(:implicit_state, implicit_state)
       |> Keyword.put(:previous_elements, term.elements)
       |> Keyword.put(:theme, theme)
-      |> Keyword.put(:theme_source, term.theme)
+      |> Keyword.put(:theme_source, term.theme_source || term.theme)
       |> Keyword.put(:apply_theme_defaults, term.apply_theme_defaults?)
 
     profile_scope = Keyword.get(opts, :profile_scope)

@@ -56,6 +56,13 @@ defmodule Breeze.Theme do
   @spec defaults_enabled?(term()) :: boolean()
   def defaults_enabled?(theme), do: theme not in [nil, false]
 
+  @spec probe_status(t() | map() | keyword() | atom() | nil) ::
+          :ready | :pending | :unavailable | nil
+  def probe_status(theme) do
+    theme = new(theme)
+    Map.get(theme.variables, :palette_probe_status)
+  end
+
   @spec default_style(t() | map() | keyword() | atom() | nil) :: map()
   def default_style(theme) do
     theme = new(theme)
@@ -73,18 +80,8 @@ defmodule Breeze.Theme do
       name: Keyword.get(opts, :name, "system16"),
       mode: :system16,
       dark: Keyword.get(opts, :dark, infer_dark(terminal_palette)),
-      defaults: %{foreground_color: 7, background_color: 0, border_color: 8},
-      palette: %{
-        muted: 8,
-        primary: 4,
-        secondary: 6,
-        warning: 3,
-        error: 1,
-        success: 2,
-        accent: 5,
-        surface: 0,
-        panel: 0
-      },
+      defaults: %{foreground_color: 7, background_color: 0, border_color: 7},
+      palette: system16_palette(terminal_palette),
       extras: %{},
       variables: Keyword.get(opts, :variables, %{}),
       terminal_palette: terminal_palette
@@ -98,17 +95,68 @@ defmodule Breeze.Theme do
         Keyword.get(opts, :palette) || terminal_palette_from_terminal(opts[:terminal])
       )
 
-    %__MODULE__{
-      name: Keyword.get(opts, :name, "system"),
-      mode: :system,
-      dark: Keyword.get(opts, :dark, infer_dark(terminal_palette)),
-      defaults: system_defaults(terminal_palette),
-      palette: system_palette(terminal_palette),
-      extras: %{},
-      variables: Keyword.get(opts, :variables, %{}),
-      terminal_palette: terminal_palette
-    }
+    if system_palette_available?(terminal_palette) do
+      %__MODULE__{
+        name: Keyword.get(opts, :name, "system"),
+        mode: :system,
+        dark: Keyword.get(opts, :dark, infer_dark(terminal_palette)),
+        defaults: system_defaults(terminal_palette),
+        palette: system_palette(terminal_palette),
+        extras: %{},
+        variables: Keyword.get(opts, :variables, %{}) |> Map.put(:palette_probe_status, :ready),
+        terminal_palette: terminal_palette
+      }
+    else
+      system16(
+        name: Keyword.get(opts, :name, "system16"),
+        dark: Keyword.get(opts, :dark),
+        variables:
+          Keyword.get(opts, :variables, %{})
+          |> Map.put(:requested_theme, :system)
+          |> Map.put(:palette_probe_status, Breeze.Theme.Probe.probe_status(opts[:terminal])),
+        palette: terminal_palette
+      )
+    end
   end
+
+  @spec ensure_runtime_palette_async(Termite.Terminal.t() | nil, pid()) :: :ok
+  def ensure_runtime_palette_async(%Termite.Terminal{} = terminal, notify_pid)
+      when is_pid(notify_pid) do
+    Breeze.Theme.Probe.ensure_runtime_palette_async(terminal, notify_pid)
+  end
+
+  def ensure_runtime_palette_async(_terminal, _notify_pid), do: :ok
+
+  @spec start_runtime_palette_probe(Termite.Terminal.t() | nil) ::
+          {:start, term(), binary()} | :ready | :pending | :unavailable | :error
+  def start_runtime_palette_probe(%Termite.Terminal{} = terminal) do
+    Breeze.Theme.Probe.start_runtime_palette_probe(terminal)
+  end
+
+  def start_runtime_palette_probe(_terminal), do: :error
+
+  @spec runtime_palette_probe_timeout_ms() :: pos_integer()
+  def runtime_palette_probe_timeout_ms, do: Breeze.Theme.Probe.runtime_palette_probe_timeout_ms()
+
+  @spec merge_runtime_palette_data(binary(), map(), binary()) :: {map(), binary()}
+  def merge_runtime_palette_data(buffer, palette, data)
+      when is_binary(buffer) and is_map(palette) and is_binary(data) do
+    Breeze.Theme.Probe.merge_runtime_palette_data(buffer, palette, data)
+  end
+
+  @spec runtime_palette_probe_complete?(map()) :: boolean()
+  def runtime_palette_probe_complete?(palette) when is_map(palette),
+    do: Breeze.Theme.Probe.runtime_palette_probe_complete?(palette)
+
+  def runtime_palette_probe_complete?(_palette), do: false
+
+  @spec finish_runtime_palette_probe(Termite.Terminal.t() | nil, map()) :: :ready | :unavailable
+  def finish_runtime_palette_probe(%Termite.Terminal{} = terminal, palette)
+      when is_map(palette) do
+    Breeze.Theme.Probe.finish_runtime_palette_probe(terminal, palette)
+  end
+
+  def finish_runtime_palette_probe(_terminal, _palette), do: :unavailable
 
   @spec new(t() | map() | keyword() | atom() | nil, keyword()) :: t()
   def new(theme, opts \\ [])
@@ -215,6 +263,29 @@ defmodule Breeze.Theme do
   end
 
   def resolve_color(_theme, value), do: value
+
+  @spec blend(color(), color(), float()) :: color()
+  def blend(left, right, weight) when is_number(weight) do
+    mix(left, right, max(0.0, min(weight * 1.0, 1.0)))
+  end
+
+  @spec lighten(color(), float()) :: color()
+  def lighten(color, amount) when is_number(amount) do
+    blend(color, {255, 255, 255}, max(0.0, min(amount * 1.0, 1.0)))
+  end
+
+  @spec darken(color(), float()) :: color()
+  def darken(color, amount) when is_number(amount) do
+    blend(color, {0, 0, 0}, max(0.0, min(amount * 1.0, 1.0)))
+  end
+
+  @spec blendable?(t() | map() | keyword() | atom() | nil) :: boolean()
+  def blendable?(theme) do
+    case new(theme).mode do
+      mode when mode in [:system, :system16] -> false
+      _ -> true
+    end
+  end
 
   defp build_custom(theme) do
     defaults =
@@ -346,6 +417,42 @@ defmodule Breeze.Theme do
     }
   end
 
+  defp system16_palette(nil) do
+    %{
+      muted: 7,
+      primary: 4,
+      secondary: 6,
+      warning: 3,
+      error: 1,
+      success: 2,
+      accent: 5,
+      surface: 8,
+      panel: 8
+    }
+  end
+
+  defp system16_palette(terminal_palette) do
+    background =
+      terminal_palette_lookup(terminal_palette, :background) ||
+        terminal_palette_lookup(terminal_palette, 0) || {0, 0, 0}
+
+    foreground =
+      terminal_palette_lookup(terminal_palette, :foreground) ||
+        terminal_palette_lookup(terminal_palette, 7) || {255, 255, 255}
+
+    %{
+      muted: tone_mix(foreground, background, 0.55, 7),
+      primary: 4,
+      secondary: 6,
+      warning: 3,
+      error: 1,
+      success: 2,
+      accent: 5,
+      surface: tone_mix(background, foreground, 0.08, 8),
+      panel: tone_mix(background, foreground, 0.14, 8)
+    }
+  end
+
   defp system_palette(nil) do
     %{
       muted: 8,
@@ -365,28 +472,28 @@ defmodule Breeze.Theme do
     foreground = system_defaults(terminal_palette).foreground_color
 
     primary =
-      terminal_palette_lookup(terminal_palette, 12) ||
-        terminal_palette_lookup(terminal_palette, 4) || foreground
+      terminal_palette_lookup(terminal_palette, 4) ||
+        terminal_palette_lookup(terminal_palette, 12) || foreground
 
     secondary =
-      terminal_palette_lookup(terminal_palette, 14) ||
-        terminal_palette_lookup(terminal_palette, 6) || foreground
+      terminal_palette_lookup(terminal_palette, 6) ||
+        terminal_palette_lookup(terminal_palette, 14) || foreground
 
     warning =
-      terminal_palette_lookup(terminal_palette, 11) ||
-        terminal_palette_lookup(terminal_palette, 3) || foreground
+      terminal_palette_lookup(terminal_palette, 3) ||
+        terminal_palette_lookup(terminal_palette, 11) || foreground
 
     error =
-      terminal_palette_lookup(terminal_palette, 9) || terminal_palette_lookup(terminal_palette, 1) ||
+      terminal_palette_lookup(terminal_palette, 1) || terminal_palette_lookup(terminal_palette, 9) ||
         foreground
 
     success =
-      terminal_palette_lookup(terminal_palette, 10) ||
-        terminal_palette_lookup(terminal_palette, 2) || foreground
+      terminal_palette_lookup(terminal_palette, 2) ||
+        terminal_palette_lookup(terminal_palette, 10) || foreground
 
     accent =
-      terminal_palette_lookup(terminal_palette, 13) ||
-        terminal_palette_lookup(terminal_palette, 5) || primary
+      terminal_palette_lookup(terminal_palette, 5) ||
+        terminal_palette_lookup(terminal_palette, 13) || primary
 
     %{
       muted: mix(foreground, background, 0.55),
@@ -396,13 +503,44 @@ defmodule Breeze.Theme do
       error: error,
       success: success,
       accent: accent,
-      surface: mix(background, foreground, 0.08),
-      panel: mix(background, foreground, 0.14)
+      surface: tone_mix(background, foreground, 0.08, 8),
+      panel: tone_mix(background, foreground, 0.14, 8)
     }
   end
 
+  defp tone_mix(left, right, weight, fallback) do
+    case mix(left, right, weight) do
+      value when value == left ->
+        fallback
+
+      value ->
+        if visually_distinct?(left, value) do
+          value
+        else
+          fallback
+        end
+    end
+  end
+
+  defp visually_distinct?(left, right) do
+    with {:ok, left_rgb} <- to_rgb(left),
+         {:ok, right_rgb} <- to_rgb(right) do
+      color_distance(left_rgb, right_rgb) >= 36
+    else
+      _ -> left != right
+    end
+  end
+
+  defp color_distance({lr, lg, lb}, {rr, rg, rb}) do
+    :math.sqrt(
+      :math.pow(rr - lr, 2) +
+        :math.pow(rg - lg, 2) +
+        :math.pow(rb - lb, 2)
+    )
+  end
+
   defp terminal_palette_from_terminal(%Termite.Terminal{} = terminal),
-    do: Map.get(terminal, :palette)
+    do: Map.get(terminal, :palette) || Breeze.Theme.Probe.cached_terminal_palette(terminal)
 
   defp terminal_palette_from_terminal(_), do: nil
 
@@ -476,6 +614,15 @@ defmodule Breeze.Theme do
 
   defp terminal_palette_lookup(nil, _key), do: nil
   defp terminal_palette_lookup(palette, key), do: Map.get(palette, key)
+
+  defp system_palette_available?(terminal_palette) when is_map(terminal_palette) do
+    Enum.all?(
+      [:background, :foreground],
+      &match?({_, _, _}, terminal_palette_lookup(terminal_palette, &1))
+    )
+  end
+
+  defp system_palette_available?(_), do: false
 
   defp default_color(theme, key) do
     case canonical_default_key(key) do

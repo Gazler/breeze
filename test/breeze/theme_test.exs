@@ -3,6 +3,35 @@ defmodule Breeze.ThemeTest do
 
   alias Breeze.Theme
 
+  defmodule PaletteAdapter do
+    @behaviour Termite.Terminal.Adapter
+
+    def start(opts), do: {:ok, Map.new(opts)}
+    def reader(term), do: {:ok, Map.fetch!(term, :ref)}
+    def resize(_term), do: %{width: 80, height: 24}
+
+    def write(term, _str) do
+      ref = Map.fetch!(term, :ref)
+      owner = self()
+
+      send(owner, {ref, {:data, "\e]10;rgb:cdcd/d6d6/f4f4\a"}})
+      send(owner, {ref, {:data, "\e]11;rgb:1818/1818/2525\a"}})
+      send(owner, {ref, {:data, "\e]4;1;rgb:f28f/adad/adad\a"}})
+      send(owner, {ref, {:data, "\e]4;2;rgb:abe9/b3b3/b3b3\a"}})
+      send(owner, {ref, {:data, "\e]4;3;rgb:fae3/b0b0/b0b0\a"}})
+      send(owner, {ref, {:data, "\e]4;4;rgb:f5f5/c2c2/e7e7\a"}})
+      send(owner, {ref, {:data, "\e]4;5;rgb:fafa/b3b3/8787\a"}})
+      send(owner, {ref, {:data, "\e]4;6;rgb:cba6/f7f7/f7f7\a"}})
+      send(owner, {ref, {:data, "\e]4;9;rgb:f28f/adad/adad\a"}})
+      send(owner, {ref, {:data, "\e]4;10;rgb:abe9/b3b3/b3b3\a"}})
+      send(owner, {ref, {:data, "\e]4;11;rgb:fae3/b0b0/b0b0\a"}})
+      send(owner, {ref, {:data, "\e]4;12;rgb:f5f5/c2c2/e7e7\a"}})
+      send(owner, {ref, {:data, "\e]4;13;rgb:fafa/b3b3/8787\a"}})
+      send(owner, {ref, {:data, "\e]4;14;rgb:cba6/f7f7/f7f7\a"}})
+      {:ok, term}
+    end
+  end
+
   defmodule ToggleView do
     use Breeze.View
 
@@ -38,6 +67,7 @@ defmodule Breeze.ThemeTest do
 
     assert Theme.color(theme, :primary) == 4
     assert Theme.color(theme, :background) == 0
+    assert Theme.default_style(theme).border_color == 7
   end
 
   test "system derives colors from the terminal palette" do
@@ -60,6 +90,128 @@ defmodule Breeze.ThemeTest do
     assert Theme.color(theme, :background) == {16, 17, 18}
     assert Theme.color(theme, :primary) == {51, 85, 170}
     assert Theme.color(theme, :panel) == {47, 48, 49}
+  end
+
+  test "system prefers base ANSI hues over bright grayscale slots for solarized-like palettes" do
+    theme =
+      Theme.system(
+        palette: %{
+          1 => "#dc322f",
+          2 => "#859900",
+          3 => "#b58900",
+          4 => "#268bd2",
+          5 => "#d33682",
+          6 => "#2aa198",
+          9 => "#cb4b16",
+          10 => "#586e75",
+          11 => "#657b83",
+          12 => "#839496",
+          13 => "#6c71c4",
+          14 => "#93a1a1",
+          background: "#002b36",
+          foreground: "#839496"
+        }
+      )
+
+    assert Theme.color(theme, :primary) == {38, 139, 210}
+    assert Theme.color(theme, :secondary) == {42, 161, 152}
+    assert Theme.color(theme, :warning) == {181, 137, 0}
+    assert Theme.color(theme, :error) == {220, 50, 47}
+    assert Theme.color(theme, :success) == {133, 153, 0}
+    assert Theme.color(theme, :accent) == {211, 54, 130}
+  end
+
+  test "system falls back to system16 when no runtime palette is available" do
+    theme = Theme.system()
+
+    assert theme.mode == :system16
+    assert Theme.color(theme, :primary) == 4
+    assert Theme.color(theme, :background) == 0
+  end
+
+  test "system can derive colors from a probed runtime palette" do
+    ref = make_ref()
+
+    terminal = %Termite.Terminal{
+      reader: ref,
+      adapter: {PaletteAdapter, %{ref: ref}},
+      size: %{width: 80, height: 24}
+    }
+
+    assert {:start, {:reader, ^ref}, query} = Theme.start_runtime_palette_probe(terminal)
+    assert :ok = Theme.ensure_runtime_palette_async(terminal, self())
+    _terminal = Termite.Terminal.write(terminal, query)
+
+    palette = collect_probe_palette(%{})
+    assert :ready = Theme.finish_runtime_palette_probe(terminal, palette)
+    assert_receive {:breeze_theme_palette, {:reader, ^ref}, :ready}
+
+    theme = Theme.new(:system, terminal: terminal)
+
+    assert theme.mode == :system
+    assert Theme.color(theme, :background) == {24, 24, 37}
+    assert Theme.color(theme, :text) == {205, 214, 244}
+    assert Theme.color(theme, :primary) == {245, 194, 231}
+    assert Theme.color(theme, :accent) == {250, 179, 135}
+  end
+
+  test "partial probed palettes do not promote system mode" do
+    ref = make_ref()
+
+    terminal = %Termite.Terminal{
+      reader: ref,
+      adapter: {PaletteAdapter, %{ref: ref}},
+      size: %{width: 80, height: 24}
+    }
+
+    partial = %{
+      foreground: {205, 214, 244},
+      background: {24, 24, 37}
+    }
+
+    assert :unavailable = Theme.finish_runtime_palette_probe(terminal, partial)
+    assert Theme.new(:system, terminal: terminal).mode == :system16
+  end
+
+  defp collect_probe_palette(palette, buffer \\ "")
+
+  defp collect_probe_palette(palette, buffer) do
+    receive do
+      {_ref, {:data, data}} ->
+        {palette, buffer} = Theme.merge_runtime_palette_data(buffer, palette, data)
+
+        if Theme.runtime_palette_probe_complete?(palette) do
+          palette
+        else
+          collect_probe_palette(palette, buffer)
+        end
+    after
+      100 ->
+        palette
+    end
+  end
+
+  test "system16 derives neutral tones from the terminal palette" do
+    palette = %{
+      1 => "#aa2233",
+      2 => "#22aa33",
+      3 => "#ccbb33",
+      4 => "#3355aa",
+      5 => "#9933aa",
+      6 => "#33aaaa",
+      7 => "#dddddd",
+      8 => "#777777",
+      background: "#101112",
+      foreground: "#f0f0f0"
+    }
+
+    system = Theme.system(palette: palette)
+    system16 = Theme.system16(palette: palette)
+
+    assert Theme.color(system16, :primary) == 4
+    assert Theme.color(system16, :panel) == Theme.color(system, :panel)
+    assert Theme.color(system16, :surface) == Theme.color(system, :surface)
+    assert Theme.color(system16, :muted) == Theme.color(system, :muted)
   end
 
   test "custom themes preserve explicit colors" do
@@ -85,6 +237,7 @@ defmodule Breeze.ThemeTest do
     assert dark.name == "solarized-dark"
     assert Theme.color(dark, :background) == {0, 43, 54}
     assert Theme.color(dark, :panel) == {10, 58, 69}
+    assert Theme.color(dark, :cursor) == {131, 148, 150}
   end
 
   test "views can switch themes at runtime" do

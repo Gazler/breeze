@@ -367,9 +367,20 @@ defmodule Breeze.View do
   Set the active Breeze theme for the current term.
   """
   def put_theme(%{theme: _} = term, theme) do
+    theme_source =
+      case Breeze.Theme.new(theme, terminal: term.terminal) do
+        %Breeze.Theme{variables: %{requested_theme: requested_theme}}
+        when not is_nil(requested_theme) ->
+          requested_theme
+
+        _ ->
+          theme
+      end
+
     %{
       term
       | theme: Breeze.Theme.new(theme, terminal: term.terminal),
+        theme_source: theme_source,
         apply_theme_defaults?: Breeze.Theme.defaults_enabled?(theme)
     }
   end

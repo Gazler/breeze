@@ -6,6 +6,7 @@ defmodule Breeze.Term do
     :server,
     :terminal,
     :theme,
+    :theme_source,
     :reader,
     last_render_at: nil,
     last_interaction_at: nil,
@@ -45,6 +46,7 @@ defmodule Breeze.Server do
   defstruct [
     :terminal,
     :reader,
+    :input_router,
     :view_pid,
     :view,
     :start_opts,
@@ -162,6 +164,7 @@ defmodule Breeze.Server do
     state = %__MODULE__{
       terminal: terminal,
       reader: terminal.reader,
+      input_router: Keyword.get(opts, :input_router),
       view_pid: view_pid,
       view: view,
       start_opts: start_opts,
@@ -245,6 +248,12 @@ defmodule Breeze.Server do
           {:noreply, enter_crash_state(state, crash)}
       end
     end
+  end
+
+  def handle_info({:ensure_runtime_palette, :system}, %{input_router: pid} = state)
+      when is_pid(pid) do
+    send(pid, {:ensure_runtime_palette, :system})
+    {:noreply, state}
   end
 
   def handle_info(:child_invalidated, state) do

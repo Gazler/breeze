@@ -6,7 +6,8 @@ defmodule ThemeDemo do
   alias Breeze.Theme
 
   def mount(_opts, term) do
-    {:ok, term |> put_theme(Theme.builtin(:nebula)) |> assign(mode: :nebula)}
+    term = put_theme(term, Theme.builtin(:nebula))
+    {:ok, assign(term, mode: :nebula, actual_theme_mode: term.theme.mode, theme_status: :ready)}
   end
 
   def render(assigns) do
@@ -113,51 +114,60 @@ defmodule ThemeDemo do
         </box>
         <box class="height-1">
         </box>
-        <box class="border border-accent bg-panel width-42">Current theme: {@mode}</box>
+        <box class="border border-accent bg-panel width-42">
+          Current theme: {@mode}/{@actual_theme_mode} ({@theme_status})
+        </box>
       </.panel>
     </box>
     """
   end
 
   def handle_event(_, %{"key" => "1"}, term),
-    do: {:noreply, term |> put_theme(Theme.system16()) |> assign(mode: :system16)}
+    do: {:noreply, assign_theme(term, :system16, Theme.system16())}
 
   def handle_event(_, %{"key" => "2"}, term),
-    do: {:noreply, term |> put_theme(Theme.system()) |> assign(mode: :system)}
+    do: {:noreply, assign_theme(term, :system, Theme.system())}
 
   def handle_event(_, %{"key" => "3"}, term),
-    do: {:noreply, term |> put_theme(Theme.builtin(:nebula)) |> assign(mode: :nebula)}
+    do: {:noreply, assign_theme(term, :nebula, Theme.builtin(:nebula))}
 
   def handle_event(_, %{"key" => "4"}, term),
-    do: {:noreply, term |> put_theme(Theme.builtin(:catppuccin)) |> assign(mode: :catppuccin)}
+    do: {:noreply, assign_theme(term, :catppuccin, Theme.builtin(:catppuccin))}
 
   def handle_event(_, %{"key" => "5"}, term),
-    do: {:noreply, term |> put_theme(Theme.builtin(:dracula)) |> assign(mode: :dracula)}
+    do: {:noreply, assign_theme(term, :dracula, Theme.builtin(:dracula))}
 
   def handle_event(_, %{"key" => "6"}, term),
-    do: {:noreply, term |> put_theme(Theme.builtin(:gruvbox)) |> assign(mode: :gruvbox)}
+    do: {:noreply, assign_theme(term, :gruvbox, Theme.builtin(:gruvbox))}
 
   def handle_event(_, %{"key" => "7"}, term),
-    do: {:noreply, term |> put_theme(Theme.builtin(:nord)) |> assign(mode: :nord)}
+    do: {:noreply, assign_theme(term, :nord, Theme.builtin(:nord))}
 
   def handle_event(_, %{"key" => "8"}, term),
-    do:
-      {:noreply,
-       term |> put_theme(Theme.builtin(:solarized, :light)) |> assign(mode: :solarized_light)}
+    do: {:noreply, assign_theme(term, :solarized_light, Theme.builtin(:solarized, :light))}
 
   def handle_event(_, %{"key" => "9"}, term),
-    do:
-      {:noreply,
-       term |> put_theme(Theme.builtin(:solarized, :dark)) |> assign(mode: :solarized_dark)}
+    do: {:noreply, assign_theme(term, :solarized_dark, Theme.builtin(:solarized, :dark))}
 
   def handle_event(_, _, term), do: {:noreply, term}
 
   def handle_info(_, term), do: {:noreply, term}
+
+  defp assign_theme(term, mode, theme) do
+    term = put_theme(term, theme)
+
+    assign(term,
+      mode: mode,
+      actual_theme_mode: term.theme.mode,
+      theme_status: Breeze.Theme.probe_status(term.theme) || :ready
+    )
+  end
 end
 
 Breeze.Example.run(
   [
     view: ThemeDemo,
+    reload: true,
     global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
   ],
   keep_alive: :infinity
