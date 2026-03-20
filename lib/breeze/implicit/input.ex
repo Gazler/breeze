@@ -5,7 +5,8 @@ defmodule Breeze.Implicit.Input do
 
   @type state :: %{
           value: String.t(),
-          cursor: non_neg_integer()
+          cursor: non_neg_integer(),
+          placeholder: String.t() | nil
         }
 
   def init(items, last_state), do: init(items, %{}, last_state)
@@ -16,7 +17,8 @@ defmodule Breeze.Implicit.Input do
 
     attrs_state = %{
       value: value,
-      cursor: if(is_binary(raw_cursor), do: String.to_integer(raw_cursor), else: raw_cursor)
+      cursor: if(is_binary(raw_cursor), do: String.to_integer(raw_cursor), else: raw_cursor),
+      placeholder: Map.get(root_attrs, :"input-placeholder")
     }
 
     state = Map.merge(last_state, attrs_state)
@@ -95,8 +97,10 @@ defmodule Breeze.Implicit.Input do
     end
   end
 
-  def handle_modifiers(:root, _flags, _state), do: []
-  def handle_modifiers(:child, _flags, _state), do: []
+  def handle_modifiers(:root, _flags, state),
+    do: [{:style, "input"} | placeholder_modifiers(state)]
+
+  def handle_modifiers(:child, _flags, state), do: placeholder_modifiers(state)
 
   def animate(
         :root,
@@ -117,7 +121,7 @@ defmodule Breeze.Implicit.Input do
       y: layout.top + border_top_offset(box),
       char: cursor_char(content, display_cursor),
       foreground_color: Map.get(defaults, :background_color),
-      background_color: Theme.resolve_color(theme, :accent),
+      background_color: Theme.color(theme, :cursor) || Theme.color(theme, :accent),
       visible?: Breeze.TerminalOverlay.visible?(now, last_interaction_at)
     }
 
@@ -182,6 +186,11 @@ defmodule Breeze.Implicit.Input do
     String.at(content, display_cursor) || " "
   end
 
+  defp source_content(_content, %{value: "", placeholder: placeholder})
+       when is_binary(placeholder) and placeholder != "" do
+    " " <> placeholder
+  end
+
   defp source_content(content, %{value: value}) when is_binary(content) and is_binary(value) do
     if value == "" or String.contains?(content, value) do
       content
@@ -189,6 +198,13 @@ defmodule Breeze.Implicit.Input do
       " " <> value
     end
   end
+
+  defp placeholder_modifiers(%{value: "", placeholder: placeholder})
+       when is_binary(placeholder) and placeholder != "" do
+    [placeholder: true]
+  end
+
+  defp placeholder_modifiers(_state), do: []
 
   defp render_visible_content(content, state, %{viewport_width: width})
        when is_binary(content) and is_integer(width) and width > 0 do

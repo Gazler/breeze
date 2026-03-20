@@ -99,7 +99,8 @@ defmodule Breeze.Implicit.InputTest do
   end
 
   test "init returns normalized state and cursor animation metadata" do
-    assert {:ok, %{cursor: 1, value: ""}, rerender_every: 500, active_when_focused: true} =
+    assert {:ok, %{cursor: 1, value: "", placeholder: nil},
+            rerender_every: 500, active_when_focused: true} =
              Input.init([], %{id: "input"}, %{})
   end
 
@@ -112,16 +113,38 @@ defmodule Breeze.Implicit.InputTest do
     assert {:noreply, %{value: "", cursor: 0}} =
              Input.handle_event(nil, %{"key" => "\x7f"}, %{value: "", cursor: 0})
 
-    assert {:ok, %{value: "", cursor: 1}, rerender_every: 500, active_when_focused: true} =
+    assert {:ok, %{value: "", cursor: 1, placeholder: nil},
+            rerender_every: 500, active_when_focused: true} =
              Input.init([], %{:"input-value" => "", :"input-cursor" => 4}, %{})
   end
 
   test "init prefers input attrs over previous implicit state" do
-    assert {:ok, %{value: "", cursor: 0}, rerender_every: 500, active_when_focused: true} =
+    assert {:ok, %{value: "", cursor: 0, placeholder: nil},
+            rerender_every: 500, active_when_focused: true} =
              Input.init([], %{:"input-value" => "", :"input-cursor" => 0}, %{
                value: "stale",
-               cursor: 5
+               cursor: 5,
+               placeholder: "stale"
              })
+  end
+
+  test "renders placeholder content when the value is empty" do
+    assert {:ok, %Box{content: " Search docs"}, overlays: [%{visible?: true}]} =
+             Input.animate(
+               :root,
+               %Box{content: "", style: %BackBreeze.Style{}},
+               [focused: true],
+               %{value: "", cursor: 1, placeholder: "Search docs"},
+               %{layout: %{left: 0, top: 0}, now: 0, last_interaction_at: nil}
+             )
+  end
+
+  test "root modifiers apply the input style by default" do
+    assert [{:style, "input"}] =
+             Input.handle_modifiers(:root, [], %{value: "hello", placeholder: nil})
+
+    assert [{:style, "input"}, placeholder: true] =
+             Input.handle_modifiers(:root, [], %{value: "", placeholder: "Search docs"})
   end
 
   test "animate leaves focused content untouched" do
