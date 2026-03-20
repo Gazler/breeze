@@ -147,7 +147,7 @@ defmodule Breeze.Implicit.Input do
 
   defp clamp_cursor(_cursor, value), do: max_cursor(value)
 
-  defp max_cursor(value), do: max(String.length(value), 1)
+  defp max_cursor(value), do: String.length(value)
 
   defp split_value(value, cursor) do
     String.split_at(value, clamp_cursor(cursor, value))

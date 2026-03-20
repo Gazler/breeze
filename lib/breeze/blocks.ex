@@ -128,15 +128,21 @@ defmodule Breeze.Blocks do
       |> assign(
         trigger_class:
           merge_class(
-            "bg-primary text bold width-#{width} height-1 focus:inverse",
+            "bg-primary text-bg bold width-#{width} height-1 focus:inverse",
             class_override(assigns)
           )
       )
-      |> assign(menu_class: class_override(assigns, :menu_class, :menu_style))
+      |> assign(
+        menu_class:
+          merge_class(
+            "bg-primary text-background",
+            class_override(assigns, :menu_class, :menu_style)
+          )
+      )
       |> assign(
         item_class:
           merge_class(
-            "width-#{menu_width} text selected:bg-primary selected:text focus:inverse",
+            "width-#{menu_width} bg-primary text-background selected:inverse",
             class_override(assigns, :item_class, :item_style)
           )
       )

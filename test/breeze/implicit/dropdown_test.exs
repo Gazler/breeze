@@ -18,7 +18,7 @@ defmodule Breeze.Implicit.DropdownTest do
           id="method"
           selected={@method}
           br-change="method_changed"
-          style="bg-primary text bold focus:inverse width-10"
+          style="bg-primary text-background bold focus:inverse width-10"
           menu_width={12}
         >
           <:item :for={method <- @methods} value={method}>{" #{method}"}</:item>
@@ -56,7 +56,7 @@ defmodule Breeze.Implicit.DropdownTest do
             id="method"
             selected={@method}
             br-change="method_changed"
-            style="bg-primary text bold focus:inverse width-10"
+            style="bg-primary text-background bold focus:inverse width-10"
             menu_width={12}
           >
             <:item :for={method <- @methods} value={method}>{" #{method}"}</:item>
@@ -99,12 +99,24 @@ defmodule Breeze.Implicit.DropdownTest do
 
     assert moved_state.highlighted_index == 2
 
-    assert {{:change, %{value: "PUT", index: 2}}, selected_state} =
+    assert {{:change, %{value: "PUT", index: 2}}, selected_state, focus: nil} =
              Dropdown.handle_event(nil, %{"key" => "Enter"}, moved_state)
 
     assert selected_state.open? == false
     assert selected_state.selected == "PUT"
     assert selected_state.selected_index == 2
+  end
+
+  test "selecting an item clears focus in the child server" do
+    terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
+    {:ok, pid} = Breeze.ChildServer.start(view: DropdownView, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert {:noreply, "method", true} = Breeze.ChildServer.dispatch_input(pid, "\x14")
+    assert {:noreply, nil, true} = Breeze.ChildServer.dispatch_input(pid, "Enter")
+
+    metadata = Breeze.ChildServer.metadata(pid)
+    assert metadata.focused == nil
   end
 
   test "item modifiers collapse the items when closed" do
@@ -139,7 +151,7 @@ defmodule Breeze.Implicit.DropdownTest do
       menu_top: 1
     }
 
-    assert [selected: true, style: "absolute left-0 top-1 bg-panel text width-12 layer-21"] =
+    assert [selected: true, style: "absolute left-0 top-1 width-12 layer-21"] =
              Dropdown.handle_modifiers(
                :child,
                [{:"dropdown-item", true}, {:"dropdown-item-index", 0}, {:value, "POST"}],

@@ -65,7 +65,6 @@ defmodule Posting do
         :url_display,
         " " <> String.pad_trailing(assigns.url, max((assigns.url_width || 1) - 1, 0))
       )
-      |> Map.put(:action_style, action_style(assigns.theme_mode))
 
     ~H"""
     <box style="width-screen height-screen" class="bg text">
@@ -79,13 +78,13 @@ defmodule Posting do
           </box>
           <box class="height-1 width-full bg">
           </box>
-          <box style="grid grid-cols-3 height-1">
+          <box style="grid grid-cols-4 height-1">
+            <box style="text-primary width-1">▐</box>
             <.dropdown
               id="method"
               selected={@method}
               br-change="method_changed"
-              class="focus:inverse width-10"
-              style={@action_style}
+              class="width-10"
               item_style="bg-panel text"
               menu_style="bg-panel text"
               menu_top={1}
@@ -102,7 +101,10 @@ defmodule Posting do
             >
               {@url_display}
             </.input>
-            <box class="width-8" style={@action_style}>{"  Send  "}</box>
+            <box class="width-8 inline">
+              <box class="bg-primary text-bg bold">{"  Send "}</box>
+              <box class="bg-primary text-bg">▐</box>
+            </box>
           </box>
         </box>
         <box style="height-1 bg">
@@ -161,7 +163,7 @@ defmodule Posting do
                 <box style="grid grid-cols-3 height-1">
                   <box class="width-8 text-muted">Name</box>
                   <box class="focus:inverse" focusable>{" Value input "}</box>
-                  <box class="width-7" style={@action_style}>{" Add "}</box>
+                  <box class="width-7 bg-primary text-bg bold">{" Add "}</box>
                 </box>
               </box>
             </box>
@@ -180,19 +182,19 @@ defmodule Posting do
           </box>
         </box>
         <box style="inline height-1 width-screen">
-          <box style={@action_style}>{" ^j "}</box>
+          <box class="bg-primary text-bg bold">{" ^j "}</box>
           <box> Send  </box>
-          <box style={@action_style}>{" ^t "}</box>
+          <box class="bg-primary text-bg bold">{" ^t "}</box>
           <box> Method  </box>
-          <box style={@action_style}>{" Tab "}</box>
+          <box class="bg-primary text-bg bold">{" Tab "}</box>
           <box> Next  </box>
-          <box style={@action_style}>{" F1 "}</box>
+          <box class="bg-primary text-bg bold">{" F1 "}</box>
           <box> Help  </box>
-          <box style={@action_style}>{" F2 "}</box>
+          <box class="bg-primary text-bg bold">{" F2 "}</box>
           <box> Debug  </box>
-          <box style={@action_style}>{" F3 "}</box>
+          <box class="bg-primary text-bg bold">{" F3 "}</box>
           <box> Theme  </box>
-          <box style={@action_style}>{" q "}</box>
+          <box class="bg-primary text-bg bold">{" q "}</box>
           <box> Quit </box>
         </box>
       </box>
@@ -201,43 +203,43 @@ defmodule Posting do
         <box>
         </box>
         <box class="inline">
-          <box class="width-8" style={@action_style}>{" Tab "}</box>
+          <box class="width-8 bg-primary text-bg bold">{" Tab "}</box>
           <box>Cycle focus within the active surface</box>
         </box>
         <box class="inline">
-          <box class="width-8" style={@action_style}>{" ^t "}</box>
+          <box class="width-8 bg-primary text-bg bold">{" ^t "}</box>
           <box>Cycle HTTP method</box>
         </box>
         <box class="inline">
-          <box class="width-8" style={@action_style}>{" ←/→ "}</box>
+          <box class="width-8 bg-primary text-bg bold">{" ←/→ "}</box>
           <box>Switch tabs</box>
         </box>
         <box class="inline">
-          <box class="width-8" style={@action_style}>{" ↑/↓ "}</box>
+          <box class="width-8 bg-primary text-bg bold">{" ↑/↓ "}</box>
           <box>Navigate list</box>
         </box>
         <box class="inline">
-          <box class="width-8" style={@action_style}>{" ^j "}</box>
+          <box class="width-8 bg-primary text-bg bold">{" ^j "}</box>
           <box>Send request</box>
         </box>
         <box class="inline">
-          <box class="width-8" style={@action_style}>{" Escape "}</box>
+          <box class="width-8 bg-primary text-bg bold">{" Escape "}</box>
           <box>Close this dialog</box>
         </box>
         <box class="inline">
-          <box class="width-8" style={@action_style}>{" q "}</box>
+          <box class="width-8 bg-primary text-bg bold">{" q "}</box>
           <box>Quit</box>
         </box>
         <box class="inline">
-          <box class="width-8" style={@action_style}>{" F2 "}</box>
+          <box class="width-8 bg-primary text-bg bold">{" F2 "}</box>
           <box>Toggle debug panel</box>
         </box>
         <box class="inline">
-          <box class="width-8" style={@action_style}>{" F3 "}</box>
+          <box class="width-8 bg-primary text-bg bold">{" F3 "}</box>
           <box>Cycle theme</box>
         </box>
         <box class="inline">
-          <box class="width-8" style={@action_style}>{" Theme "}</box>
+          <box class="width-8 bg-primary text-bg bold">{" Theme "}</box>
           <box>{@theme_mode}</box>
         </box>
       </.modal>
@@ -331,14 +333,6 @@ defmodule Posting do
   defp next_theme(:nord), do: {:solarized_light, Theme.builtin(:solarized, :light)}
   defp next_theme(:solarized_light), do: {:solarized_dark, Theme.builtin(:solarized, :dark)}
   defp next_theme(_theme_mode), do: {:system16, :system16}
-
-  defp action_style(theme_mode) when theme_mode in [:solarized_light, :solarized_dark] do
-    %{background_color: :primary, foreground_color: :background, bold: true}
-  end
-
-  defp action_style(_theme_mode) do
-    %{background_color: :primary, foreground_color: :text, bold: true}
-  end
 
   defp current_user_host do
     case Application.get_env(:breeze, :example_user_host) do

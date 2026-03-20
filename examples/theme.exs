@@ -13,12 +13,7 @@ defmodule ThemeDemo do
   def render(assigns) do
     ~H"""
     <box class="width-screen height-screen bg text">
-      <.panel
-        id="theme-demo"
-        width={76}
-        height={20}
-        class="border bg-panel"
-      >
+      <.panel id="theme-demo" width={85} height={20} class="border bg-panel">
         <:title>Theme Demo ({@mode}/{@actual_theme_mode} - {@theme_status})</:title>
         <box class="text-primary bold width-full">Semantic theme tokens</box>
         <box class="text-muted width-full">
@@ -84,6 +79,12 @@ defmodule ThemeDemo do
         <box class="height-1">
         </box>
         <box class="inline">
+          <box class="width-14 height-3 border text-fg bg-surface">text-fg</box>
+          <box class="width-2">
+          </box>
+          <box class="width-14 height-3 border text-bg bg-primary">text-bg</box>
+          <box class="width-2">
+          </box>
           <box
             style={%{width: 14, height: 3, background_color: :surface, foreground_color: :text, border: :line}}
           >

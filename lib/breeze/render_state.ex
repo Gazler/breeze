@@ -165,6 +165,18 @@ defmodule Breeze.RenderState do
             payload = Map.put(payload, "element", Map.get(term.elements, id))
 
             case mod.handle_event(:ignore_me, payload, implicit) do
+              {{:change, event}, val, opts} when is_list(opts) ->
+                term = put_implicit_state(term, id, mod, val)
+                term = apply_implicit_term_options(term, opts)
+
+                {view_state, term} =
+                  case get_in(term.events, [id, :change]) do
+                    nil -> {:noreply, term}
+                    change -> route_change_fun.(term, id, change, event)
+                  end
+
+                {view_state, true, term}
+
               {{:change, event}, val} ->
                 term = put_implicit_state(term, id, mod, val)
 
@@ -208,6 +220,16 @@ defmodule Breeze.RenderState do
             end
         end
     end
+  end
+
+  defp apply_implicit_term_options(term, opts) do
+    Enum.reduce(opts, term, fn
+      {:focus, focused}, acc ->
+        %{acc | focused: focused, allow_unfocused?: is_nil(focused)}
+
+      _, acc ->
+        acc
+    end)
   end
 
   defp add_implicit_item(acc, meta_acc, term, id, mod, items, root_attrs) do

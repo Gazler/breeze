@@ -66,7 +66,7 @@ defmodule Breeze.Implicit.Dropdown do
         highlighted_index: selected_index
     }
 
-    {{:change, %{value: selected, index: selected_index}}, next_state}
+    {{:change, %{value: selected, index: selected_index}}, next_state, focus: nil}
   end
 
   def handle_event(_, _, state), do: {:noreply, state}
@@ -110,12 +110,12 @@ defmodule Breeze.Implicit.Dropdown do
 
   defp frame_style(state),
     do:
-      "absolute left-#{state.menu_left} top-#{state.menu_top} width-#{state.menu_width} height-#{state.menu_height} bg-panel text overflow-hidden layer-20"
+      "absolute left-#{state.menu_left} top-#{state.menu_top} width-#{state.menu_width} height-#{state.menu_height} overflow-hidden layer-20"
 
   defp item_style(state, flags) do
     index = int_flag(flags, :"dropdown-item-index", 0)
 
-    "absolute left-#{state.menu_left} top-#{state.menu_top + index} bg-panel text width-#{state.menu_width} layer-21"
+    "absolute left-#{state.menu_left} top-#{state.menu_top + index} width-#{state.menu_width} layer-21"
   end
 
   defp indicator_style(state, opts \\ []) do

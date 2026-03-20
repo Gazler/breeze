@@ -99,7 +99,7 @@ defmodule Breeze.Implicit.InputTest do
   end
 
   test "init returns normalized state and cursor animation metadata" do
-    assert {:ok, %{cursor: 1, value: "", placeholder: nil},
+    assert {:ok, %{cursor: 0, value: "", placeholder: nil},
             rerender_every: 500, active_when_focused: true} =
              Input.init([], %{id: "input"}, %{})
   end
@@ -113,9 +113,15 @@ defmodule Breeze.Implicit.InputTest do
     assert {:noreply, %{value: "", cursor: 0}} =
              Input.handle_event(nil, %{"key" => "\x7f"}, %{value: "", cursor: 0})
 
-    assert {:ok, %{value: "", cursor: 1, placeholder: nil},
+    assert {:ok, %{value: "", cursor: 0, placeholder: nil},
             rerender_every: 500, active_when_focused: true} =
              Input.init([], %{:"input-value" => "", :"input-cursor" => 4}, %{})
+  end
+
+  test "placeholder inputs do not allow moving the cursor right" do
+    state = %{value: "", cursor: 0, placeholder: "Search docs"}
+
+    assert {:noreply, ^state} = Input.handle_event(nil, %{"key" => "ArrowRight"}, state)
   end
 
   test "init prefers input attrs over previous implicit state" do
@@ -134,7 +140,7 @@ defmodule Breeze.Implicit.InputTest do
                :root,
                %Box{content: "", style: %BackBreeze.Style{}},
                [focused: true],
-               %{value: "", cursor: 1, placeholder: "Search docs"},
+               %{value: "", cursor: 0, placeholder: "Search docs"},
                %{layout: %{left: 0, top: 0}, now: 0, last_interaction_at: nil}
              )
   end
