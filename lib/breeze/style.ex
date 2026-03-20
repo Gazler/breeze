@@ -51,12 +51,12 @@ defmodule Breeze.Style do
 
     attributes =
       attributes
+      |> maybe_put_runtime_attr(:selected, Keyword.get(opts, :selected, false))
       |> maybe_put_runtime_attr(:placeholder, Keyword.get(opts, :placeholder, false))
       |> maybe_put_runtime_attr(:focus, Keyword.get(opts, :focus, false))
 
     bb_style =
       bb_style
-      |> apply_input_style(attributes, theme)
       |> then(fn style ->
         if Keyword.get(opts, :apply_theme_defaults, false) do
           apply_theme_defaults(style, theme)
@@ -243,6 +243,12 @@ defmodule Breeze.Style do
   defp apply_style("text-emphasize-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :text_emphasize, normalize_percent(value))}
 
+  defp apply_style("mute-text-" <> value, {style, attrs}, _theme),
+    do: {style, Map.put(attrs, :text_mute, normalize_percent(value))}
+
+  defp apply_style("emphasize-text-" <> value, {style, attrs}, _theme),
+    do: {style, Map.put(attrs, :text_emphasize, normalize_percent(value))}
+
   defp apply_style("text-" <> color, {style, attrs}, theme),
     do: {BackBreeze.Style.foreground_color(style, Theme.resolve_color(theme, color)), attrs}
 
@@ -261,6 +267,12 @@ defmodule Breeze.Style do
   defp apply_style("bg-emphasize-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :bg_emphasize, normalize_percent(value))}
 
+  defp apply_style("mute-bg-" <> value, {style, attrs}, _theme),
+    do: {style, Map.put(attrs, :bg_mute, normalize_percent(value))}
+
+  defp apply_style("emphasize-bg-" <> value, {style, attrs}, _theme),
+    do: {style, Map.put(attrs, :bg_emphasize, normalize_percent(value))}
+
   defp apply_style("bg-" <> color, {style, attrs}, theme),
     do: {BackBreeze.Style.background_color(style, Theme.resolve_color(theme, color)), attrs}
 
@@ -275,6 +287,12 @@ defmodule Breeze.Style do
 
   defp apply_style("emphasize-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :emphasize, normalize_percent(value))}
+
+  defp apply_style("placeholder-mute-text-" <> value, {style, attrs}, _theme),
+    do: {style, Map.put(attrs, :placeholder_mute, normalize_percent(value))}
+
+  defp apply_style("placeholder-emphasize-text-" <> value, {style, attrs}, _theme),
+    do: {style, Map.put(attrs, :placeholder_emphasize, normalize_percent(value))}
 
   defp apply_style("placeholder-lighten-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :placeholder_lighten, normalize_percent(value))}
@@ -600,13 +618,13 @@ defmodule Breeze.Style do
   defp apply_placeholder_system_tones(style, attrs, theme) do
     if Map.get(attrs, :placeholder, false) do
       style
-      |> maybe_apply_system_semantic(
+      |> maybe_adjust_system_tone(
         theme,
         :mute,
         [:foreground_color],
         Map.get(attrs, :placeholder_mute)
       )
-      |> maybe_apply_system_semantic(
+      |> maybe_adjust_system_tone(
         theme,
         :emphasize,
         [:foreground_color],
@@ -619,27 +637,27 @@ defmodule Breeze.Style do
 
   defp apply_system_tones(style, attrs, theme) do
     style
-    |> maybe_apply_system_semantic(
+    |> maybe_adjust_system_tone(
       theme,
       :mute,
       [:foreground_color, :background_color],
       Map.get(attrs, :mute)
     )
-    |> maybe_apply_system_semantic(
+    |> maybe_adjust_system_tone(
       theme,
       :emphasize,
       [:foreground_color, :background_color],
       Map.get(attrs, :emphasize)
     )
-    |> maybe_apply_system_semantic(theme, :mute, [:foreground_color], Map.get(attrs, :text_mute))
-    |> maybe_apply_system_semantic(
+    |> maybe_adjust_system_tone(theme, :mute, [:foreground_color], Map.get(attrs, :text_mute))
+    |> maybe_adjust_system_tone(
       theme,
       :emphasize,
       [:foreground_color],
       Map.get(attrs, :text_emphasize)
     )
-    |> maybe_apply_system_semantic(theme, :mute, [:background_color], Map.get(attrs, :bg_mute))
-    |> maybe_apply_system_semantic(
+    |> maybe_adjust_system_tone(theme, :mute, [:background_color], Map.get(attrs, :bg_mute))
+    |> maybe_adjust_system_tone(
       theme,
       :emphasize,
       [:background_color],
@@ -702,36 +720,37 @@ defmodule Breeze.Style do
     end
   end
 
-  defp apply_system_semantic(style, theme, direction, keys) do
+  defp maybe_adjust_system_tone(style, _theme, _direction, _keys, amount)
+       when not is_number(amount) or amount <= 0,
+       do: style
+
+  defp maybe_adjust_system_tone(style, theme, direction, keys, amount) do
     Enum.reduce(keys, style, fn key, acc ->
-      case system_semantic_color(theme, key, direction) do
+      case system_tone_color(acc, theme, key, direction, amount) do
         nil -> acc
         color -> Map.put(acc, key, color)
       end
     end)
   end
 
-  defp maybe_apply_system_semantic(style, _theme, _direction, _keys, amount)
-       when not is_number(amount),
-       do: style
+  defp system_tone_color(style, theme, key, direction, amount) do
+    defaults = Theme.default_style(theme)
+    source = Map.get(style, key) || Map.get(defaults, key)
 
-  defp maybe_apply_system_semantic(style, theme, direction, keys, _amount) do
-    apply_system_semantic(style, theme, direction, keys)
+    target =
+      case {key, direction} do
+        {:foreground_color, :mute} -> Map.get(defaults, :background_color)
+        {:foreground_color, :emphasize} -> Map.get(defaults, :foreground_color)
+        {:background_color, :mute} -> Map.get(defaults, :background_color)
+        {:background_color, :emphasize} -> Map.get(defaults, :foreground_color)
+        _ -> nil
+      end
+
+    case {source, target} do
+      {{_, _, _} = source, {_, _, _} = target} -> Theme.blend(source, target, amount)
+      _ -> nil
+    end
   end
-
-  defp system_semantic_color(theme, :foreground_color, :mute),
-    do: Theme.resolve_color(theme, :muted)
-
-  defp system_semantic_color(theme, :foreground_color, :emphasize),
-    do: Theme.resolve_color(theme, :text)
-
-  defp system_semantic_color(theme, :background_color, :mute),
-    do: Theme.resolve_color(theme, :surface)
-
-  defp system_semantic_color(theme, :background_color, :emphasize),
-    do: Theme.resolve_color(theme, :panel)
-
-  defp system_semantic_color(_theme, _key, _direction), do: nil
 
   defp semantic_direction(theme, :mute) do
     if theme_dark?(theme), do: :darken, else: :lighten
@@ -778,117 +797,6 @@ defmodule Breeze.Style do
     |> maybe_put_default_background(defaults)
     |> maybe_put_default_border_color(defaults)
   end
-
-  defp apply_input_style(style, attrs, theme) do
-    if Map.get(attrs, :input) do
-      theme = Theme.new(theme)
-      focused? = Map.get(attrs, :focus, false)
-      placeholder? = Map.get(attrs, :placeholder, false)
-
-      style
-      |> maybe_put_input_background(theme, focused?)
-      |> maybe_put_input_foreground(theme, focused?, placeholder?)
-    else
-      style
-    end
-  end
-
-  defp input_background_color(%{mode: :system16}, _focused?), do: 8
-
-  defp input_background_color(%{mode: :system} = theme, focused?) do
-    base = input_system_background_base(theme)
-
-    case {base, focused?} do
-      {nil, _} -> nil
-      {color, false} -> adjust_input_emphasis(color, theme, 0.10)
-      {color, true} -> adjust_input_emphasis(color, theme, 0.18)
-    end
-  end
-
-  defp input_background_color(theme, focused?) do
-    base = Theme.resolve_color(theme, :panel) || Theme.resolve_color(theme, :surface)
-
-    if focused? and Theme.blendable?(theme) do
-      adjust_input_emphasis(base, theme, 0.06)
-    else
-      base
-    end
-  end
-
-  defp input_foreground_color(%{mode: :system16}, _focused?, true), do: 7
-  defp input_foreground_color(%{mode: :system16}, false, false), do: 15
-  defp input_foreground_color(%{mode: :system16}, true, false), do: 15
-
-  defp input_foreground_color(%{mode: :system} = theme, _focused?, true) do
-    input_system_foreground_color(theme, 0.58)
-  end
-
-  defp input_foreground_color(%{mode: :system} = theme, false, false) do
-    input_system_foreground_color(theme, 0.72)
-  end
-
-  defp input_foreground_color(%{mode: :system} = theme, true, false) do
-    Theme.resolve_color(theme, :text)
-  end
-
-  defp input_foreground_color(theme, _focused?, true) do
-    theme
-    |> Theme.resolve_color(:muted)
-    |> adjust_input_subtle(theme, 0.20)
-  end
-
-  defp input_foreground_color(theme, false, false), do: Theme.resolve_color(theme, :muted)
-  defp input_foreground_color(theme, true, false), do: Theme.resolve_color(theme, :text)
-
-  defp input_system_background_base(theme) do
-    case Theme.resolve_color(theme, :panel) || Theme.resolve_color(theme, :surface) do
-      value when is_integer(value) ->
-        Theme.blend(
-          Theme.default_style(theme).background_color,
-          Theme.default_style(theme).foreground_color,
-          0.14
-        )
-
-      value ->
-        value
-    end
-  end
-
-  defp input_system_foreground_color(theme, amount) do
-    defaults = Theme.default_style(theme)
-
-    case {Map.get(defaults, :background_color), Map.get(defaults, :foreground_color)} do
-      {{_, _, _} = background, {_, _, _} = foreground} ->
-        Theme.blend(background, foreground, amount)
-
-      _ ->
-        Theme.resolve_color(theme, :muted)
-    end
-  end
-
-  defp adjust_input_emphasis(nil, _theme, _amount), do: nil
-
-  defp adjust_input_emphasis(color, theme, amount) do
-    if theme_dark?(theme), do: Theme.lighten(color, amount), else: Theme.darken(color, amount)
-  end
-
-  defp adjust_input_subtle(nil, _theme, _amount), do: nil
-
-  defp adjust_input_subtle(color, theme, amount) do
-    if theme_dark?(theme), do: Theme.darken(color, amount), else: Theme.lighten(color, amount)
-  end
-
-  defp maybe_put_input_background(%{background_color: nil} = style, theme, focused?) do
-    %{style | background_color: input_background_color(theme, focused?)}
-  end
-
-  defp maybe_put_input_background(style, _theme, _focused?), do: style
-
-  defp maybe_put_input_foreground(%{foreground_color: nil} = style, theme, focused?, placeholder?) do
-    %{style | foreground_color: input_foreground_color(theme, focused?, placeholder?)}
-  end
-
-  defp maybe_put_input_foreground(style, _theme, _focused?, _placeholder?), do: style
 
   defp theme_dark?(theme) do
     theme = Theme.new(theme)

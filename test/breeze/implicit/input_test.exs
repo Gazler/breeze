@@ -139,12 +139,15 @@ defmodule Breeze.Implicit.InputTest do
              )
   end
 
-  test "root modifiers apply the input style by default" do
-    assert [{:style, "input"}] =
+  test "input modifiers only add runtime placeholder state" do
+    assert [] =
              Input.handle_modifiers(:root, [], %{value: "hello", placeholder: nil})
 
-    assert [{:style, "input"}, placeholder: true] =
+    assert [placeholder: true] =
              Input.handle_modifiers(:root, [], %{value: "", placeholder: "Search docs"})
+
+    assert [placeholder: true] =
+             Input.handle_modifiers(:child, [], %{value: "", placeholder: "Search docs"})
   end
 
   test "animate leaves focused content untouched" do

@@ -97,8 +97,7 @@ defmodule Breeze.Implicit.Input do
     end
   end
 
-  def handle_modifiers(:root, _flags, state),
-    do: [{:style, "input"} | placeholder_modifiers(state)]
+  def handle_modifiers(:root, _flags, state), do: placeholder_modifiers(state)
 
   def handle_modifiers(:child, _flags, state), do: placeholder_modifiers(state)
 

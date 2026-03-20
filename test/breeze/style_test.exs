@@ -153,33 +153,39 @@ defmodule Breeze.StyleTest do
       |> Style.to_element(theme: :system16, focus: true, placeholder: true)
 
     assert unfocused.style.foreground_color == 7
-    assert unfocused.style.background_color == 8
+    assert unfocused.style.background_color == 0
     assert focused.style.foreground_color == 7
-    assert focused.style.background_color == 8
+    assert focused.style.background_color == 0
   end
 
-  test "input semantic chooses sane defaults for system16" do
+  test "explicit input semantic classes choose sane defaults for system16" do
     placeholder =
       Style.empty()
-      |> Style.put_class("input")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20"
+      )
       |> Style.to_element(theme: :system16, placeholder: true)
 
     unfocused =
       Style.empty()
-      |> Style.put_class("input")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20"
+      )
       |> Style.to_element(theme: :system16)
 
     focused =
       Style.empty()
-      |> Style.put_class("input")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20"
+      )
       |> Style.to_element(theme: :system16, focus: true)
 
-    assert placeholder.style.background_color == 8
+    assert placeholder.style.background_color == nil
     assert placeholder.style.foreground_color == 7
-    assert unfocused.style.background_color == 8
-    assert unfocused.style.foreground_color == 15
-    assert focused.style.background_color == 8
-    assert focused.style.foreground_color == 15
+    assert unfocused.style.background_color == nil
+    assert unfocused.style.foreground_color == 7
+    assert focused.style.background_color == nil
+    assert focused.style.foreground_color == 7
   end
 
   test "placeholder modifiers only affect placeholder text" do
@@ -336,14 +342,11 @@ defmodule Breeze.StyleTest do
         placeholder: true
       )
 
-    assert element.style.foreground_color ==
-             Breeze.Theme.color(Breeze.Theme.system(palette: palette), :muted)
-
-    assert element.style.background_color ==
-             Breeze.Theme.color(Breeze.Theme.system(palette: palette), :panel)
+    assert element.style.foreground_color == {150, 151, 151}
+    assert element.style.background_color == {66, 67, 68}
   end
 
-  test "input semantic keeps placeholder subtler than unfocused text on blendable themes" do
+  test "explicit input semantic classes keep placeholder subtler than unfocused text on blendable themes" do
     theme =
       Breeze.Theme.new(
         defaults: %{
@@ -358,27 +361,33 @@ defmodule Breeze.StyleTest do
 
     placeholder =
       Style.empty()
-      |> Style.put_class("input")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20"
+      )
       |> Style.to_element(theme: theme, placeholder: true)
 
     unfocused =
       Style.empty()
-      |> Style.put_class("input")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20"
+      )
       |> Style.to_element(theme: theme)
 
     focused =
       Style.empty()
-      |> Style.put_class("input")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20"
+      )
       |> Style.to_element(theme: theme, focus: true)
 
-    assert placeholder.style.background_color == {51, 51, 51}
-    assert placeholder.style.foreground_color == {122, 122, 122}
-    assert unfocused.style.foreground_color == {153, 153, 153}
-    assert focused.style.background_color == {63, 63, 63}
+    assert placeholder.style.background_color == {112, 112, 112}
+    assert placeholder.style.foreground_color == {137, 137, 137}
+    assert unfocused.style.foreground_color == {171, 171, 171}
+    assert focused.style.background_color == {139, 139, 139}
     assert focused.style.foreground_color == {238, 238, 238}
   end
 
-  test "input semantic composes with placeholder tone on blendable themes" do
+  test "explicit input semantic classes compose with placeholder tone on blendable themes" do
     theme =
       Breeze.Theme.new(
         defaults: %{
@@ -393,53 +402,65 @@ defmodule Breeze.StyleTest do
 
     placeholder =
       Style.empty()
-      |> Style.put_class("input placeholder:mute-40")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20 placeholder:mute-40"
+      )
       |> Style.to_element(theme: theme, placeholder: true)
 
     value =
       Style.empty()
-      |> Style.put_class("input placeholder:mute-40")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20 placeholder:mute-40"
+      )
       |> Style.to_element(theme: theme)
 
-    assert placeholder.style.foreground_color == {73, 73, 73}
-    assert value.style.foreground_color == {153, 153, 153}
+    assert placeholder.style.foreground_color == {103, 103, 103}
+    assert value.style.foreground_color == {171, 171, 171}
   end
 
-  test "input semantic treats builtin solarized dark as a dark theme" do
+  test "explicit input semantic classes treat builtin solarized dark as a dark theme" do
     theme = Breeze.Theme.builtin(:solarized, :dark)
 
     placeholder =
       Style.empty()
-      |> Style.put_class("input")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20"
+      )
       |> Style.to_element(theme: theme, placeholder: true)
 
     unfocused =
       Style.empty()
-      |> Style.put_class("input")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20"
+      )
       |> Style.to_element(theme: theme)
 
-    assert placeholder.style.foreground_color == {81, 98, 105}
-    assert unfocused.style.foreground_color == {101, 123, 131}
+    assert placeholder.style.foreground_color == {75, 86, 86}
+    assert unfocused.style.foreground_color == {94, 107, 108}
   end
 
-  test "input semantic overrides theme default foreground when defaults are enabled" do
+  test "explicit input semantic classes override theme default foreground when defaults are enabled" do
     theme = Breeze.Theme.builtin(:solarized, :dark)
 
     placeholder =
       Style.empty()
-      |> Style.put_class("input")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20"
+      )
       |> Style.to_element(theme: theme, apply_theme_defaults: true, placeholder: true)
 
     unfocused =
       Style.empty()
-      |> Style.put_class("input")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20"
+      )
       |> Style.to_element(theme: theme, apply_theme_defaults: true)
 
-    assert placeholder.style.foreground_color == {81, 98, 105}
-    assert unfocused.style.foreground_color == {101, 123, 131}
+    assert placeholder.style.foreground_color == {75, 86, 86}
+    assert unfocused.style.foreground_color == {94, 107, 108}
   end
 
-  test "input semantic lifts the background above panel on system themes" do
+  test "explicit input semantic classes preserve system theme input contrast" do
     theme =
       Breeze.Theme.system(
         palette: %{
@@ -453,16 +474,21 @@ defmodule Breeze.StyleTest do
 
     unfocused =
       Style.empty()
-      |> Style.put_class("input")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20"
+      )
       |> Style.to_element(theme: theme)
 
     focused =
       Style.empty()
-      |> Style.put_class("input")
+      |> Style.put_class(
+        "input text mute-text-28 bg-emphasize-30 focus:text focus:mute-text-0 focus:emphasize-bg-43 placeholder:mute-text-20"
+      )
       |> Style.to_element(theme: theme, focus: true)
 
-    assert unfocused.style.background_color == {44, 80, 88}
-    assert focused.style.background_color != unfocused.style.background_color
-    refute unfocused.style.background_color == Breeze.Theme.color(theme, :panel)
+    assert unfocused.style.foreground_color == {106, 128, 131}
+    assert focused.style.foreground_color == {147, 161, 161}
+    assert unfocused.style.background_color == {44, 78, 86}
+    assert focused.style.background_color == {63, 94, 100}
   end
 end

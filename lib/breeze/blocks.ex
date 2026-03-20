@@ -282,6 +282,15 @@ defmodule Breeze.Blocks do
   slot :inner_block
 
   def input(assigns) do
+    assigns =
+      assign(assigns,
+        class:
+          merge_class(
+            "input text mute-text-22 bg-emphasize-24 focus:text focus:mute-text-0 focus:emphasize-bg-34 placeholder:mute-text-16",
+            class_override(assigns)
+          )
+      )
+
     ~H"""
     <box
       id={@id}
