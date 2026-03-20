@@ -32,11 +32,10 @@ defmodule Posting do
     method_index = Enum.find_index(@methods, &(&1 == method)) || 0
     user_host = current_user_host()
 
+    term = term |> Breeze.View.put_theme(Theme.system()) |> focus("url")
+
     term =
-      term
-      |> Breeze.View.put_theme(Theme.system())
-      |> focus("url")
-      |> assign(
+      assign(term,
         url: url,
         url_cursor: String.length(url),
         method: method,
@@ -50,6 +49,8 @@ defmodule Posting do
         request_tab: "headers",
         response_tab: "body",
         theme_mode: :system,
+        actual_theme_mode: term.theme.mode,
+        theme_status: Breeze.Theme.probe_status(term.theme) || :ready,
         show_debug: System.get_env("BREEZE_DEBUG") == "1",
         show_help: false
       )
@@ -69,14 +70,14 @@ defmodule Posting do
     ~H"""
     <box style="width-screen height-screen" class="bg text">
       <box style="grid grid-cols-1 width-full height-full">
-        <box style="height-3" class="bg-panel">
+        <box style="height-3" class="bg">
           <box style="inline width-screen height-1">
             <box class="bold text-primary">Req It Ralph</box>
             <box class="text-muted"> 0.0.1</box>
-            <box class="text-muted"> {@theme_mode}</box>
+            <box class="text-muted"> {@theme_mode}/{@actual_theme_mode} ({@theme_status})</box>
             <box class="width-full text-right text-muted">{@user_host}</box>
           </box>
-          <box class="height-1 width-full bg-panel">
+          <box class="height-1 width-full bg">
           </box>
           <box style="grid grid-cols-3 height-1">
             <.dropdown
@@ -91,38 +92,37 @@ defmodule Posting do
             >
               <:item :for={method <- @methods} value={method}>{method}</:item>
             </.dropdown>
-            <box
-              focusable
+            <.input
               id="url"
-              implicit={Breeze.Implicit.Input}
               input-value={@url}
               input-cursor={@url_cursor}
+              input-placeholder="Enter URL"
               br-change="url_changed"
-              style="width-full focus:inverse"
+              style="width-full"
             >
               {@url_display}
-            </box>
+            </.input>
             <box class="width-8" style={@action_style}>{"  Send  "}</box>
           </box>
         </box>
-        <box style="height-1 bg-panel">
+        <box style="height-1 bg">
         </box>
         <box style="grid grid-cols-2 height-full">
           <.list
             id="collection"
             list-scroll-padding={1}
-            class="bg-surface border-rounded height-full overflow-scroll focus:border-accent width-full"
+            class="bg border-rounded height-full overflow-scroll focus:border-accent width-full"
             item_style="selected:bg-primary selected:text focus:selected:text focus:selected:bg-accent width-full"
           >
             <:item :for={{val, label} <- @collection} value={val}>{label}</:item>
           </.list>
           <box style="grid grid-cols-1 grid-rows-2 height-full">
-            <box style="border-rounded overflow-hidden" class="bg-surface">
+            <box style="border-rounded overflow-hidden" class="bg">
               <box style="grid grid-cols-1 grid-rows-3 height-full">
                 <box class="height-1 text-primary"> Headers  Body  Query  Auth  Info  Options </box>
                 <.scroll
                   id="request-headers-scroll"
-                  class="height-full overflow-scroll bg-surface"
+                  class="height-full overflow-scroll bg"
                   style={%{scrollbar: %{arrows: true}}}
                 >
                   <box class="inline width-full">
@@ -165,7 +165,7 @@ defmodule Posting do
                 </box>
               </box>
             </box>
-            <box style="border-rounded overflow-hidden" class="bg-surface">
+            <box style="border-rounded overflow-hidden" class="bg">
               <box style="inline">
                 <box class="text-primary bold"> Body </box>
                 <box class="text-muted"> Headers  Cookies  Trace </box>
@@ -295,7 +295,15 @@ defmodule Posting do
     {theme_mode, theme} =
       next_theme(term.assigns.theme_mode || :solarized_dark)
 
-    {:noreply, term |> Breeze.View.put_theme(theme) |> assign(theme_mode: theme_mode)}
+    term = Breeze.View.put_theme(term, theme)
+
+    {:noreply,
+     term
+     |> assign(
+       theme_mode: theme_mode,
+       actual_theme_mode: term.theme.mode,
+       theme_status: Breeze.Theme.probe_status(term.theme) || :ready
+     )}
   end
 
   def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}

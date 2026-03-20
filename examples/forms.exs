@@ -1,5 +1,6 @@
 defmodule FormsDemo do
   use Breeze.View
+  import Breeze.Blocks
 
   @fields [
     {"name", "Name"},
@@ -65,17 +66,15 @@ defmodule FormsDemo do
         </box>
         <box :for={field <- @fields} style={field.row_style}>
           <box style="text-4 bold">{field.label}</box>
-          <box
+          <.input
             id={field.id}
-            focusable
-            implicit={Breeze.Implicit.Input}
             input-value={field.value}
             input-cursor={field.cursor}
             br-change={"#{field.id}_changed"}
             style={"width-#{field.width} focus:inverse"}
           >
             {field.display}
-          </box>
+          </.input>
           <box style="text-24">width={field.width} cursor={field.cursor} value={field.value}</box>
         </box>
       </box>

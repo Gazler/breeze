@@ -272,6 +272,34 @@ defmodule Breeze.Blocks do
   end
 
   attr :id, :string, required: true
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :"input-value", :string, default: ""
+  attr :"input-cursor", :any, default: nil
+  attr :"input-placeholder", :string, default: nil
+  attr :rest, :global
+
+  slot :inner_block
+
+  def input(assigns) do
+    ~H"""
+    <box
+      id={@id}
+      focusable
+      implicit={Breeze.Implicit.Input}
+      class={@class}
+      style={Breeze.Blocks.inline_style(assigns)}
+      input-value={assigns[:"input-value"]}
+      input-cursor={assigns[:"input-cursor"]}
+      input-placeholder={assigns[:"input-placeholder"]}
+      {@rest}
+    >
+      {render_slot(@inner_block)}
+    </box>
+    """
+  end
+
+  attr :id, :string, required: true
   attr :content, :string, required: true
   attr :width, :integer, required: true
   attr :class, :string, default: nil
