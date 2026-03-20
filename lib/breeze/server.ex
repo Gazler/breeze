@@ -1048,13 +1048,7 @@ defmodule Breeze.Server do
   end
 
   defp visible_width(line) when is_binary(line) do
-    line
-    |> strip_ansi()
-    |> String.length()
-  end
-
-  defp strip_ansi(line) do
-    Regex.replace(~r/\e\[[0-9;?]*[ -\/]*[@-~]/u, line, "")
+    BackBreeze.Utils.string_length(line)
   end
 
   defp overlay_patch_payload(overlays, changed_rows) do

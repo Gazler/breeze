@@ -24,8 +24,10 @@ defmodule Snake do
       <:title>
         <box style="text-3">Score: {length(@path) - 4}</box>
       </:title>
-      <box :for={{x, y} <- @path} style={"bg-7 absolute left-#{x * 2 - 1} top-#{y + 1}"}>##</box>
-      <box style={"text-2 absolute text-#{@food.color} left-#{@food.x * 2 - 1} top-#{@food.y + 1}"}>
+      <box :for={{x, y} <- @path} style={"bg-7 absolute left-#{x * 2 - 1} top-#{y + 1}"}>██</box>
+      <box
+        style={"width-2 text-2 absolute text-#{@food.color} left-#{@food.x * 2 - 1} top-#{@food.y + 1}"}
+      >
         {@food.glyph}
       </box>
     </.panel>

@@ -201,7 +201,7 @@ defmodule Breeze.ExampleSnapshotTest do
     session =
       Breeze.Test.start!(Snake,
         size: {40, 16},
-        start_opts: [seed: {1, 2, 3}, tick_ms: nil]
+        start_opts: [seed: {3, 29, 5}, tick_ms: nil]
       )
 
     on_exit(fn -> Breeze.Test.stop(session) end)
@@ -210,14 +210,19 @@ defmodule Breeze.ExampleSnapshotTest do
       snapshot_dir: "../__snapshots__"
     )
 
-    assert {:noreply, _focused} = Breeze.Test.info(session, :tick)
+    for _ <- 1..14 do
+      assert {:noreply, _focused} = Breeze.Test.info(session, :tick)
+    end
 
     assert_snapshot(Breeze.Test.render!(session), "examples/snake/after-tick.ansi",
       snapshot_dir: "../__snapshots__"
     )
 
     assert {:noreply, _focused, true} = Breeze.Test.event(session, nil, %{"key" => "ArrowDown"})
-    assert {:noreply, _focused} = Breeze.Test.info(session, :tick)
+
+    for _ <- 1..4 do
+      assert {:noreply, _focused} = Breeze.Test.info(session, :tick)
+    end
 
     assert_snapshot(Breeze.Test.render!(session), "examples/snake/turned.ansi",
       snapshot_dir: "../__snapshots__"
