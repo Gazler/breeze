@@ -32,7 +32,7 @@ defmodule Posting do
     method_index = Enum.find_index(@methods, &(&1 == method)) || 0
     user_host = current_user_host()
 
-    term = term |> Breeze.View.put_theme(Theme.system()) |> focus("url")
+    term = term |> Breeze.View.put_theme(:system) |> focus("url")
 
     term =
       assign(term,
@@ -322,7 +322,7 @@ defmodule Posting do
 
   def handle_info(_, term), do: {:noreply, term}
 
-  defp next_theme(:system16), do: {:system, Theme.system()}
+  defp next_theme(:system16), do: {:system, :system}
   defp next_theme(:system), do: {:nebula, Theme.builtin(:nebula)}
   defp next_theme(:nebula), do: {:catppuccin, Theme.builtin(:catppuccin)}
   defp next_theme(:catppuccin), do: {:dracula, Theme.builtin(:dracula)}
@@ -330,7 +330,7 @@ defmodule Posting do
   defp next_theme(:gruvbox), do: {:nord, Theme.builtin(:nord)}
   defp next_theme(:nord), do: {:solarized_light, Theme.builtin(:solarized, :light)}
   defp next_theme(:solarized_light), do: {:solarized_dark, Theme.builtin(:solarized, :dark)}
-  defp next_theme(_theme_mode), do: {:system16, Theme.system16()}
+  defp next_theme(_theme_mode), do: {:system16, :system16}
 
   defp action_style(theme_mode) when theme_mode in [:solarized_light, :solarized_dark] do
     %{background_color: :primary, foreground_color: :background, bold: true}
@@ -362,7 +362,7 @@ end
 Breeze.Example.run(
   view: Posting,
   reload: true,
-  theme: Breeze.Theme.system(),
+  theme: :system,
   hide_cursor: true,
   global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
 )

@@ -181,7 +181,7 @@ defmodule Breeze.Theme.Builtin do
         success: "#859900",
         accent: "#6C71C4",
         surface: "#073642",
-        panel: "#0A3A45"
+        panel: "#04262D"
       },
       extras: %{cursor: "#839496"}
     )

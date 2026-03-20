@@ -427,7 +427,7 @@ defmodule Breeze.Theme do
       success: 2,
       accent: 5,
       surface: 8,
-      panel: 8
+      panel: 0
     }
   end
 
@@ -449,7 +449,7 @@ defmodule Breeze.Theme do
       success: 2,
       accent: 5,
       surface: tone_mix(background, foreground, 0.08, 8),
-      panel: tone_mix(background, foreground, 0.14, 8)
+      panel: tone_mix(background, foreground, 0.14, 0)
     }
   end
 
@@ -503,8 +503,8 @@ defmodule Breeze.Theme do
       error: error,
       success: success,
       accent: accent,
-      surface: tone_mix(background, foreground, 0.08, 8),
-      panel: tone_mix(background, foreground, 0.14, 8)
+      surface: mix(background, foreground, 0.08),
+      panel: mix(background, foreground, 0.14)
     }
   end
 

@@ -67,6 +67,8 @@ defmodule Breeze.ThemeTest do
 
     assert Theme.color(theme, :primary) == 4
     assert Theme.color(theme, :background) == 0
+    assert Theme.color(theme, :panel) == 0
+    assert Theme.color(theme, :surface) == 8
     assert Theme.default_style(theme).border_color == 7
   end
 
@@ -89,6 +91,7 @@ defmodule Breeze.ThemeTest do
 
     assert Theme.color(theme, :background) == {16, 17, 18}
     assert Theme.color(theme, :primary) == {51, 85, 170}
+    assert Theme.color(theme, :surface) == {34, 35, 36}
     assert Theme.color(theme, :panel) == {47, 48, 49}
   end
 
@@ -153,6 +156,8 @@ defmodule Breeze.ThemeTest do
     assert Theme.color(theme, :text) == {205, 214, 244}
     assert Theme.color(theme, :primary) == {245, 194, 231}
     assert Theme.color(theme, :accent) == {250, 179, 135}
+    assert Theme.color(theme, :surface) == {38, 39, 54}
+    assert Theme.color(theme, :panel) == {49, 51, 66}
   end
 
   test "partial probed palettes do not promote system mode" do
@@ -173,6 +178,33 @@ defmodule Breeze.ThemeTest do
     assert Theme.new(:system, terminal: terminal).mode == :system16
   end
 
+  test "system probe retries after an unavailable result" do
+    ref = make_ref()
+
+    terminal = %Termite.Terminal{
+      reader: ref,
+      adapter: {PaletteAdapter, %{ref: ref}},
+      size: %{width: 80, height: 24}
+    }
+
+    partial = %{
+      foreground: {205, 214, 244},
+      background: {24, 24, 37}
+    }
+
+    assert :unavailable = Theme.finish_runtime_palette_probe(terminal, partial)
+    assert {:start, {:reader, ^ref}, query} = Theme.start_runtime_palette_probe(terminal)
+
+    assert :ok = Theme.ensure_runtime_palette_async(terminal, self())
+
+    _terminal = Termite.Terminal.write(terminal, query)
+
+    palette = collect_probe_palette(%{})
+    assert :ready = Theme.finish_runtime_palette_probe(terminal, palette)
+    assert_receive {:breeze_theme_palette, {:reader, ^ref}, :ready}
+    assert Theme.new(:system, terminal: terminal).mode == :system
+  end
+
   defp collect_probe_palette(palette, buffer \\ "")
 
   defp collect_probe_palette(palette, buffer) do
@@ -191,26 +223,32 @@ defmodule Breeze.ThemeTest do
     end
   end
 
-  test "system16 derives neutral tones from the terminal palette" do
+  test "system keeps derived RGB neutral tones where system16 falls back on solarized-like palettes" do
     palette = %{
-      1 => "#aa2233",
-      2 => "#22aa33",
-      3 => "#ccbb33",
-      4 => "#3355aa",
-      5 => "#9933aa",
-      6 => "#33aaaa",
-      7 => "#dddddd",
-      8 => "#777777",
-      background: "#101112",
-      foreground: "#f0f0f0"
+      1 => "#dc322f",
+      2 => "#859900",
+      3 => "#b58900",
+      4 => "#268bd2",
+      5 => "#d33682",
+      6 => "#2aa198",
+      9 => "#cb4b16",
+      10 => "#586e75",
+      11 => "#657b83",
+      12 => "#839496",
+      13 => "#6c71c4",
+      14 => "#93a1a1",
+      background: "#002b36",
+      foreground: "#839496"
     }
 
     system = Theme.system(palette: palette)
     system16 = Theme.system16(palette: palette)
 
     assert Theme.color(system16, :primary) == 4
-    assert Theme.color(system16, :panel) == Theme.color(system, :panel)
-    assert Theme.color(system16, :surface) == Theme.color(system, :surface)
+    assert Theme.color(system16, :panel) == 0
+    assert Theme.color(system16, :surface) == 8
+    assert Theme.color(system, :panel) == {18, 58, 67}
+    assert Theme.color(system, :surface) == {10, 51, 62}
     assert Theme.color(system16, :muted) == Theme.color(system, :muted)
   end
 
@@ -236,7 +274,7 @@ defmodule Breeze.ThemeTest do
     assert light.name == "solarized-light"
     assert dark.name == "solarized-dark"
     assert Theme.color(dark, :background) == {0, 43, 54}
-    assert Theme.color(dark, :panel) == {10, 58, 69}
+    assert Theme.color(dark, :panel) == {4, 38, 45}
     assert Theme.color(dark, :cursor) == {131, 148, 150}
   end
 

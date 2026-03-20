@@ -44,7 +44,8 @@ defmodule Breeze.Theme.Probe do
             send(notify_pid, {:breeze_theme_palette, key, :ready})
 
           [{^key, :unavailable}] ->
-            send(notify_pid, {:breeze_theme_palette, key, :unavailable})
+            :ets.insert(@palette_cache_table, {key, :pending})
+            :ets.insert(@palette_waiters_table, {key, notify_pid})
 
           [{^key, :pending}] ->
             :ets.insert(@palette_waiters_table, {key, notify_pid})
@@ -76,7 +77,8 @@ defmodule Breeze.Theme.Probe do
             :ready
 
           [{^key, :unavailable}] ->
-            :unavailable
+            :ets.insert(@palette_cache_table, {key, :pending})
+            {:start, key, palette_query_sequence()}
 
           [{^key, :pending}] ->
             {:start, key, palette_query_sequence()}
@@ -103,11 +105,14 @@ defmodule Breeze.Theme.Probe do
   end
 
   @spec runtime_palette_probe_complete?(map()) :: boolean()
-  def runtime_palette_probe_complete?(palette) when is_map(palette), do: palette_probe_complete?(palette)
+  def runtime_palette_probe_complete?(palette) when is_map(palette),
+    do: palette_probe_complete?(palette)
+
   def runtime_palette_probe_complete?(_palette), do: false
 
   @spec finish_runtime_palette_probe(Termite.Terminal.t() | nil, map()) :: :ready | :unavailable
-  def finish_runtime_palette_probe(%Termite.Terminal{} = terminal, palette) when is_map(palette) do
+  def finish_runtime_palette_probe(%Termite.Terminal{} = terminal, palette)
+      when is_map(palette) do
     case terminal_cache_key(terminal) do
       {:ok, key} ->
         ensure_palette_cache_table()
@@ -253,13 +258,22 @@ defmodule Breeze.Theme.Probe do
 
   defp parse_palette_response(sequence) do
     cond do
-      captures = Regex.run(~r/^\e\]10;rgb:([0-9A-Fa-f\/]+)(?:\a|\e\\)$/, sequence, capture: :all_but_first) ->
+      captures =
+          Regex.run(~r/^\e\]10;rgb:([0-9A-Fa-f\/]+)(?:\a|\e\\)$/, sequence,
+            capture: :all_but_first
+          ) ->
         {:foreground, parse_osc_rgb!(hd(captures))}
 
-      captures = Regex.run(~r/^\e\]11;rgb:([0-9A-Fa-f\/]+)(?:\a|\e\\)$/, sequence, capture: :all_but_first) ->
+      captures =
+          Regex.run(~r/^\e\]11;rgb:([0-9A-Fa-f\/]+)(?:\a|\e\\)$/, sequence,
+            capture: :all_but_first
+          ) ->
         {:background, parse_osc_rgb!(hd(captures))}
 
-      captures = Regex.run(~r/^\e\]4;(\d+);rgb:([0-9A-Fa-f\/]+)(?:\a|\e\\)$/, sequence, capture: :all_but_first) ->
+      captures =
+          Regex.run(~r/^\e\]4;(\d+);rgb:([0-9A-Fa-f\/]+)(?:\a|\e\\)$/, sequence,
+            capture: :all_but_first
+          ) ->
         [index, rgb] = captures
         {String.to_integer(index), parse_osc_rgb!(rgb)}
 

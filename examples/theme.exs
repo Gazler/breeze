@@ -16,12 +16,10 @@ defmodule ThemeDemo do
       <.panel
         id="theme-demo"
         width={76}
-        height={18}
-        scroll
-        class="border bg-surface"
-        scroll_class="bg-surface"
+        height={20}
+        class="border bg-panel"
       >
-        <:title>Theme Demo</:title>
+        <:title>Theme Demo ({@mode}/{@actual_theme_mode} - {@theme_status})</:title>
         <box class="text-primary bold width-full">Semantic theme tokens</box>
         <box class="text-muted width-full">
           1 system16  2 system  3 nebula  4 catppuccin  5 dracula  6 gruvbox  7 nord  8 solarized-light  9 solarized-dark
@@ -50,7 +48,7 @@ defmodule ThemeDemo do
           <box class="width-1">
           </box>
           <box
-            style={%{width: 12, height: 3, background_color: :surface, foreground_color: :muted, border: :line}}
+            style={%{width: 12, height: 3, background_color: :background, foreground_color: :muted, border: :line}}
           >
             Muted
           </box>
@@ -114,19 +112,16 @@ defmodule ThemeDemo do
         </box>
         <box class="height-1">
         </box>
-        <box class="border border-accent bg-panel width-42">
-          Current theme: {@mode}/{@actual_theme_mode} ({@theme_status})
-        </box>
       </.panel>
     </box>
     """
   end
 
   def handle_event(_, %{"key" => "1"}, term),
-    do: {:noreply, assign_theme(term, :system16, Theme.system16())}
+    do: {:noreply, assign_theme(term, :system16, :system16)}
 
   def handle_event(_, %{"key" => "2"}, term),
-    do: {:noreply, assign_theme(term, :system, Theme.system())}
+    do: {:noreply, assign_theme(term, :system, :system)}
 
   def handle_event(_, %{"key" => "3"}, term),
     do: {:noreply, assign_theme(term, :nebula, Theme.builtin(:nebula))}
@@ -168,6 +163,7 @@ Breeze.Example.run(
   [
     view: ThemeDemo,
     reload: true,
+    theme: :system,
     global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
   ],
   keep_alive: :infinity
