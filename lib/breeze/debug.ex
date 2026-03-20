@@ -9,6 +9,7 @@ defmodule Breeze.Debug do
     fixed = Keyword.get(opts, :fixed, false)
     right = Keyword.get(opts, :right, 0)
     bottom = Keyword.get(opts, :bottom, 0)
+    stats = Keyword.get(opts, :stats, %{})
 
     if term.server do
       Breeze.Server.subscribe_debug(term.server, self())
@@ -16,7 +17,7 @@ defmodule Breeze.Debug do
 
     {:ok,
      assign(term,
-       stats: %{},
+       stats: stats,
        width: width,
        height: height,
        fixed: fixed,
@@ -144,7 +145,8 @@ defmodule Breeze.Debug do
 
   def handle_event(_, _, term), do: {:noreply, term}
 
-  def handle_info({:debug_stats, stats}, term), do: {:noreply, assign(term, stats: stats)}
+  def handle_info({:debug_stats, stats}, term),
+    do: {:noreply, assign(term, stats: stats), invalidate: false}
 
   def handle_info(_, term), do: {:noreply, term}
 

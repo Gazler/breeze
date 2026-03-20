@@ -5,6 +5,7 @@ defmodule Breeze.Term do
     :view,
     :server,
     :terminal,
+    :theme,
     :reader,
     last_render_at: nil,
     last_interaction_at: nil,
@@ -24,7 +25,8 @@ defmodule Breeze.Term do
     mouse_targets: %{},
     children: %{},
     frame_delay_ms: 16,
-    render_timer: nil
+    render_timer: nil,
+    apply_theme_defaults?: false
   ]
 end
 
@@ -50,9 +52,13 @@ defmodule Breeze.Server do
     :reload_opts,
     :reloader_pid,
     :focused,
+    :theme,
+    :apply_theme_defaults?,
     :crash,
     :base_output,
     :last_frame_payload,
+    :last_frame_lines,
+    :last_overlays,
     :pending_ref,
     :pending_started_at,
     :last_render_at,
@@ -80,7 +86,10 @@ defmodule Breeze.Server do
           | {:hide_cursor, boolean()}
           | {:mouse, boolean() | keyword()}
           | {:reload, boolean() | keyword()}
+          | {:theme, Breeze.Theme.t() | map() | keyword() | atom()}
           | {:global_keybindings, list()}
+          | {:debug_push_interval_ms, pos_integer()}
+          | {:busy_delay_ms, non_neg_integer()}
           | {:frame_delay_ms, pos_integer()}
 
   @doc """
@@ -120,7 +129,11 @@ defmodule Breeze.Server do
     view = Keyword.fetch!(opts, :view)
     start_opts = Keyword.get(opts, :start_opts, [])
     frame_delay_ms = Keyword.get(opts, :frame_delay_ms, 80)
+    debug_push_interval_ms = Keyword.get(opts, :debug_push_interval_ms, 250)
     terminal = Keyword.fetch!(opts, :terminal)
+    theme = Breeze.Theme.new(Keyword.get(opts, :theme), terminal: terminal)
+    theme_source = Keyword.get(opts, :theme)
+    apply_theme_defaults? = Breeze.Theme.defaults_enabled?(Keyword.get(opts, :theme))
 
     session = self()
 
@@ -129,6 +142,9 @@ defmodule Breeze.Server do
         view: view,
         start_opts: start_opts,
         terminal: terminal,
+        theme: theme,
+        theme_source: theme_source,
+        apply_theme_defaults?: apply_theme_defaults?,
         server: self(),
         global_keybindings: Keyword.get(opts, :global_keybindings, []),
         invalidate: fn -> send(session, :child_invalidated) end
@@ -136,10 +152,11 @@ defmodule Breeze.Server do
 
     Process.monitor(view_pid)
 
-    focused =
+    {focused, theme} =
       case Breeze.ChildServer.metadata(view_pid) do
-        %{focused: focused} -> focused
-        _ -> nil
+        %{focused: focused, theme: child_theme} -> {focused, child_theme}
+        %{focused: focused} -> {focused, theme}
+        _ -> {nil, theme}
       end
 
     state = %__MODULE__{
@@ -154,13 +171,18 @@ defmodule Breeze.Server do
           Keyword.get(opts, :reload, Application.get_env(:breeze, :reload, false))
         ),
       focused: focused,
+      theme: theme,
+      apply_theme_defaults?: apply_theme_defaults?,
       global_keybindings: Keyword.get(opts, :global_keybindings, []),
+      debug_push_interval_ms: debug_push_interval_ms,
       busy_delay_ms: Keyword.get(opts, :busy_delay_ms, 120),
       frame_delay_ms: frame_delay_ms,
       base_output: "",
       pending_started_at: nil,
       last_render_at: System.monotonic_time(:millisecond),
-      last_interaction_at: nil
+      last_interaction_at: nil,
+      last_frame_lines: nil,
+      last_overlays: []
     }
 
     state = maybe_start_reloader(state)
@@ -170,21 +192,21 @@ defmodule Breeze.Server do
 
   @impl true
   def handle_call(:stats, _from, state) do
-    {:reply,
-     state.debug_stats
-     |> Map.put(:focused, state.focused)
-     |> Map.put(:pending?, not is_nil(state.pending_ref))
-     |> Map.put(:screen, state.terminal.size), state}
+    {:reply, debug_stats_snapshot(state), state}
   end
 
   @impl true
   def handle_cast({:subscribe_debug, subscriber}, state) do
     if is_pid(subscriber), do: Process.monitor(subscriber)
 
+    state = Map.update!(state, :debug_subscribers, &MapSet.put(&1, subscriber))
+
     state =
-      state
-      |> Map.update!(:debug_subscribers, &MapSet.put(&1, subscriber))
-      |> push_debug_stats_now()
+      if state.debug_stats == %{} do
+        state
+      else
+        push_debug_stats_now(state)
+      end
 
     {:noreply, state}
   end
@@ -217,7 +239,7 @@ defmodule Breeze.Server do
           stop(state)
 
         {:ok, {:noreply, focused}} ->
-          {:noreply, maybe_render_base(%{state | focused: focused}, :resize)}
+          {:noreply, force_full_redraw(%{state | focused: focused}, :resize)}
 
         {:crash, crash} ->
           {:noreply, enter_crash_state(state, crash)}
@@ -238,7 +260,13 @@ defmodule Breeze.Server do
     if crashed?(state) do
       {:noreply, state}
     else
-      state = increment_debug_stat(state, :child_invalidated_count)
+      state =
+        if debug_child_id?(child_id) do
+          state
+        else
+          increment_debug_stat(state, :child_invalidated_count)
+        end
+
       {:noreply, maybe_render_invalidated_child(state, child_id)}
     end
   end
@@ -567,7 +595,8 @@ defmodule Breeze.Server do
 
         root_snapshot_us = System.monotonic_time(:microsecond) - root_started_at
 
-        focused = safe_focused_metadata(state) || state.focused
+        {metadata_focused, metadata_theme} = safe_focused_metadata(state)
+        focused = metadata_focused || state.focused
 
         %{
           missing: missing,
@@ -587,7 +616,7 @@ defmodule Breeze.Server do
 
             true ->
               decorations = decorations ++ child_decorations
-              state = %{state | focused: focused}
+              state = %{state | focused: focused, theme: metadata_theme}
               prep_started_at = System.monotonic_time(:microsecond)
               {base_output, decorations} = prepare_decorations(box.content, decorations, state)
               prepare_decorations_us = System.monotonic_time(:microsecond) - prep_started_at
@@ -655,6 +684,7 @@ defmodule Breeze.Server do
     Breeze.ChildServer.render_snapshot(state.view_pid,
       implicit_state: %{},
       terminal: state.terminal,
+      theme: state.theme,
       render_tracking_ref: tracking_ref,
       profile_scope: profile_scope,
       profile_label: inspect(root_view_module(state)),
@@ -672,15 +702,24 @@ defmodule Breeze.Server do
 
   defp safe_focused_metadata(state) do
     case Breeze.ChildServer.metadata(state.view_pid) do
-      %{focused: focused} -> focused
-      _ -> nil
+      %{focused: focused, theme: theme} -> {focused, theme}
+      %{focused: focused} -> {focused, state.theme}
+      _ -> {nil, state.theme}
     end
   catch
-    :exit, _reason -> nil
+    :exit, _reason -> {nil, state.theme}
   end
 
   defp maybe_render_after_input(%{pending_ref: ref} = state) when not is_nil(ref), do: state
   defp maybe_render_after_input(state), do: maybe_render_base(state, :input_flush)
+
+  defp force_full_redraw(state, cause) do
+    state
+    |> Map.put(:last_frame_payload, nil)
+    |> Map.put(:last_frame_lines, nil)
+    |> Map.put(:last_overlays, [])
+    |> maybe_render_base(cause)
+  end
 
   defp render_live_child(attrs, opts, state, profile_scope, tracking_ref) do
     id = fetch_live_attr!(attrs, :id)
@@ -710,6 +749,7 @@ defmodule Breeze.Server do
                      focused: local_focused,
                      implicit_state: %{},
                      terminal: state.terminal,
+                     theme: state.theme,
                      live_prefix: full_id,
                      render_tracking_ref: tracking_ref,
                      profile_scope: profile_scope,
@@ -765,6 +805,7 @@ defmodule Breeze.Server do
                    focused: strip_live_prefix(state.focused, child_id),
                    implicit_state: %{},
                    terminal: state.terminal,
+                   theme: state.theme,
                    live_prefix: child_id,
                    render_tracking_ref: tracking_ref,
                    profile_scope: profile_scope,
@@ -811,30 +852,41 @@ defmodule Breeze.Server do
             write_us = written_at - composed_at
             profile_entries = Breeze.DebugProfiler.snapshot(profile_scope)
 
-            {:ok,
-             state
-             |> Map.put(:terminal, terminal)
-             |> Map.put(:last_frame_payload, nil)
-             |> put_debug_stat(:last_render_cause, :child_patch)
-             |> put_debug_stat(:last_root_snapshot_us, 0)
-             |> put_debug_stat(:last_root_snapshot_app_us, 0)
-             |> put_debug_stat(:last_live_children_us, child_render_us)
-             |> put_debug_stat(:last_live_children_app_us, child_render_us)
-             |> put_debug_stat(
-               :last_live_children,
-               normalize_child_timings([%{id: child_id, view: view, us: child_render_us}])
-             )
-             |> put_debug_stat(:last_render_profile, summarize_profile(profile_entries))
-             |> put_debug_stat(:last_reconcile_passes, 1)
-             |> put_debug_stat(:last_reconcile_changed_ids, [child_id])
-             |> put_debug_stat(:last_prepare_decorations_us, 0)
-             |> put_debug_stat(:last_render_base_us, total_us)
-             |> put_debug_stat(:last_render_base_app_us, total_us)
-             |> put_debug_stat(:last_frame_compose_us, composed_at - started_at)
-             |> put_debug_stat(:last_terminal_write_us, write_us)
-             |> put_debug_stat(:last_frame_us, total_us)
-             |> put_debug_stat(:last_frame_bytes, byte_size(fragment))
-             |> put_debug_stat(:overlay_count, 0)}
+            next_state =
+              state
+              |> Map.put(:terminal, terminal)
+              |> Map.put(:last_frame_payload, nil)
+              |> Map.put(:last_frame_lines, nil)
+              |> Map.put(:last_overlays, [])
+
+            next_state =
+              if debug_child_id?(child_id) do
+                next_state
+              else
+                next_state
+                |> put_debug_stat(:last_render_cause, :child_patch)
+                |> put_debug_stat(:last_root_snapshot_us, 0)
+                |> put_debug_stat(:last_root_snapshot_app_us, 0)
+                |> put_debug_stat(:last_live_children_us, child_render_us)
+                |> put_debug_stat(:last_live_children_app_us, child_render_us)
+                |> put_debug_stat(
+                  :last_live_children,
+                  normalize_child_timings([%{id: child_id, view: view, us: child_render_us}])
+                )
+                |> put_debug_stat(:last_render_profile, summarize_profile(profile_entries))
+                |> put_debug_stat(:last_reconcile_passes, 1)
+                |> put_debug_stat(:last_reconcile_changed_ids, [child_id])
+                |> put_debug_stat(:last_prepare_decorations_us, 0)
+                |> put_debug_stat(:last_render_base_us, total_us)
+                |> put_debug_stat(:last_render_base_app_us, total_us)
+                |> put_debug_stat(:last_frame_compose_us, composed_at - started_at)
+                |> put_debug_stat(:last_terminal_write_us, write_us)
+                |> put_debug_stat(:last_frame_us, total_us)
+                |> put_debug_stat(:last_frame_bytes, byte_size(fragment))
+                |> put_debug_stat(:overlay_count, 0)
+              end
+
+            {:ok, next_state}
         end
       else
         _ -> :error
@@ -849,14 +901,20 @@ defmodule Breeze.Server do
     {output, decorations} = apply_decorations(state.base_output, state.decorations, state)
     output = strip_private_use_chars(output)
     overlays = terminal_overlays(decorations, state)
-    overlay_output = Breeze.TerminalOverlay.render_overlays(overlays)
 
-    screen_height = state.terminal.size.height
-    lines = :binary.split(output, "\n", [:global])
-    output_lines = max(length(lines), 1)
-    trailing = String.duplicate("\n\e[K", max(screen_height - output_lines, 0))
-    output = IO.iodata_to_binary(["\e[K", Enum.intersperse(lines, "\n\e[K"), trailing])
-    frame_payload = IO.iodata_to_binary(["\e[H", output, overlay_output])
+    lines =
+      output
+      |> normalize_frame_lines(state.terminal.size.height)
+
+    frame_payload =
+      build_frame_payload(
+        state.last_frame_lines,
+        lines,
+        state.last_overlays || [],
+        overlays,
+        state.terminal.size.width
+      )
+
     composed_at = System.monotonic_time(:microsecond)
 
     {terminal, write_duration} =
@@ -872,11 +930,128 @@ defmodule Breeze.Server do
     |> Map.put(:terminal, terminal)
     |> Map.put(:decorations, decorations)
     |> Map.put(:last_frame_payload, frame_payload)
+    |> Map.put(:last_frame_lines, lines)
+    |> Map.put(:last_overlays, overlays)
     |> put_debug_stat(:last_frame_compose_us, composed_at - started_at)
     |> put_debug_stat(:last_terminal_write_us, write_duration)
     |> put_debug_stat(:last_frame_us, System.monotonic_time(:microsecond) - started_at)
-    |> put_debug_stat(:last_frame_bytes, byte_size(output))
+    |> put_debug_stat(:last_frame_bytes, byte_size(frame_payload))
     |> put_debug_stat(:overlay_count, length(overlays))
+  end
+
+  defp normalize_frame_lines(output, screen_height) do
+    output
+    |> :binary.split("\n", [:global])
+    |> then(fn lines ->
+      lines = if lines == [], do: [""], else: lines
+      lines ++ List.duplicate("", max(screen_height - length(lines), 0))
+    end)
+    |> Enum.take(screen_height)
+  end
+
+  defp build_frame_payload(nil, lines, _prev_overlays, overlays, _screen_width) do
+    full_redraw_payload(lines, overlays)
+  end
+
+  defp build_frame_payload(prev_lines, lines, prev_overlays, overlays, screen_width) do
+    changed_rows =
+      changed_base_rows(prev_lines, lines)
+      |> MapSet.union(changed_overlay_rows(prev_overlays, overlays))
+
+    if MapSet.size(changed_rows) == 0 do
+      ""
+    else
+      IO.iodata_to_binary([
+        row_patch_payload(lines, changed_rows, screen_width),
+        overlay_patch_payload(overlays, changed_rows)
+      ])
+    end
+  end
+
+  defp full_redraw_payload(lines, overlays) do
+    output = IO.iodata_to_binary(["\e[K", Enum.intersperse(lines, "\n\e[K")])
+    overlay_output = Breeze.TerminalOverlay.render_overlays(overlays)
+    IO.iodata_to_binary(["\e[2J\e[H", output, overlay_output])
+  end
+
+  defp changed_base_rows(prev_lines, lines) do
+    lines
+    |> Enum.zip(prev_lines)
+    |> Enum.with_index()
+    |> Enum.reduce(MapSet.new(), fn
+      {{line, line}, _row}, acc -> acc
+      {_pair, row}, acc -> MapSet.put(acc, row)
+    end)
+  end
+
+  defp changed_overlay_rows(prev_overlays, overlays) do
+    prev_map = overlay_row_map(prev_overlays)
+    next_map = overlay_row_map(overlays)
+
+    Map.keys(prev_map)
+    |> Kernel.++(Map.keys(next_map))
+    |> MapSet.new()
+    |> Enum.reduce(MapSet.new(), fn row, acc ->
+      if Map.get(prev_map, row, MapSet.new()) == Map.get(next_map, row, MapSet.new()) do
+        acc
+      else
+        MapSet.put(acc, row)
+      end
+    end)
+  end
+
+  defp overlay_row_map(overlays) do
+    Enum.reduce(overlays, %{}, fn overlay, acc ->
+      row = Map.get(overlay, :y, 0)
+      sig = overlay_signature(overlay)
+      Map.update(acc, row, MapSet.new([sig]), &MapSet.put(&1, sig))
+    end)
+  end
+
+  defp overlay_signature(overlay) do
+    {Map.get(overlay, :x), Map.get(overlay, :y), Breeze.TerminalOverlay.render_overlay(overlay)}
+  end
+
+  defp row_patch_payload(lines, changed_rows, screen_width) do
+    changed_rows
+    |> Enum.sort()
+    |> Enum.map(fn row ->
+      line = Enum.at(lines, row, "")
+      visible_width = visible_width(line)
+
+      if visible_width >= screen_width do
+        ["\e[", Integer.to_string(row + 1), ";1H", line]
+      else
+        [
+          "\e[",
+          Integer.to_string(row + 1),
+          ";1H",
+          line,
+          "\e[",
+          Integer.to_string(row + 1),
+          ";",
+          Integer.to_string(visible_width + 1),
+          "H\e[K"
+        ]
+      end
+    end)
+    |> IO.iodata_to_binary()
+  end
+
+  defp visible_width(line) when is_binary(line) do
+    line
+    |> strip_ansi()
+    |> String.length()
+  end
+
+  defp strip_ansi(line) do
+    Regex.replace(~r/\e\[[0-9;?]*[ -\/]*[@-~]/u, line, "")
+  end
+
+  defp overlay_patch_payload(overlays, changed_rows) do
+    overlays
+    |> Enum.filter(&MapSet.member?(changed_rows, Map.get(&1, :y, 0)))
+    |> Breeze.TerminalOverlay.render_overlays()
   end
 
   defp initialize_decorations(decorations) do
@@ -967,6 +1142,7 @@ defmodule Breeze.Server do
       focused?: (decoration[:owner_id] || decoration.id) == state.focused,
       last_render_at: state.last_render_at,
       last_interaction_at: state.last_interaction_at,
+      theme: state.theme,
       id: decoration.id,
       layout: decoration[:layout]
     }
@@ -1095,6 +1271,9 @@ defmodule Breeze.Server do
   defp patchable_live_child?("debug"), do: true
   defp patchable_live_child?(_child_id), do: false
 
+  defp debug_child_id?("debug"), do: true
+  defp debug_child_id?(_child_id), do: false
+
   defp wrap_child_fragment(child_box, viewport) do
     BackBreeze.Box.new(
       style: %{width: viewport.width, height: viewport.height, overflow: :hidden},
@@ -1210,6 +1389,8 @@ defmodule Breeze.Server do
     |> Map.put(:crash, crash)
     |> Map.put(:base_output, content)
     |> Map.put(:last_frame_payload, nil)
+    |> Map.put(:last_frame_lines, nil)
+    |> Map.put(:last_overlays, [])
     |> render_frame()
   end
 
@@ -1243,15 +1424,18 @@ defmodule Breeze.Server do
     shutdown_root_view(state.view_pid)
 
     case start_root_view(state) do
-      {:ok, pid, focused} ->
+      {:ok, pid, focused, theme} ->
         state
         |> Map.put(:view_pid, pid)
         |> Map.put(:focused, focused)
+        |> Map.put(:theme, theme)
         |> Map.put(:crash, nil)
         |> Map.put(:children, %{})
         |> Map.put(:decorations, [])
         |> Map.put(:base_output, "")
         |> Map.put(:last_frame_payload, nil)
+        |> Map.put(:last_frame_lines, nil)
+        |> Map.put(:last_overlays, [])
         |> Map.put(:pending_ref, nil)
         |> Map.put(:pending_started_at, nil)
         |> Map.put(:queued_input, [])
@@ -1278,6 +1462,7 @@ defmodule Breeze.Server do
              view: state.view,
              start_opts: state.start_opts || [],
              terminal: state.terminal,
+             theme: state.theme,
              server: self(),
              global_keybindings: state.global_keybindings || [],
              invalidate: fn -> send(session, :child_invalidated) end
@@ -1286,13 +1471,14 @@ defmodule Breeze.Server do
       {:ok, {:ok, pid}} ->
         Process.monitor(pid)
 
-        focused =
+        {focused, theme} =
           case safe_call(fn -> Breeze.ChildServer.metadata(pid) end) do
-            {:ok, %{focused: focused}} -> focused
-            _ -> nil
+            {:ok, %{focused: focused, theme: child_theme}} -> {focused, child_theme}
+            {:ok, %{focused: focused}} -> {focused, state.theme}
+            _ -> {nil, state.theme}
           end
 
-        {:ok, pid, focused}
+        {:ok, pid, focused, theme}
 
       {:ok, other} ->
         {:error,
@@ -1466,12 +1652,13 @@ defmodule Breeze.Server do
           else
             ref = Map.get(child, :ref)
             if is_reference(ref), do: Process.demonitor(ref, [:flush])
-            child = start_child!(attrs, state.terminal)
+
+            child = start_child!(attrs, state.terminal, state.theme, state)
             {%{state | children: Map.put(state.children, id, child)}, true}
           end
 
         nil ->
-          child = start_child!(attrs, state.terminal)
+          child = start_child!(attrs, state.terminal, state.theme, state)
           {%{state | children: Map.put(state.children, id, child)}, true}
       end
     end)
@@ -1586,11 +1773,7 @@ defmodule Breeze.Server do
   end
 
   defp push_debug_stats_now(state) do
-    stats =
-      state.debug_stats
-      |> Map.put(:focused, state.focused)
-      |> Map.put(:pending?, not is_nil(state.pending_ref))
-      |> Map.put(:screen, state.terminal.size)
+    stats = debug_stats_snapshot(state)
 
     Enum.each(state.debug_subscribers, fn subscriber ->
       if is_pid(subscriber) and Process.alive?(subscriber) do
@@ -1607,9 +1790,9 @@ defmodule Breeze.Server do
 
   defp schedule_debug_push(state), do: state
 
-  defp start_child!(attrs, terminal) do
+  defp start_child!(attrs, terminal, theme, state) do
     view = fetch_live_attr!(attrs, :view)
-    start_opts = fetch_live_attr(attrs, :start_opts, [])
+    start_opts = child_start_opts(fetch_live_attr(attrs, :start_opts, []), view, state)
     persistent = fetch_live_attr(attrs, :persistent, false)
     parent = self()
     child_id = fetch_live_attr!(attrs, :id)
@@ -1621,11 +1804,25 @@ defmodule Breeze.Server do
         start_opts: start_opts,
         server: self(),
         terminal: terminal,
+        theme: theme,
         invalidate: invalidate
       )
 
     ref = Process.monitor(pid)
     %{pid: pid, ref: ref, view: view, persistent: persistent}
+  end
+
+  defp child_start_opts(start_opts, Breeze.Debug, state) do
+    Keyword.put_new(start_opts, :stats, debug_stats_snapshot(state))
+  end
+
+  defp child_start_opts(start_opts, _view, _state), do: start_opts
+
+  defp debug_stats_snapshot(state) do
+    state.debug_stats
+    |> Map.put(:focused, state.focused)
+    |> Map.put(:pending?, not is_nil(state.pending_ref))
+    |> Map.put(:screen, state.terminal.size)
   end
 
   defp begin_render_tracking do

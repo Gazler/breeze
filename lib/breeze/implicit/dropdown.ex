@@ -110,12 +110,12 @@ defmodule Breeze.Implicit.Dropdown do
 
   defp frame_style(state),
     do:
-      "absolute left-#{state.menu_left} top-#{state.menu_top} width-#{state.menu_width} height-#{state.menu_height} bg-0 text-7 overflow-hidden layer-20"
+      "absolute left-#{state.menu_left} top-#{state.menu_top} width-#{state.menu_width} height-#{state.menu_height} bg-panel text overflow-hidden layer-20"
 
   defp item_style(state, flags) do
     index = int_flag(flags, :"dropdown-item-index", 0)
 
-    "absolute left-#{state.menu_left} top-#{state.menu_top + index} bg-0 text-7 width-#{state.menu_width} layer-21"
+    "absolute left-#{state.menu_left} top-#{state.menu_top + index} bg-panel text width-#{state.menu_width} layer-21"
   end
 
   defp indicator_style(state, opts \\ []) do

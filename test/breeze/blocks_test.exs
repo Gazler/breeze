@@ -3,6 +3,13 @@ defmodule Breeze.BlocksTest do
 
   alias Breeze.Blocks
 
+  describe "merge_class/2" do
+    test "matches merge_style semantics" do
+      assert Blocks.merge_class("border width-24 height-8", "width-32 bg-4") ==
+               "border width-32 height-8 bg-4"
+    end
+  end
+
   describe "merge_style/2" do
     test "nil override returns default unchanged" do
       assert Blocks.merge_style("border width-24", nil) == "border width-24"

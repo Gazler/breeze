@@ -137,12 +137,24 @@ defmodule Breeze.Implicit.InputTest do
 
   test "animate can return geometry-aware overlay data" do
     box = %Box{style: %BackBreeze.Style{border: BackBreeze.Border.line()}}
+    theme = Breeze.Theme.Builtin.nebula()
 
-    assert {:ok, %Box{content: " hello"}, overlays: [%{x: 15, y: 5, char: " ", visible?: true}]} =
+    assert {:ok, %Box{content: " hello"},
+            overlays: [
+              %{
+                x: 15,
+                y: 5,
+                char: " ",
+                foreground_color: {13, 33, 55},
+                background_color: {255, 121, 198},
+                visible?: true
+              }
+            ]} =
              Input.animate(:root, box, [focused: true], %{value: "hello", cursor: 7}, %{
                layout: %{left: 6, top: 4},
                now: 0,
-               last_interaction_at: nil
+               last_interaction_at: nil,
+               theme: theme
              })
   end
 
@@ -224,6 +236,26 @@ defmodule Breeze.Implicit.InputTest do
   test "delete removes the grapheme under the cursor" do
     assert {{:change, %{value: "helo", cursor: 2}}, %{value: "helo", cursor: 2}} =
              Input.handle_event(nil, %{"key" => "Delete"}, %{value: "hello", cursor: 2})
+  end
+
+  test "ctrl-w deletes the previous word and surrounding gap" do
+    assert {{:change, %{value: "hello", cursor: 5}}, %{value: "hello", cursor: 5}} =
+             Input.handle_event(nil, %{"key" => "\x17"}, %{value: "hello   world", cursor: 13})
+  end
+
+  test "ctrl-backspace via ctrl-h deletes the previous word and surrounding gap" do
+    assert {{:change, %{value: "hello", cursor: 5}}, %{value: "hello", cursor: 5}} =
+             Input.handle_event(nil, %{"key" => "\x08"}, %{value: "hello   world", cursor: 13})
+  end
+
+  test "ctrl-w is a no-op at the start of the input" do
+    assert {:noreply, %{value: "hello", cursor: 0}} =
+             Input.handle_event(nil, %{"key" => "\x17"}, %{value: "hello", cursor: 0})
+  end
+
+  test "control characters are not treated as insertable input" do
+    assert {:noreply, %{value: "hello", cursor: 2}} =
+             Input.handle_event(nil, %{"key" => "\x01"}, %{value: "hello", cursor: 2})
   end
 
   test "animate leaves unfocused content untouched" do

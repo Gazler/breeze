@@ -51,10 +51,11 @@ defmodule Breeze.View do
   * `id` - the id of the element. This is required for focusables and implicits
   * `focusable` - if the element should be added to the focus tree. These are added in
   the order they appear, and can be toggled using tab/shift-tab. The `focus` style
-  state can be used to style these. E.g. style="border focus:border-3"
+  state can be used to style these. E.g. class="border focus:border-3"
   * `default-focus` - marks the preferred focus target when a view or focus scope becomes active
   * `focus-scope` - defines a focus region. Set `focus-scope="trap"` to keep tab traversal inside it
-  * `style` - the style for the box. This is covered in the [Style](`m:Breeze.View#module-style`) section.
+  * `class` - token-based styling for the box. This is covered in the [Style](`m:Breeze.View#module-style`) section.
+  * `style` - inline style maps or `%BackBreeze.Style{}` values for the box. Passing a binary remains backwards compatible.
   * `implicit` - this is a module that will be used for implicit state. This is covered
    in the [Implicits](`m:Breeze.View#module-implicits`) section.
 
@@ -91,13 +92,23 @@ defmodule Breeze.View do
 
   ## Style
 
-  The `style` attribute can be used to style the box. This uses `BackBreeze.Box.new/1` under
-  the hood.
+  Breeze supports two styling inputs:
 
-  A box can be styled similar to CSS using the style attribute:
+  * `class` - string tokens such as `border`, `width-15`, `text-3`
+  * `style` - a `%BackBreeze.Style{}` struct or a map for inline values
+
+  Passing a binary to `style` remains supported for backwards compatibility.
+
+  A box can be styled similar to CSS using the class attribute:
 
   ```
-  <box style="bold text-3 border width-15">Hello World</box>
+  <box class="bold text-3 border width-15">Hello World</box>
+  ```
+
+  Inline maps can be used when you want direct `BackBreeze` values:
+
+  ```
+  <box style={%{border: :rounded, border_color: 3, width: 15}}>Hello World</box>
   ```
 
   The following styles are supported:
@@ -151,11 +162,11 @@ defmodule Breeze.View do
 
   def list(assigns) do
     ~H\"\"\"
-    <box focusable style="border focus:border-3" implicit={MyAppList} id={@id} {@rest}>
+    <box focusable class="border focus:border-3" implicit={MyAppList} id={@id} {@rest}>
       <box
         :for={item <- @item}
         value={item.value}
-        style="selected:bg-24 selected:text-0 focus:selected:text-7 focus:selected:bg-4"
+        class="selected:bg-24 selected:text-0 focus:selected:text-7 focus:selected:bg-4"
       ><%= render_slot(item, %{}) %></box>
     </box>
     \"\"\"
@@ -350,6 +361,17 @@ defmodule Breeze.View do
 
   def focus(term, value) do
     %{term | focused: value, allow_unfocused?: is_nil(value)}
+  end
+
+  @doc """
+  Set the active Breeze theme for the current term.
+  """
+  def put_theme(%{theme: _} = term, theme) do
+    %{
+      term
+      | theme: Breeze.Theme.new(theme, terminal: term.terminal),
+        apply_theme_defaults?: Breeze.Theme.defaults_enabled?(theme)
+    }
   end
 
   @doc """

@@ -21,6 +21,9 @@ defmodule Breeze.Test do
     child_opts = [
       view: view,
       terminal: terminal,
+      theme: Keyword.get(opts, :theme),
+      theme_source: Keyword.get(opts, :theme),
+      apply_theme_defaults?: Breeze.Theme.defaults_enabled?(Keyword.get(opts, :theme)),
       start_opts: Keyword.get(opts, :start_opts, []),
       global_keybindings: Keyword.get(opts, :global_keybindings, [])
     ]
@@ -40,6 +43,7 @@ defmodule Breeze.Test do
       opts
       |> Keyword.put_new(:terminal, session.terminal)
       |> Keyword.put_new(:implicit_state, %{})
+      |> Keyword.put_new(:theme_source, Keyword.get(opts, :theme))
 
     case ChildServer.render_snapshot(session.pid, render_opts) do
       {:ok, _acc, box, _decorations} -> {:ok, box.content}

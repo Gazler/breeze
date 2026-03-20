@@ -3,6 +3,8 @@ defmodule Posting do
   use Breeze.View
   import Breeze.Blocks
 
+  alias Breeze.Theme
+
   @methods ["GET", "POST", "PUT", "PATCH", "DELETE"]
 
   @collection [
@@ -32,6 +34,7 @@ defmodule Posting do
 
     term =
       term
+      |> Breeze.View.put_theme(Theme.system())
       |> focus("url")
       |> assign(
         url: url,
@@ -46,6 +49,7 @@ defmodule Posting do
         url_width: screen_width - 18,
         request_tab: "headers",
         response_tab: "body",
+        theme_mode: :system,
         show_debug: System.get_env("BREEZE_DEBUG") == "1",
         show_help: false
       )
@@ -55,31 +59,34 @@ defmodule Posting do
 
   def render(assigns) do
     assigns =
-      Map.put(
-        assigns,
+      assigns
+      |> Map.put(
         :url_display,
         " " <> String.pad_trailing(assigns.url, max((assigns.url_width || 1) - 1, 0))
       )
+      |> Map.put(:action_style, action_style(assigns.theme_mode))
 
     ~H"""
-    <box style="width-screen height-screen">
-      <box style="grid grid-cols-1 width-screen height-full">
-        <box style="height-3">
+    <box style="width-screen height-screen" class="bg text">
+      <box style="grid grid-cols-1 width-full height-full">
+        <box style="height-3" class="bg-panel">
           <box style="inline width-screen height-1">
-            <box style="bold">Req It Ralph</box>
-            <box> 0.0.1</box>
-            <box style="width-full text-right">{@user_host}</box>
+            <box class="bold text-primary">Req It Ralph</box>
+            <box class="text-muted"> 0.0.1</box>
+            <box class="text-muted"> {@theme_mode}</box>
+            <box class="width-full text-right text-muted">{@user_host}</box>
           </box>
-          <box style="height-1">
+          <box class="height-1 width-full bg-panel">
           </box>
           <box style="grid grid-cols-3 height-1">
             <.dropdown
               id="method"
               selected={@method}
               br-change="method_changed"
-              style="bg-4 text-7 bold focus:inverse width-10"
-              item_style="bg-7 text-0"
-              menu_style="bg-7 text-0"
+              class="focus:inverse width-10"
+              style={@action_style}
+              item_style="bg-panel text"
+              menu_style="bg-panel text"
               menu_top={1}
             >
               <:item :for={method <- @methods} value={method}>{method}</:item>
@@ -95,72 +102,73 @@ defmodule Posting do
             >
               {@url_display}
             </box>
-            <box style="bg-4 text-7 bold width-8">  Send  </box>
+            <box class="width-8" style={@action_style}>{"  Send  "}</box>
           </box>
         </box>
-        <box style="height-1">
+        <box style="height-1 bg-panel">
         </box>
-        <box style="grid grid-cols-2">
+        <box style="grid grid-cols-2 height-full">
           <.list
             id="collection"
             list-scroll-padding={1}
-            style="border-rounded height-full overflow-scroll focus:border-4 width-full"
-            item_style="selected:bg-24 selected:text-0 focus:selected:text-7 focus:selected:bg-4 width-full"
+            class="bg-surface border-rounded height-full overflow-scroll focus:border-accent width-full"
+            item_style="selected:bg-primary selected:text focus:selected:text focus:selected:bg-accent width-full"
           >
             <:item :for={{val, label} <- @collection} value={val}>{label}</:item>
           </.list>
-          <box style="grid grid-cols-1 grid-rows-2">
-            <box style="border-rounded overflow-hidden">
+          <box style="grid grid-cols-1 grid-rows-2 height-full">
+            <box style="border-rounded overflow-hidden" class="bg-surface">
               <box style="grid grid-cols-1 grid-rows-3 height-full">
-                <box style="height-1"> Headers  Body  Query  Auth  Info  Options </box>
+                <box class="height-1 text-primary"> Headers  Body  Query  Auth  Info  Options </box>
                 <.scroll
                   id="request-headers-scroll"
-                  style="height-full overflow-scroll scrollbar-arrows-always"
+                  class="height-full overflow-scroll bg-surface"
+                  style={%{scrollbar: %{arrows: true}}}
                 >
-                  <box style="inline">
-                    <box style="text-4 width-18">Content-Type</box>
+                  <box class="inline width-full">
+                    <box class="text-primary width-18">Content-Type</box>
                     <box>application/json</box>
                   </box>
-                  <box style="inline">
-                    <box style="text-4 width-18">Referer</box>
+                  <box class="inline width-full">
+                    <box class="text-primary width-18">Referer</box>
                     <box>https://example.com/</box>
                   </box>
-                  <box style="inline">
-                    <box style="text-4 width-18">Accept-Encoding</box>
+                  <box class="inline width-full">
+                    <box class="text-primary width-18">Accept-Encoding</box>
                     <box>gzip</box>
                   </box>
-                  <box style="inline">
-                    <box style="text-4 width-18">Cache-Control</box>
+                  <box class="inline width-full">
+                    <box class="text-primary width-18">Cache-Control</box>
                     <box>no-cache</box>
                   </box>
-                  <box style="inline">
-                    <box style="text-4 width-18">X-Test-Header</box>
+                  <box class="inline width-full">
+                    <box class="text-primary width-18">X-Test-Header</box>
                     <box>one</box>
                   </box>
-                  <box style="inline">
-                    <box style="text-4 width-18">X-Test-Header</box>
+                  <box class="inline width-full">
+                    <box class="text-primary width-18">X-Test-Header</box>
                     <box>two</box>
                   </box>
-                  <box style="inline">
-                    <box style="text-4 width-18">X-Test-Header</box>
+                  <box class="inline width-full">
+                    <box class="text-primary width-18">X-Test-Header</box>
                     <box>three</box>
                   </box>
-                  <box style="inline">
-                    <box style="text-4 width-18">X-Test-Header</box>
+                  <box class="inline width-full">
+                    <box class="text-primary width-18">X-Test-Header</box>
                     <box>four</box>
                   </box>
                 </.scroll>
                 <box style="grid grid-cols-3 height-1">
-                  <box style="width-8">Name</box>
-                  <box style="focus:inverse" focusable>{" Value input "}</box>
-                  <box style="bg-7 text-0 bold width-7"> Add </box>
+                  <box class="width-8 text-muted">Name</box>
+                  <box class="focus:inverse" focusable>{" Value input "}</box>
+                  <box class="width-7" style={@action_style}>{" Add "}</box>
                 </box>
               </box>
             </box>
-            <box style="border-rounded overflow-hidden">
+            <box style="border-rounded overflow-hidden" class="bg-surface">
               <box style="inline">
-                <box style="text-4 bold"> Body </box>
-                <box> Headers  Cookies  Trace </box>
+                <box class="text-primary bold"> Body </box>
+                <box class="text-muted"> Headers  Cookies  Trace </box>
               </box>
               <box>{"  1  {"}</box>
               <box>{"  2    \"title\": \"foo\","}</box>
@@ -172,17 +180,19 @@ defmodule Posting do
           </box>
         </box>
         <box style="inline height-1 width-screen">
-          <box style="bg-7 text-0 bold"> ^j </box>
+          <box style={@action_style}>{" ^j "}</box>
           <box> Send  </box>
-          <box style="bg-7 text-0 bold"> ^t </box>
+          <box style={@action_style}>{" ^t "}</box>
           <box> Method  </box>
-          <box style="bg-7 text-0 bold"> Tab </box>
+          <box style={@action_style}>{" Tab "}</box>
           <box> Next  </box>
-          <box style="bg-7 text-0 bold"> F1 </box>
+          <box style={@action_style}>{" F1 "}</box>
           <box> Help  </box>
-          <box style="bg-7 text-0 bold"> F2 </box>
+          <box style={@action_style}>{" F2 "}</box>
           <box> Debug  </box>
-          <box style="bg-7 text-0 bold"> q </box>
+          <box style={@action_style}>{" F3 "}</box>
+          <box> Theme  </box>
+          <box style={@action_style}>{" q "}</box>
           <box> Quit </box>
         </box>
       </box>
@@ -190,37 +200,45 @@ defmodule Posting do
         <:title>Keyboard Shortcuts</:title>
         <box>
         </box>
-        <box style="inline">
-          <box style="bg-7 text-0 bold width-8"> Tab </box>
+        <box class="inline">
+          <box class="width-8" style={@action_style}>{" Tab "}</box>
           <box>Cycle focus within the active surface</box>
         </box>
-        <box style="inline">
-          <box style="bg-7 text-0 bold width-8"> ^t </box>
+        <box class="inline">
+          <box class="width-8" style={@action_style}>{" ^t "}</box>
           <box>Cycle HTTP method</box>
         </box>
-        <box style="inline">
-          <box style="bg-7 text-0 bold width-8"> ←/→ </box>
+        <box class="inline">
+          <box class="width-8" style={@action_style}>{" ←/→ "}</box>
           <box>Switch tabs</box>
         </box>
-        <box style="inline">
-          <box style="bg-7 text-0 bold width-8"> ↑/↓ </box>
+        <box class="inline">
+          <box class="width-8" style={@action_style}>{" ↑/↓ "}</box>
           <box>Navigate list</box>
         </box>
-        <box style="inline">
-          <box style="bg-7 text-0 bold width-8"> ^j </box>
+        <box class="inline">
+          <box class="width-8" style={@action_style}>{" ^j "}</box>
           <box>Send request</box>
         </box>
-        <box style="inline">
-          <box style="bg-7 text-0 bold width-8"> Escape </box>
+        <box class="inline">
+          <box class="width-8" style={@action_style}>{" Escape "}</box>
           <box>Close this dialog</box>
         </box>
-        <box style="inline">
-          <box style="bg-7 text-0 bold width-8"> q </box>
+        <box class="inline">
+          <box class="width-8" style={@action_style}>{" q "}</box>
           <box>Quit</box>
         </box>
-        <box style="inline">
-          <box style="bg-7 text-0 bold width-8"> F2 </box>
+        <box class="inline">
+          <box class="width-8" style={@action_style}>{" F2 "}</box>
           <box>Toggle debug panel</box>
+        </box>
+        <box class="inline">
+          <box class="width-8" style={@action_style}>{" F3 "}</box>
+          <box>Cycle theme</box>
+        </box>
+        <box class="inline">
+          <box class="width-8" style={@action_style}>{" Theme "}</box>
+          <box>{@theme_mode}</box>
         </box>
       </.modal>
       <box :if={@show_debug} style="fixed right-0 bottom-0 width-42 height-24">
@@ -265,13 +283,20 @@ defmodule Posting do
     do: {:noreply, term |> assign(show_help: false) |> focus("url")}
 
   def handle_event(_, %{"key" => "F1"}, %{assigns: %{show_help: true}} = term),
-    do: {:noreply, term}
+    do: {:noreply, term |> assign(show_help: false) |> focus("url")}
 
   def handle_event(_, %{"key" => "F1"}, term),
     do: {:noreply, term |> assign(show_help: true) |> focus("help")}
 
   def handle_event(_, %{"key" => "F2"}, term),
     do: {:noreply, assign(term, show_debug: !term.assigns.show_debug)}
+
+  def handle_event(_, %{"key" => "F3"}, term) do
+    {theme_mode, theme} =
+      next_theme(term.assigns.theme_mode || :solarized_dark)
+
+    {:noreply, term |> Breeze.View.put_theme(theme) |> assign(theme_mode: theme_mode)}
+  end
 
   def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
   def handle_event(_, _, term), do: {:noreply, term}
@@ -288,6 +313,24 @@ defmodule Posting do
   end
 
   def handle_info(_, term), do: {:noreply, term}
+
+  defp next_theme(:system16), do: {:system, Theme.system()}
+  defp next_theme(:system), do: {:nebula, Theme.builtin(:nebula)}
+  defp next_theme(:nebula), do: {:catppuccin, Theme.builtin(:catppuccin)}
+  defp next_theme(:catppuccin), do: {:dracula, Theme.builtin(:dracula)}
+  defp next_theme(:dracula), do: {:gruvbox, Theme.builtin(:gruvbox)}
+  defp next_theme(:gruvbox), do: {:nord, Theme.builtin(:nord)}
+  defp next_theme(:nord), do: {:solarized_light, Theme.builtin(:solarized, :light)}
+  defp next_theme(:solarized_light), do: {:solarized_dark, Theme.builtin(:solarized, :dark)}
+  defp next_theme(_theme_mode), do: {:system16, Theme.system16()}
+
+  defp action_style(theme_mode) when theme_mode in [:solarized_light, :solarized_dark] do
+    %{background_color: :primary, foreground_color: :background, bold: true}
+  end
+
+  defp action_style(_theme_mode) do
+    %{background_color: :primary, foreground_color: :text, bold: true}
+  end
 
   defp current_user_host do
     case Application.get_env(:breeze, :example_user_host) do
@@ -311,6 +354,7 @@ end
 Breeze.Example.run(
   view: Posting,
   reload: true,
+  theme: Breeze.Theme.system(),
   hide_cursor: true,
   global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
 )

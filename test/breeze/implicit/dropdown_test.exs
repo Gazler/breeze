@@ -18,7 +18,7 @@ defmodule Breeze.Implicit.DropdownTest do
           id="method"
           selected={@method}
           br-change="method_changed"
-          style="bg-4 text-7 bold focus:inverse width-10"
+          style="bg-primary text bold focus:inverse width-10"
           menu_width={12}
         >
           <:item :for={method <- @methods} value={method}>{" #{method}"}</:item>
@@ -56,7 +56,7 @@ defmodule Breeze.Implicit.DropdownTest do
             id="method"
             selected={@method}
             br-change="method_changed"
-            style="bg-4 text-7 bold focus:inverse width-10"
+            style="bg-primary text bold focus:inverse width-10"
             menu_width={12}
           >
             <:item :for={method <- @methods} value={method}>{" #{method}"}</:item>
@@ -139,7 +139,7 @@ defmodule Breeze.Implicit.DropdownTest do
       menu_top: 1
     }
 
-    assert [selected: true, style: "absolute left-0 top-1 bg-0 text-7 width-12 layer-21"] =
+    assert [selected: true, style: "absolute left-0 top-1 bg-panel text width-12 layer-21"] =
              Dropdown.handle_modifiers(
                :child,
                [{:"dropdown-item", true}, {:"dropdown-item-index", 0}, {:value, "POST"}],

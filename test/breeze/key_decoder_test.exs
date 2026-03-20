@@ -15,4 +15,9 @@ defmodule Breeze.KeyDecoderTest do
     assert Breeze.KeyDecoder.decode("\e") == "Escape"
     assert Breeze.KeyDecoder.decode("\r") == "Enter"
   end
+
+  test "normalizes common ctrl-backspace sequences to word-delete" do
+    assert Breeze.KeyDecoder.decode("\e[8;5u") == "\x17"
+    assert Breeze.KeyDecoder.decode("\e[127;5u") == "\x17"
+  end
 end
