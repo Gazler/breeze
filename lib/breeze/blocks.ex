@@ -456,7 +456,7 @@ defmodule Breeze.Blocks do
               class_override(assigns, :frame_class, :frame_style)
             ),
             merge_class(
-              "absolute left-0 top-0 layer-51 width-#{width} height-#{height} border-rounded border-stroke bg-panel",
+              "absolute left-0 top-0 layer-51 width-#{width} height-#{height} border-rounded border-stroke bg",
               class_override(assigns)
             )
           }
@@ -468,7 +468,7 @@ defmodule Breeze.Blocks do
               class_override(assigns, :frame_class, :frame_style)
             ),
             merge_class(
-              "absolute left-0 right-0 top-0 bottom-0 layer-51 width-full height-full border-rounded border-stroke bg-panel",
+              "absolute left-0 right-0 top-0 bottom-0 layer-51 width-full height-full border-rounded border-stroke bg",
               class_override(assigns)
             )
           }
@@ -481,7 +481,7 @@ defmodule Breeze.Blocks do
               class_override(assigns, :frame_class, :frame_style)
             ),
             merge_class(
-              "absolute left-0 right-0 top-0 bottom-0 layer-51 width-full height-full border-rounded border-stroke bg-panel",
+              "absolute left-0 right-0 top-0 bottom-0 layer-51 width-full height-full border-rounded border-stroke bg",
               class_override(assigns)
             )
           }

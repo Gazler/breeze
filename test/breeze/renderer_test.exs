@@ -350,7 +350,7 @@ defmodule Breeze.RendererTest do
 
     test "forwards inline styles through block components" do
       assert Renderer.render_to_string(PanelStyleExample, %{}) ==
-               "\e[48;5;0;38;5;8m╭───────╮\e[0m\n\e[48;5;0;38;5;8m│\e[0m\e[48;5;0;38;5;3mHello  \e[0m\e[48;5;0;38;5;8m│\e[0m\n\e[48;5;0;38;5;8m╰───────╯\e[0m"
+               "\e[48;5;0;38;5;7m╭───────╮\e[0m\n\e[48;5;0;38;5;7m│\e[0m\e[48;5;0;38;5;3mHello  \e[0m\e[48;5;0;38;5;7m│\e[0m\n\e[48;5;0;38;5;7m╰───────╯\e[0m"
     end
 
     test "resolves semantic tokens against custom themes" do
@@ -365,7 +365,7 @@ defmodule Breeze.RendererTest do
 
     test "theme: true enables default semantic text, background, and border colors" do
       assert Renderer.render_to_string(ThemeDefaultsExample, %{}, theme: true) ==
-               "\e[48;5;0;38;5;8m┌─────┐\e[0m\n\e[48;5;0;38;5;8m│\e[0m\e[48;5;0;38;5;7mHello\e[0m\e[48;5;0;38;5;8m│\e[0m\n\e[48;5;0;38;5;8m└─────┘\e[0m"
+               "\e[48;5;0;38;5;7m┌─────┐\e[0m\n\e[48;5;0;38;5;7m│\e[0m\e[48;5;0;38;5;7mHello\e[0m\e[48;5;0;38;5;7m│\e[0m\n\e[48;5;0;38;5;7m└─────┘\e[0m"
     end
 
     test "theme defaults do not override parent backgrounds on nested content" do
