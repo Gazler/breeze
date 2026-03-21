@@ -109,6 +109,8 @@ defmodule Breeze.Implicit.Input do
     end
   end
 
+  def handle_event(_, _, state), do: {:noreply, state}
+
   def handle_modifiers(:root, _flags, state), do: placeholder_modifiers(state)
 
   def handle_modifiers(:child, _flags, state), do: placeholder_modifiers(state)

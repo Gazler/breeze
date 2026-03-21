@@ -73,13 +73,25 @@ defmodule Breeze.Server do
     animation_timer: nil,
     next_tick_at: nil,
     global_keybindings: [],
+    inspector: false,
+    inspector_visible?: false,
+    inspector_selected_id: nil,
+    inspector_hovered_id: nil,
+    inspector_panel_position: :bottom,
     debug_subscribers: MapSet.new(),
+    inspector_subscribers: MapSet.new(),
     debug_stats: %{},
     debug_push_timer: nil,
     debug_push_interval_ms: 250,
     busy_delay_ms: 120,
     frame_delay_ms: 80,
-    rendered_elements: %{}
+    rendered_elements: %{},
+    rendered_viewports: %{},
+    rendered_mouse_targets: %{},
+    rendered_flags: %{},
+    rendered_focus_meta: %{},
+    rendered_implicit_state: %{},
+    rendered_implicit_meta: %{}
   ]
 
   @type option ::
@@ -90,6 +102,7 @@ defmodule Breeze.Server do
           | {:reload, boolean() | keyword()}
           | {:theme, Breeze.Theme.t() | map() | keyword() | atom()}
           | {:global_keybindings, list()}
+          | {:inspector, boolean() | keyword()}
           | {:debug_push_interval_ms, pos_integer()}
           | {:busy_delay_ms, non_neg_integer()}
           | {:frame_delay_ms, pos_integer()}
@@ -103,6 +116,7 @@ defmodule Breeze.Server do
     * `:hide_cursor` - hide the cursor on start. Defaults to `false`
     * `:mouse` - enable mouse tracking. Defaults to `false`. Pass `true` for click mode or keyword options for `Termite.Screen.enable_mouse/2`
     * `:global_keybindings` - app-wide keybindings checked before focused event handling
+    * `:inspector` - opt-in inspector support. Defaults to `false`
 
   """
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -121,9 +135,19 @@ defmodule Breeze.Server do
     GenServer.call(pid, :stats)
   end
 
+  @spec inspector_snapshot(pid()) :: map()
+  def inspector_snapshot(pid) do
+    GenServer.call(pid, :inspector_snapshot)
+  end
+
   @spec subscribe_debug(pid(), pid()) :: :ok
   def subscribe_debug(pid, subscriber) do
     GenServer.cast(pid, {:subscribe_debug, subscriber})
+  end
+
+  @spec subscribe_inspector(pid(), pid()) :: :ok
+  def subscribe_inspector(pid, subscriber) do
+    GenServer.cast(pid, {:subscribe_inspector, subscriber})
   end
 
   @impl true
@@ -177,6 +201,7 @@ defmodule Breeze.Server do
       theme: theme,
       apply_theme_defaults?: apply_theme_defaults?,
       global_keybindings: Keyword.get(opts, :global_keybindings, []),
+      inspector: Keyword.get(opts, :inspector, false),
       debug_push_interval_ms: debug_push_interval_ms,
       busy_delay_ms: Keyword.get(opts, :busy_delay_ms, 120),
       frame_delay_ms: frame_delay_ms,
@@ -198,6 +223,10 @@ defmodule Breeze.Server do
     {:reply, debug_stats_snapshot(state), state}
   end
 
+  def handle_call(:inspector_snapshot, _from, state) do
+    {:reply, Breeze.Inspector.snapshot(state), state}
+  end
+
   @impl true
   def handle_cast({:subscribe_debug, subscriber}, state) do
     if is_pid(subscriber), do: Process.monitor(subscriber)
@@ -212,6 +241,13 @@ defmodule Breeze.Server do
       end
 
     {:noreply, state}
+  end
+
+  def handle_cast({:subscribe_inspector, subscriber}, state) do
+    if is_pid(subscriber), do: Process.monitor(subscriber)
+
+    state = Map.update!(state, :inspector_subscribers, &MapSet.put(&1, subscriber))
+    {:noreply, push_inspector_snapshot_now(state)}
   end
 
   @impl true
@@ -397,6 +433,14 @@ defmodule Breeze.Server do
                | debug_subscribers: MapSet.delete(state.debug_subscribers, elem(message, 3))
              }}
 
+          MapSet.member?(state.inspector_subscribers, elem(message, 3)) ->
+            {:noreply,
+             %{
+               state
+               | inspector_subscribers:
+                   MapSet.delete(state.inspector_subscribers, elem(message, 3))
+             }}
+
           true ->
             children =
               state.children
@@ -452,27 +496,57 @@ defmodule Breeze.Server do
   end
 
   defp handle_decoded_sync_input({:mouse, event}, state) do
-    if crashed?(state), do: {:noreply, state}, else: handle_mouse(event, state)
+    cond do
+      crashed?(state) ->
+        {:noreply, state}
+
+      inspector_mouse_active?(state) ->
+        {:noreply,
+         state
+         |> touch_interaction()
+         |> maybe_select_inspector_target(event)
+         |> maybe_render_base(:inspector_select)}
+
+      true ->
+        handle_mouse(event, state)
+    end
   end
 
   defp handle_decoded_sync_input({:key, key}, state) do
     if crashed?(state) do
       {:noreply, dispatch_crash_input({:key, key}, touch_interaction(state))}
     else
-      case key do
-        key when key in ["\t", "ShiftTab"] ->
-          state
-          |> touch_interaction()
-          |> safe_apply_input_reply(fn state ->
-            Breeze.ChildServer.dispatch_input(state.view_pid, key)
-          end)
+      cond do
+        inspector_toggle_key?(key, state) ->
+          {:noreply,
+           state
+           |> touch_interaction()
+           |> Breeze.Inspector.toggle()
+           |> maybe_render_base(:inspector_toggle)}
 
-        key ->
-          state
-          |> touch_interaction()
-          |> safe_apply_input_reply(fn state ->
-            dispatch_input_hierarchy(state, key)
-          end)
+        inspector_move_key?(key, state) ->
+          {:noreply,
+           state
+           |> touch_interaction()
+           |> Breeze.Inspector.toggle_position()
+           |> maybe_render_base(:inspector_move)}
+
+        true ->
+          case key do
+            key when key in ["\t", "ShiftTab"] ->
+              state
+              |> touch_interaction()
+              |> safe_apply_input_reply(fn state ->
+                Breeze.ChildServer.dispatch_input(state.view_pid, key)
+              end)
+
+            key ->
+              state
+              |> touch_interaction()
+              |> safe_apply_input_reply(fn state ->
+                dispatch_input_hierarchy(state, key)
+              end)
+          end
       end
     end
   end
@@ -497,7 +571,9 @@ defmodule Breeze.Server do
   defp sync_input_message?({:key, _key}, %{crash: crash}) when not is_nil(crash), do: true
 
   defp sync_input_message?({:key, key}, state) do
-    stop_global_key?(key, state) or
+    inspector_toggle_key?(key, state) or
+      inspector_move_key?(key, state) or
+      stop_global_key?(key, state) or
       (is_nil(state.pending_ref) and
          (key in ["\t", "ShiftTab"] or sync_input?(state, key)))
   end
@@ -544,6 +620,29 @@ defmodule Breeze.Server do
 
   defp touch_interaction(state) do
     %{state | last_interaction_at: System.monotonic_time(:millisecond)}
+  end
+
+  defp inspector_mouse_active?(state) do
+    Breeze.Inspector.picks_mouse?(state)
+  end
+
+  defp maybe_select_inspector_target(state, %{button: :left, action: :press} = event) do
+    Breeze.Inspector.select_at(state, event)
+  end
+
+  defp maybe_select_inspector_target(state, %{action: :move} = event) do
+    Breeze.Inspector.hover_at(state, event)
+  end
+
+  defp maybe_select_inspector_target(state, _event), do: state
+
+  defp inspector_toggle_key?(key, state) do
+    Breeze.Inspector.enabled?(state) and key == Breeze.Inspector.toggle_key(state)
+  end
+
+  defp inspector_move_key?(key, state) do
+    Breeze.Inspector.enabled?(state) and state.inspector_visible? and
+      key == Breeze.Inspector.move_key(state)
   end
 
   defp sync_input?(state, key) do
@@ -638,6 +737,7 @@ defmodule Breeze.Server do
               |> increment_debug_stat(:render_base_count)
               |> Map.put(:base_output, base_output)
               |> Map.put(:rendered_elements, viewports_from_acc(acc))
+              |> merge_inspector_render_data(acc)
               |> Map.put(:rendered_boxes, acc.boxes)
               |> Map.put(:decorations, decorations)
               |> Map.put(:focused, focused)
@@ -946,6 +1046,7 @@ defmodule Breeze.Server do
     |> put_debug_stat(:last_frame_us, System.monotonic_time(:microsecond) - started_at)
     |> put_debug_stat(:last_frame_bytes, byte_size(frame_payload))
     |> put_debug_stat(:overlay_count, length(overlays))
+    |> push_inspector_snapshot_now()
   end
 
   defp normalize_frame_lines(output, screen_height) do
@@ -1263,10 +1364,13 @@ defmodule Breeze.Server do
   defp remaining_busy_delay(_state), do: nil
 
   defp terminal_overlays(decorations, state) do
-    decorations
-    |> Enum.filter(&decoration_active?(&1, state))
-    |> Enum.flat_map(&Map.get(&1, :current_overlays, []))
-    |> Enum.reject(&is_nil/1)
+    decoration_overlays =
+      decorations
+      |> Enum.filter(&decoration_active?(&1, state))
+      |> Enum.flat_map(&Map.get(&1, :current_overlays, []))
+      |> Enum.reject(&is_nil/1)
+
+    decoration_overlays ++ Breeze.Inspector.overlays(state)
   end
 
   defp normalize_animation_result({:ok, %BackBreeze.Box{} = box, opts}) when is_list(opts) do
@@ -1837,11 +1941,82 @@ defmodule Breeze.Server do
 
   defp child_start_opts(start_opts, _view, _state), do: start_opts
 
+  defp merge_inspector_render_data(%{inspector: false} = state, _acc), do: state
+
+  defp merge_inspector_render_data(state, acc) do
+    metadata = safe_root_metadata(state)
+    %{viewports: viewports, bounds: bounds, flags: flags} = inspector_nodes(acc)
+
+    state
+    |> Map.put(:rendered_viewports, viewports)
+    |> Map.put(:rendered_mouse_targets, bounds)
+    |> Map.put(:rendered_flags, flags)
+    |> Map.put(:rendered_focus_meta, Map.get(metadata, :focus_meta, %{}))
+    |> Map.put(:rendered_implicit_state, Map.get(metadata, :implicit_state, %{}))
+    |> Map.put(:rendered_implicit_meta, Map.get(metadata, :implicit_meta, %{}))
+    |> Breeze.Inspector.sync_selected_id()
+  end
+
   defp debug_stats_snapshot(state) do
     state.debug_stats
     |> Map.put(:focused, state.focused)
     |> Map.put(:pending?, not is_nil(state.pending_ref))
     |> Map.put(:screen, state.terminal.size)
+  end
+
+  defp safe_root_metadata(state) do
+    case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
+      {:ok, metadata} -> metadata
+      {:crash, _crash} -> %{}
+    end
+  end
+
+  defp inspector_nodes(acc) do
+    acc.elements
+    |> Enum.sort()
+    |> Enum.zip(acc.dimensions)
+    |> Enum.reduce(%{viewports: %{}, bounds: %{}, flags: %{}}, fn {{idx, flags}, dims}, acc ->
+      key = inspector_node_key(idx, flags)
+      viewport = Breeze.Viewport.from_dimensions(dims)
+
+      width = max((viewport.width || 0) - 1, 0)
+      height = max(viewport.height - 1, 0)
+      normalized_flags = Keyword.put(flags, :__inspector_idx__, idx)
+
+      bounds = %{
+        left: viewport.left,
+        top: viewport.top,
+        right: viewport.left + width,
+        bottom: viewport.top + height
+      }
+
+      %{
+        viewports: Map.put(acc.viewports, key, viewport),
+        bounds: Map.put(acc.bounds, key, bounds),
+        flags: Map.put(acc.flags, key, normalized_flags)
+      }
+    end)
+  end
+
+  defp inspector_node_key(idx, flags) do
+    case Keyword.get(flags, :id) do
+      id when is_binary(id) -> id
+      _ -> "__inspector__" <> Integer.to_string(idx)
+    end
+  end
+
+  defp push_inspector_snapshot_now(%{inspector: false} = state), do: state
+
+  defp push_inspector_snapshot_now(%{inspector_subscribers: subscribers} = state) do
+    if MapSet.size(subscribers) > 0 do
+      snapshot = Breeze.Inspector.snapshot(state)
+
+      Enum.each(subscribers, fn subscriber ->
+        if is_pid(subscriber), do: send(subscriber, {:inspector_snapshot, snapshot})
+      end)
+    end
+
+    state
   end
 
   defp begin_render_tracking do

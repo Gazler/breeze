@@ -34,6 +34,8 @@ defmodule SSHPostingEntrypoint do
       start_opts: [username: session.username],
       terminal_opts: Termite.SSH.Session.terminal_opts(session),
       hide_cursor: true,
+      mouse: [mode: :motion],
+      inspector: true,
       global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
     )
   end

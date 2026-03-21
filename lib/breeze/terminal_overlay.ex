@@ -21,9 +21,14 @@ defmodule Breeze.TerminalOverlay do
 
   def render_overlay(%{visible?: false}), do: ""
 
-  def render_overlay(%{x: x, y: y, content: content}) when is_binary(content) do
-    position = cursor_position_code(x, y)
-    position <> content <> position
+  def render_overlay(%{x: x, y: y, content: content} = overlay) when is_binary(content) do
+    render_content_overlay(%{
+      x: x,
+      y: y,
+      content: content,
+      clear_line: Map.get(overlay, :clear_line, false),
+      no_wrap: Map.get(overlay, :no_wrap, false)
+    })
   end
 
   def render_overlay(%{x: x, y: y, char: char} = overlay) do
@@ -69,6 +74,20 @@ defmodule Breeze.TerminalOverlay do
 
   defp maybe_put_background(style, nil), do: style
   defp maybe_put_background(style, color), do: Termite.Style.background(style, color)
+
+  defp render_content_overlay(%{
+         x: x,
+         y: y,
+         content: content,
+         clear_line: clear_line?,
+         no_wrap: no_wrap?
+       }) do
+    position = cursor_position_code(x, y)
+    clear = if clear_line?, do: "\e[2K", else: ""
+    wrap_off = if no_wrap?, do: "\e[?7l", else: ""
+    wrap_on = if no_wrap?, do: "\e[?7h", else: ""
+    position <> wrap_off <> clear <> content <> wrap_on <> position
+  end
 
   defp cursor_position_code(x, y), do: "\e[#{y + 1};#{x + 1}H"
 end

@@ -172,6 +172,10 @@ defmodule Posting do
             <box> Debug  </box>
             <box class="bg-primary text-bg bold">{" F3 "}</box>
             <box> Theme  </box>
+            <box class="bg-primary text-bg bold">{" F4 "}</box>
+            <box> Inspect  </box>
+            <box class="bg-primary text-bg bold">{" PgUp "}</box>
+            <box> Inspect Dock  </box>
             <box class="bg-primary text-bg bold">{" q "}</box>
             <box> Quit </box>
           </box>
@@ -216,6 +220,14 @@ defmodule Posting do
         <box class="inline">
           <box class="width-8 bg-primary text-bg bold">{" F3 "}</box>
           <box>Cycle theme</box>
+        </box>
+        <box class="inline">
+          <box class="width-8 bg-primary text-bg bold">{" F4 "}</box>
+          <box>Toggle inspector, then click an element to inspect it</box>
+        </box>
+        <box class="inline">
+          <box class="width-8 bg-primary text-bg bold">{" PgUp "}</box>
+          <box>Move inspector between bottom and top</box>
         </box>
         <box class="inline">
           <box class="width-8 bg-primary text-bg bold">{" Theme "}</box>
@@ -328,5 +340,7 @@ Breeze.Example.run(
   reload: true,
   theme: Breeze.Theme.builtin(:gruvbox),
   hide_cursor: true,
+  mouse: [mode: :motion],
+  inspector: true,
   global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
 )

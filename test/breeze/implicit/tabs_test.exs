@@ -64,7 +64,11 @@ defmodule Breeze.Implicit.TabsTest do
           "shortcuts",
           "advanced"
         ],
-        widths: Enum.map(~w(Overview Requests Responses Headers Cookies Timeline Inspector Settings Shortcuts Advanced), &(String.length(&1) + 2)),
+        widths:
+          Enum.map(
+            ~w(Overview Requests Responses Headers Cookies Timeline Inspector Settings Shortcuts Advanced),
+            &(String.length(&1) + 2)
+          ),
         selected: "overview",
         selected_index: 0,
         offset_x: 0,

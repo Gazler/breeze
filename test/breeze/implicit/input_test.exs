@@ -109,9 +109,7 @@ defmodule Breeze.Implicit.InputTest do
     def render(assigns) do
       ~H"""
       <box style="width-20">
-        <.input id="url" input-value={@url} br-change="url_changed" style="width-full">
-          {@url}
-        </.input>
+        <.input id="url" input-value={@url} br-change="url_changed" style="width-full">{@url}</.input>
       </box>
       """
     end

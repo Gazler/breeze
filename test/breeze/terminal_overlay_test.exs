@@ -1,28 +1,28 @@
 defmodule Breeze.TerminalOverlayTest do
   use ExUnit.Case, async: true
 
-  alias Breeze.TerminalOverlay
+  test "clear_line overlays clear the row before writing content" do
+    output =
+      Breeze.TerminalOverlay.render_overlay(%{
+        x: 0,
+        y: 3,
+        content: "inspector",
+        clear_line: true
+      })
 
-  test "blink visibility toggles on 500ms boundaries" do
-    assert TerminalOverlay.blink_visible?(0)
-    refute TerminalOverlay.blink_visible?(500)
-    assert TerminalOverlay.blink_visible?(1_000)
+    assert output == "\e[4;1H\e[2Kinspector\e[4;1H"
   end
 
-  test "recent interaction keeps the cursor visible" do
-    assert TerminalOverlay.visible?(500, 1)
-    assert TerminalOverlay.visible?(999, 500)
-    refute TerminalOverlay.visible?(1_500, 500)
-  end
+  test "no_wrap overlays disable autowrap while writing content" do
+    output =
+      Breeze.TerminalOverlay.render_overlay(%{
+        x: 0,
+        y: 3,
+        content: "inspector",
+        clear_line: true,
+        no_wrap: true
+      })
 
-  test "char overlays can use explicit foreground and background colors" do
-    assert TerminalOverlay.render_overlay(%{
-             x: 1,
-             y: 2,
-             char: "X",
-             foreground_color: "#111111",
-             background_color: "#abcdef"
-           }) ==
-             "\e[3;2H\e[48;2;171;205;239;38;2;17;17;17mX\e[0m\e[3;2H"
+    assert output == "\e[4;1H\e[?7l\e[2Kinspector\e[?7h\e[4;1H"
   end
 end

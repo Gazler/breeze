@@ -256,7 +256,9 @@ defmodule RouterExample do
       <box>Status is remounted when revisited</box>
       <box>Metrics uses persistence: :preload and is already ticking before first visit</box>
       <box>Logs uses persistence: :preload and captures Logger output in the background</box>
-      <box>Inside settings: a -> overview, b -> audit. Press q to quit.</box>
+      <box>
+        Inside settings: a -> overview, b -> audit. F4 toggles inspector, PgUp moves it, q quits.
+      </box>
       <box style="height-1">
       </box>
       <.router routes={@router} id="main"/>
@@ -349,6 +351,8 @@ Breeze.Example.run(
   [
     view: RouterExample,
     hide_cursor: true,
+    mouse: [mode: :motion],
+    inspector: true,
     global_keybindings: global_keybindings
   ],
   keep_alive: :infinity

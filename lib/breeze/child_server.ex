@@ -23,6 +23,10 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, {:input, input})
   end
 
+  def set_focus(pid, focused) do
+    GenServer.call(pid, {:set_focus, focused})
+  end
+
   def dispatch_event(pid, change, event) do
     GenServer.call(pid, {:event, change, event})
   end
@@ -78,7 +82,10 @@ defmodule Breeze.ChildServer do
        view: term.view,
        theme: term.theme,
        apply_theme_defaults?: term.apply_theme_defaults?,
-       focused_implicit_id: focused_implicit_id(term, term.focused)
+       focused_implicit_id: focused_implicit_id(term, term.focused),
+       focus_meta: term.focus_meta,
+       implicit_state: term.implicit_state,
+       implicit_meta: term.implicit_meta
      }, term}
   end
 
@@ -100,6 +107,16 @@ defmodule Breeze.ChildServer do
   def handle_call({:input, input}, _from, term) do
     touched_term = touch_interaction(term)
     reply_from_input_result(process_input(input, touched_term), touched_term)
+  end
+
+  def handle_call({:set_focus, focused}, _from, term) do
+    next_term =
+      term
+      |> Map.put(:focused, focused)
+      |> Map.put(:allow_unfocused?, is_nil(focused))
+      |> then(&apply_focus_transitions(term, &1))
+
+    {:reply, {:noreply, next_term.focused, next_term != term}, next_term}
   end
 
   def handle_call({:info, message, terminal}, _from, term) do

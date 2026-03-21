@@ -93,6 +93,8 @@ defmodule Breeze.Renderer do
          acc,
          opts
        ) do
+    acc = %{acc | flags: Keyword.put(acc.flags, :style_input, style)}
+    flags = Keyword.put(flags, :style_input, style)
     build_tree(rest, box, children, RenderStyle.put_style(style_state, style), flags, acc, opts)
   end
 
@@ -105,6 +107,8 @@ defmodule Breeze.Renderer do
          acc,
          opts
        ) do
+    acc = %{acc | flags: Keyword.put(acc.flags, :class, class)}
+    flags = Keyword.put(flags, :class, class)
     build_tree(rest, box, children, RenderStyle.put_class(style_state, class), flags, acc, opts)
   end
 
