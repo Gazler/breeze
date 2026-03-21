@@ -273,6 +273,7 @@ defmodule Breeze.Blocks do
       <box class="inline width-full height-1 overflow-hidden" tab-bar="true">
         <box
           :for={t <- @tab}
+          id={"#{@id}-tab-#{t.value}"}
           value={t.value}
           tab-label={t.label}
           class={@item_class}

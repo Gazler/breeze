@@ -88,78 +88,80 @@ defmodule Posting do
           <box class="width-8 bg-primary text-bg bold">{"  Send "}</box>
           <box style="bg-primary text-bg width-1">▐</box>
         </box>
-        <box style="grid grid-cols-2 height-full">
-          <.list
-            id="collection"
-            list-scroll-padding={1}
-            class="bg border-rounded height-full overflow-scroll focus:border-accent width-full"
-            item_style="selected:bg-primary selected:text focus:selected:text focus:selected:bg-accent width-full"
-          >
-            <:item :for={{val, label} <- @collection} value={val}>{label}</:item>
-          </.list>
-          <box style="grid grid-cols-1 grid-rows-2 height-full">
-            <box style="border-rounded overflow-hidden" class="bg">
-              <box style="grid grid-cols-1 grid-rows-3 height-full">
-                <box class="height-1 text-primary"> Headers  Body  Query  Auth  Info  Options </box>
-                <.scroll
-                  id="request-headers-scroll"
-                  class="height-full overflow-scroll bg"
-                  style={%{scrollbar: %{arrows: true}}}
-                >
-                  <box class="inline width-full">
-                    <box class="text-primary width-18">Content-Type</box>
-                    <box>application/json</box>
+        <box style="grid grid-cols-1 grid-rows-2 height-full">
+          <box style="grid grid-cols-2 height-full">
+            <.list
+              id="collection"
+              list-scroll-padding={1}
+              class="bg border-rounded height-full overflow-scroll focus:border-accent width-full"
+              item_style="selected:bg-primary selected:text focus:selected:text focus:selected:bg-accent width-full"
+            >
+              <:item :for={{val, label} <- @collection} value={val}>{label}</:item>
+            </.list>
+            <box style="grid grid-cols-1 grid-rows-2 height-full">
+              <box style="border-rounded overflow-hidden" class="bg">
+                <box style="grid grid-cols-1 grid-rows-3 height-full">
+                  <box class="height-1 text-primary"> Headers  Body  Query  Auth  Info  Options </box>
+                  <.scroll
+                    id="request-headers-scroll"
+                    class="height-full overflow-scroll bg"
+                    style={%{scrollbar: %{arrows: true}}}
+                  >
+                    <box class="inline width-full">
+                      <box class="text-primary width-18">Content-Type</box>
+                      <box>application/json</box>
+                    </box>
+                    <box class="inline width-full">
+                      <box class="text-primary width-18">Referer</box>
+                      <box>https://example.com/</box>
+                    </box>
+                    <box class="inline width-full">
+                      <box class="text-primary width-18">Accept-Encoding</box>
+                      <box>gzip</box>
+                    </box>
+                    <box class="inline width-full">
+                      <box class="text-primary width-18">Cache-Control</box>
+                      <box>no-cache</box>
+                    </box>
+                    <box class="inline width-full">
+                      <box class="text-primary width-18">X-Test-Header</box>
+                      <box>one</box>
+                    </box>
+                    <box class="inline width-full">
+                      <box class="text-primary width-18">X-Test-Header</box>
+                      <box>two</box>
+                    </box>
+                    <box class="inline width-full">
+                      <box class="text-primary width-18">X-Test-Header</box>
+                      <box>three</box>
+                    </box>
+                    <box class="inline width-full">
+                      <box class="text-primary width-18">X-Test-Header</box>
+                      <box>four</box>
+                    </box>
+                  </.scroll>
+                  <box style="grid grid-cols-3 height-1">
+                    <box class="width-8 text-muted">Name</box>
+                    <box class="focus:inverse" focusable>{" Value input "}</box>
+                    <box class="width-7 bg-primary text-bg bold">{" Add "}</box>
                   </box>
-                  <box class="inline width-full">
-                    <box class="text-primary width-18">Referer</box>
-                    <box>https://example.com/</box>
-                  </box>
-                  <box class="inline width-full">
-                    <box class="text-primary width-18">Accept-Encoding</box>
-                    <box>gzip</box>
-                  </box>
-                  <box class="inline width-full">
-                    <box class="text-primary width-18">Cache-Control</box>
-                    <box>no-cache</box>
-                  </box>
-                  <box class="inline width-full">
-                    <box class="text-primary width-18">X-Test-Header</box>
-                    <box>one</box>
-                  </box>
-                  <box class="inline width-full">
-                    <box class="text-primary width-18">X-Test-Header</box>
-                    <box>two</box>
-                  </box>
-                  <box class="inline width-full">
-                    <box class="text-primary width-18">X-Test-Header</box>
-                    <box>three</box>
-                  </box>
-                  <box class="inline width-full">
-                    <box class="text-primary width-18">X-Test-Header</box>
-                    <box>four</box>
-                  </box>
-                </.scroll>
-                <box style="grid grid-cols-3 height-1">
-                  <box class="width-8 text-muted">Name</box>
-                  <box class="focus:inverse" focusable>{" Value input "}</box>
-                  <box class="width-7 bg-primary text-bg bold">{" Add "}</box>
                 </box>
               </box>
-            </box>
-            <box style="border-rounded overflow-hidden" class="bg">
-              <box style="inline">
-                <box class="text-primary bold"> Body </box>
-                <box class="text-muted"> Headers  Cookies  Trace </box>
+              <box style="border-rounded overflow-hidden" class="bg">
+                <box style="inline">
+                  <box class="text-primary bold"> Body </box>
+                  <box class="text-muted"> Headers  Cookies  Trace </box>
+                </box>
+                <box>{"  1  {"}</box>
+                <box>{"  2    \"title\": \"foo\","}</box>
+                <box>{"  3    \"body\": \"bar\","}</box>
+                <box>{"  4    \"userId\": 1,"}</box>
+                <box>{"  5    \"id\": 101"}</box>
+                <box>{"  6  }"}</box>
               </box>
-              <box>{"  1  {"}</box>
-              <box>{"  2    \"title\": \"foo\","}</box>
-              <box>{"  3    \"body\": \"bar\","}</box>
-              <box>{"  4    \"userId\": 1,"}</box>
-              <box>{"  5    \"id\": 101"}</box>
-              <box>{"  6  }"}</box>
             </box>
           </box>
-          <box style="inline height-1 width-screen bg-panel">
+          <box style="inline height-1 width-full bg-panel overflow-hidden">
             <box class="bg-primary text-bg bold">{" ^j "}</box>
             <box> Send  </box>
             <box class="bg-primary text-bg bold">{" ^t "}</box>

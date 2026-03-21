@@ -42,7 +42,8 @@ defmodule Breeze.Implicit.Tabs do
       selected_index: selected_index,
       offset_x: offset_x,
       viewport_width: viewport_width,
-      delegate_target: Map.get(root_attrs, :"tab-delegate")
+      delegate_target: Map.get(root_attrs, :"tab-delegate"),
+      target_prefix: root_attrs |> Map.get(:id, "") |> Kernel.<>("-tab-")
     }
   end
 
@@ -72,6 +73,19 @@ defmodule Breeze.Implicit.Tabs do
       when key in ["ArrowDown", "ArrowUp", "j", "k", "PageDown", "PageUp", "Home", "End"] and
              is_binary(target) do
     {{:delegate, target}, state}
+  end
+
+  def handle_event(_, %{"mouse" => %{button: :left, action: :press}, "target" => target}, state)
+      when is_binary(target) do
+    case clicked_value(state, target) do
+      nil ->
+        {:noreply, state}
+
+      value ->
+        index = Enum.find_index(state.values, &(&1 == value)) || state.selected_index
+        next_state = %{state | selected: value, selected_index: index}
+        emit_change(%{next_state | offset_x: compute_offset_x(next_state)})
+    end
   end
 
   def handle_event(_, _, state), do: {:noreply, state}
@@ -130,5 +144,16 @@ defmodule Breeze.Implicit.Tabs do
 
   defp emit_change(state) do
     {{:change, %{value: state.selected, index: state.selected_index}}, state}
+  end
+
+  defp clicked_value(%{target_prefix: prefix, values: values}, target) do
+    with true <- prefix != "-tab-",
+         value when is_binary(value) <- String.trim_leading(target, prefix),
+         true <- value != target,
+         true <- value in values do
+      value
+    else
+      _ -> nil
+    end
   end
 end

@@ -318,12 +318,14 @@ defmodule Breeze.Renderer do
 
     final_box = %{Box.new(opts) | children: children, content: content}
 
-    acc =
-      if root_id do
-        %{acc | focusables: focusables, boxes: Map.put(acc.boxes, root_id, final_box)}
-      else
-        %{acc | focusables: focusables}
-      end
+    boxes =
+      acc.boxes
+      |> Map.put(acc.id, final_box)
+      |> then(fn boxes ->
+        if root_id, do: Map.put(boxes, root_id, final_box), else: boxes
+      end)
+
+    acc = %{acc | focusables: focusables, boxes: boxes}
 
     {acc, final_box}
   end
@@ -437,7 +439,15 @@ defmodule Breeze.Renderer do
   defp namespace_ids(ids, prefix), do: Enum.map(ids, &namespace_id(&1, prefix))
 
   defp namespace_box_map(boxes, prefix) do
-    Map.new(boxes, fn {id, box} -> {namespace_id(id, prefix), box} end)
+    Map.new(boxes, fn {id, box} ->
+      namespaced_id =
+        case id do
+          id when is_binary(id) -> namespace_id(id, prefix)
+          other -> other
+        end
+
+      {namespaced_id, box}
+    end)
   end
 
   defp namespace_elements(elements, prefix) do

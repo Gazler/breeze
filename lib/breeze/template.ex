@@ -169,7 +169,9 @@ defmodule Breeze.Template do
       unwrap_component(invoke_component(module, fun, assigns), assigns)
 
     comp_ctx = %{assigns: comp_assigns, vars: %{}, env: comp_env}
+
     nodes_to_tree(comp_nodes, comp_ctx)
+    |> annotate_component_nodes(component_label(module, fun, ctx.env))
   end
 
   defp element_to_tree("live", attrs, _children, ctx) do
@@ -199,6 +201,34 @@ defmodule Breeze.Template do
       node, acc -> [node | acc]
     end)
     |> Enum.reverse()
+  end
+
+  defp annotate_component_nodes(nodes, label) do
+    Enum.map(nodes, &annotate_component_node(&1, label))
+  end
+
+  defp annotate_component_node({tag, meta, children}, label) when is_atom(tag) do
+    children =
+      children
+      |> Enum.map(fn
+        {child_tag, _, _} = child when is_atom(child_tag) -> annotate_component_node(child, label)
+        other -> other
+      end)
+      |> then(&[{:attribute, ["breeze-component", label]} | &1])
+
+    {tag, meta, children}
+  end
+
+  defp annotate_component_node(node, _label), do: node
+
+  defp component_label(module, fun, env) do
+    owner =
+      case Macro.Env.lookup_import(env, {fun, 1}) do
+        [function: imported_module] -> imported_module
+        _ -> module
+      end
+
+    "#{inspect(owner)}.#{fun}"
   end
 
   defp render_nodes(nodes, ctx) do
