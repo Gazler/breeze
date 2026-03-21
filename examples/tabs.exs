@@ -94,12 +94,12 @@ defmodule TabsExample do
   def handle_info(_, term), do: {:noreply, term}
 
   defp assign_layout(term, screen_width, screen_height) do
-    tabs_width = max(min(screen_width - 4, 36), 20)
+    tabs_width = max(min(screen_width - 4, 36), 20) + 2
     panel_height = max(screen_height - 9, 6)
 
     assign(term,
       tabs_width: tabs_width,
-      tabs_height: panel_height + 2
+      tabs_height: panel_height + 4
     )
     |> assign(panel_height: panel_height)
   end

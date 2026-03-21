@@ -19,26 +19,26 @@ defmodule ModalExample do
       <box>
       </box>
       <box style="bold">Modal sizes</box>
-      <box id="open-modal" focusable style="border-rounded width-18 height-3 focus:border-4">
+      <box id="open-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
         <box style="bold text-center">Centered</box>
       </box>
-      <box id="open-wide-modal" focusable style="border-rounded width-18 height-3 focus:border-4">
+      <box id="open-wide-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
         <box style="bold text-center">Wide</box>
       </box>
-      <box id="open-inset-modal" focusable style="border-rounded width-18 height-3 focus:border-4">
+      <box id="open-inset-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
         <box style="bold text-center">Inset</box>
       </box>
       <box>
       </box>
-      <box id="other-panel" focusable style="border-rounded width-26 height-4 focus:border-4">
+      <box id="other-panel" focusable style="border-rounded width-28 height-6 focus:border-4">
         <box style="bold">Background panel</box>
         <box>Last action: {@selected_action}</box>
       </box>
       <.modal
         :if={@show_modal and @modal_variant == :centered}
         id="example-modal"
-        width={46}
-        height={10}
+        width={48}
+        height={12}
         br-change="close_modal"
       >
         <:title>Focused Widget Help</:title>
@@ -64,13 +64,13 @@ defmodule ModalExample do
             id="confirm"
             focusable
             default-focus
-            style="border-rounded width-14 height-1 focus:border-4"
+            style="border-rounded width-16 height-3 focus:border-4"
           >
             <box style="bold">Confirm</box>
           </box>
           <box>
           </box>
-          <box id="cancel" focusable style="border-rounded width-14 height-1 focus:border-4">
+          <box id="cancel" focusable style="border-rounded width-16 height-3 focus:border-4">
             <box style="bold">Dismiss</box>
           </box>
         </box>
@@ -78,8 +78,8 @@ defmodule ModalExample do
       <.modal
         :if={@show_modal and @modal_variant == :wide}
         id="wide-modal"
-        width={64}
-        height={12}
+        width={66}
+        height={14}
         br-change="close_modal"
       >
         <:title>Wide Modal</:title>
@@ -102,7 +102,7 @@ defmodule ModalExample do
           id="wide-close"
           focusable
           default-focus
-          style="border-rounded width-18 height-1 focus:border-4"
+          style="border-rounded width-20 height-3 focus:border-4"
         >
           <box style="bold text-center">Close</box>
         </box>
@@ -134,7 +134,7 @@ defmodule ModalExample do
           id="inset-close"
           focusable
           default-focus
-          style="border-rounded width-18 height-1 focus:border-4"
+          style="border-rounded width-20 height-3 focus:border-4"
         >
           <box style="bold text-center">Close</box>
         </box>

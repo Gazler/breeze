@@ -13,11 +13,23 @@ defmodule Breeze.Implicit.Input do
 
   def init(_items, root_attrs, last_state) do
     value = Map.get(root_attrs, :"input-value", "")
-    raw_cursor = Map.get(root_attrs, :"input-cursor", max_cursor(value))
+
+    cursor =
+      case Map.fetch(root_attrs, :"input-cursor") do
+        {:ok, raw_cursor} ->
+          if is_binary(raw_cursor), do: String.to_integer(raw_cursor), else: raw_cursor
+
+        :error ->
+          if Map.get(last_state, :value) == value and is_integer(Map.get(last_state, :cursor)) do
+            Map.get(last_state, :cursor)
+          else
+            max_cursor(value)
+          end
+      end
 
     attrs_state = %{
       value: value,
-      cursor: if(is_binary(raw_cursor), do: String.to_integer(raw_cursor), else: raw_cursor),
+      cursor: cursor,
       placeholder: Map.get(root_attrs, :"input-placeholder")
     }
 
@@ -111,13 +123,13 @@ defmodule Breeze.Implicit.Input do
       when is_map(layout) do
     layout = resolve_layout(layout, state)
     source = source_content(box.content, state)
-    {content, display_cursor} = render_visible_content(source, state, layout)
+    {content, display_cursor} = render_visible_content(source, state, layout, box)
     theme = Map.get(ctx, :theme)
     defaults = Theme.default_style(theme)
 
     overlay = %{
-      x: layout.left + border_left_offset(box) + display_cursor,
-      y: layout.top + border_top_offset(box),
+      x: layout.left + content_left_offset(box) + display_cursor,
+      y: layout.top + content_top_offset(box),
       char: cursor_char(content, display_cursor),
       foreground_color: Map.get(defaults, :background_color),
       background_color: Theme.color(theme, :cursor) || Theme.color(theme, :accent),
@@ -187,14 +199,14 @@ defmodule Breeze.Implicit.Input do
 
   defp source_content(_content, %{value: "", placeholder: placeholder})
        when is_binary(placeholder) and placeholder != "" do
-    " " <> placeholder
+    placeholder
   end
 
   defp source_content(content, %{value: value}) when is_binary(content) and is_binary(value) do
     if value == "" or String.contains?(content, value) do
       content
     else
-      " " <> value
+      value
     end
   end
 
@@ -205,8 +217,9 @@ defmodule Breeze.Implicit.Input do
 
   defp placeholder_modifiers(_state), do: []
 
-  defp render_visible_content(content, state, %{viewport_width: width})
+  defp render_visible_content(content, state, %{viewport_width: width}, box)
        when is_binary(content) and is_integer(width) and width > 0 do
+    width = content_viewport_width(width, box)
     display_cursor = display_cursor_index(content, state)
     content_length = String.length(content)
     scrolled? = display_cursor >= width and width > 1
@@ -214,10 +227,10 @@ defmodule Breeze.Implicit.Input do
     scroll_left = scroll_left(display_cursor, visible_width, content_length)
     visible_cursor = visible_cursor_index(display_cursor, scroll_left, width, scrolled?)
 
-    {slice_graphemes(content, scroll_left, visible_width, width), visible_cursor}
+    {slice_graphemes(content, scroll_left, visible_width), visible_cursor}
   end
 
-  defp render_visible_content(content, state, _layout) when is_binary(content) do
+  defp render_visible_content(content, state, _layout, _box) when is_binary(content) do
     {content, display_cursor_index(content, state)}
   end
 
@@ -270,12 +283,11 @@ defmodule Breeze.Implicit.Input do
     end
   end
 
-  defp slice_graphemes(content, start, visible_width, total_width) do
+  defp slice_graphemes(content, start, visible_width) do
     content
     |> String.graphemes()
     |> Enum.slice(start, visible_width)
     |> Enum.join()
-    |> String.pad_trailing(total_width)
   end
 
   defp insertable_key?(key) when is_binary(key) do
@@ -293,4 +305,25 @@ defmodule Breeze.Implicit.Input do
 
   defp border_left_offset(%{style: %{border: border}}), do: if(border.left, do: 1, else: 0)
   defp border_top_offset(%{style: %{border: border}}), do: if(border.top, do: 1, else: 0)
+
+  defp content_viewport_width(width, %{style: style}) when is_integer(width) do
+    max(width - style_value(style, :padding_left) - style_value(style, :padding_right), 0)
+  end
+
+  defp content_viewport_width(width, _box), do: width
+
+  defp content_left_offset(%{style: style} = box) do
+    border_left_offset(box) + style_value(style, :padding_left)
+  end
+
+  defp content_top_offset(%{style: style} = box) do
+    border_top_offset(box) + style_value(style, :padding_top)
+  end
+
+  defp style_value(style, side_key) do
+    case Map.get(style, side_key) do
+      value when is_integer(value) -> value
+      _ -> Map.get(style, :padding, 0) || 0
+    end
+  end
 end

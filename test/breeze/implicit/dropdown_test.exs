@@ -175,20 +175,20 @@ defmodule Breeze.Implicit.DropdownTest do
 
     open_state = %{closed_state | open?: true}
 
-    assert [style: "absolute left-8 top-0 width-1 height-1"] =
+    assert [style: "absolute right-1 top-0 width-1 height-1"] =
              Dropdown.handle_modifiers(
                :child,
                [{:"dropdown-indicator-closed", true}],
                closed_state
              )
 
-    assert [style: "absolute left-8 top-0 width-0 height-0 overflow-hidden"] =
+    assert [style: "absolute right-1 top-0 width-0 height-0 overflow-hidden"] =
              Dropdown.handle_modifiers(:child, [{:"dropdown-indicator-open", true}], closed_state)
 
-    assert [style: "absolute left-8 top-0 width-0 height-0 overflow-hidden"] =
+    assert [style: "absolute right-1 top-0 width-0 height-0 overflow-hidden"] =
              Dropdown.handle_modifiers(:child, [{:"dropdown-indicator-closed", true}], open_state)
 
-    assert [style: "absolute left-8 top-0 width-1 height-1"] =
+    assert [style: "absolute right-1 top-0 width-1 height-1"] =
              Dropdown.handle_modifiers(:child, [{:"dropdown-indicator-open", true}], open_state)
   end
 

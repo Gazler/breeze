@@ -7,8 +7,10 @@ if Code.ensure_loaded?(Mix.ProjectStack) and Process.whereis(Mix.ProjectStack) d
   """
 end
 
+project_root = Path.expand("../..", __DIR__)
+
 Mix.install([
-  {:breeze, path: "../breeze"},
+  {:breeze, path: project_root},
   {:termite, github: "gazler/termite", override: true},
   {:termite_ssh, github: "gazler/termite_ssh"}
 ])

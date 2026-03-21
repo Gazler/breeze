@@ -958,8 +958,8 @@ defmodule Breeze.Server do
     |> Enum.take(screen_height)
   end
 
-  defp build_frame_payload(nil, lines, _prev_overlays, overlays, _screen_width) do
-    full_redraw_payload(lines, overlays)
+  defp build_frame_payload(nil, lines, _prev_overlays, overlays, screen_width) do
+    full_redraw_payload(lines, overlays, screen_width)
   end
 
   defp build_frame_payload(prev_lines, lines, prev_overlays, overlays, screen_width) do
@@ -977,8 +977,15 @@ defmodule Breeze.Server do
     end
   end
 
-  defp full_redraw_payload(lines, overlays) do
-    output = IO.iodata_to_binary(["\e[K", Enum.intersperse(lines, "\n\e[K")])
+  defp full_redraw_payload(lines, overlays, screen_width) do
+    output =
+      lines
+      |> Enum.with_index()
+      |> Enum.map(fn {line, row} ->
+        write_row_payload(row, line, screen_width)
+      end)
+      |> IO.iodata_to_binary()
+
     overlay_output = Breeze.TerminalOverlay.render_overlays(overlays)
     IO.iodata_to_binary(["\e[2J\e[H", output, overlay_output])
   end
@@ -1026,25 +1033,34 @@ defmodule Breeze.Server do
     |> Enum.sort()
     |> Enum.map(fn row ->
       line = Enum.at(lines, row, "")
-      visible_width = visible_width(line)
-
-      if visible_width >= screen_width do
-        ["\e[", Integer.to_string(row + 1), ";1H", line]
-      else
-        [
-          "\e[",
-          Integer.to_string(row + 1),
-          ";1H",
-          line,
-          "\e[",
-          Integer.to_string(row + 1),
-          ";",
-          Integer.to_string(visible_width + 1),
-          "H\e[K"
-        ]
-      end
+      write_row_payload(row, line, screen_width)
     end)
     |> IO.iodata_to_binary()
+  end
+
+  defp write_row_payload(row, line, screen_width) do
+    visible_width = visible_width(line)
+
+    if visible_width >= screen_width do
+      [
+        "\e[",
+        Integer.to_string(row + 1),
+        ";1H\e[2K",
+        line
+      ]
+    else
+      [
+        "\e[",
+        Integer.to_string(row + 1),
+        ";1H",
+        line,
+        "\e[",
+        Integer.to_string(row + 1),
+        ";",
+        Integer.to_string(visible_width + 1),
+        "H\e[K"
+      ]
+    end
   end
 
   defp visible_width(line) when is_binary(line) do

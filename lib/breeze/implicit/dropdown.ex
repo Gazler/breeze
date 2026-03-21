@@ -118,13 +118,13 @@ defmodule Breeze.Implicit.Dropdown do
     "absolute left-#{state.menu_left} top-#{state.menu_top + index} width-#{state.menu_width} layer-21"
   end
 
-  defp indicator_style(state, opts \\ []) do
+  defp indicator_style(_state, opts \\ []) do
     hidden? = Keyword.get(opts, :hidden?, false)
     width = if hidden?, do: 0, else: 1
     height = if hidden?, do: 0, else: 1
     overflow = if hidden?, do: " overflow-hidden", else: ""
 
-    "absolute left-#{max(state.trigger_width - 2, 0)} top-0 width-#{width} height-#{height}#{overflow}"
+    "absolute right-1 top-0 width-#{width} height-#{height}#{overflow}"
   end
 
   defp int_flag(flags, key, default) do

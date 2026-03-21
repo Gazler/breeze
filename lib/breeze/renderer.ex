@@ -255,22 +255,6 @@ defmodule Breeze.Renderer do
     previous_elements = Keyword.get(opts, :previous_elements, %{})
     previous_layout = if id, do: Map.get(previous_elements, id), else: nil
 
-    box =
-      if implicit && function_exported?(implicit_mod, :animate, 5) do
-        implicit_mod
-        |> apply(:animate, [
-          type,
-          box,
-          flags,
-          implicit,
-          animation_ctx(opts, id, focused, previous_layout)
-        ])
-        |> normalize_animation_result()
-        |> elem(0)
-      else
-        box
-      end
-
     {style_flags, style_modifiers, scroll_modifier} =
       if implicit do
         flags =
@@ -299,6 +283,25 @@ defmodule Breeze.Renderer do
           apply_theme_defaults: Keyword.get(opts, :apply_theme_defaults, false)
         )
       )
+
+    box =
+      if implicit && function_exported?(implicit_mod, :animate, 5) do
+        animated_box =
+          %{box | style: struct(BackBreeze.Style, element.style)}
+
+        implicit_mod
+        |> apply(:animate, [
+          type,
+          animated_box,
+          flags,
+          implicit,
+          animation_ctx(opts, id, focused, previous_layout)
+        ])
+        |> normalize_animation_result()
+        |> elem(0)
+      else
+        box
+      end
 
     opts =
       element.attributes

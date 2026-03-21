@@ -21,8 +21,8 @@ defmodule Breeze.ErrorView do
     left_inner_width = max(pane_outer_width - 2, 1)
     right_inner_width = max(right_outer_width - 2, 1)
     pane_inner_height = max(body_height - 2, 1)
-    stacktrace_list_height = max(pane_inner_height - 1, 1)
-    history_scroll_height = max(pane_inner_height - 1, 1)
+    stacktrace_list_height = max(pane_inner_height - 2, 1)
+    history_scroll_height = max(pane_inner_height - 2, 1)
 
     crash = prepare_crash(view, crash, size)
     entries = frame_entries(crash)
@@ -240,8 +240,8 @@ defmodule Breeze.ErrorView do
       left_inner_width: left_inner_width,
       right_inner_width: right_inner_width,
       pane_inner_height: pane_inner_height,
-      stacktrace_list_height: max(pane_inner_height - 1, 1),
-      history_scroll_height: max(pane_inner_height - 1, 1)
+      stacktrace_list_height: max(pane_inner_height - 2, 1),
+      history_scroll_height: max(pane_inner_height - 2, 1)
     }
   end
 
@@ -333,10 +333,10 @@ defmodule Breeze.ErrorView do
   defp pane_title_style(width), do: "width-#{width}"
 
   defp pane_style(true, pane_outer_width, body_height),
-    do: "border border-4 width-#{pane_outer_width - 2} height-#{body_height - 2}"
+    do: "border border-4 width-#{pane_outer_width} height-#{body_height}"
 
   defp pane_style(false, pane_outer_width, body_height),
-    do: "border width-#{pane_outer_width - 2} height-#{body_height - 2}"
+    do: "border width-#{pane_outer_width} height-#{body_height}"
 
   defp rotate_focus(current, delta) do
     index = Enum.find_index(@focus_order, &(&1 == current)) || 0

@@ -26,29 +26,24 @@ defmodule Posting do
   ]
 
   def mount(_opts, term) do
-    {screen_width, screen_height} = BackBreeze.screen_dimensions(term.terminal)
     url = "https://jsonplaceholder.typicode.com/posts"
     method = "POST"
     method_index = Enum.find_index(@methods, &(&1 == method)) || 0
     user_host = current_user_host()
 
-    term = term |> Breeze.View.put_theme(:system) |> focus("url")
+    term = term |> Breeze.View.put_theme(Theme.builtin(:gruvbox)) |> focus("url")
 
     term =
       assign(term,
         url: url,
-        url_cursor: String.length(url),
         method: method,
         method_index: method_index,
         methods: @methods,
         collection: @collection,
-        screen_width: screen_width,
-        screen_height: screen_height,
         user_host: user_host,
-        url_width: screen_width - 18,
         request_tab: "headers",
         response_tab: "body",
-        theme_mode: :system,
+        theme_mode: :gruvbox,
         actual_theme_mode: term.theme.mode,
         theme_status: Breeze.Theme.probe_status(term.theme) || :ready,
         show_debug: System.get_env("BREEZE_DEBUG") == "1",
@@ -59,55 +54,39 @@ defmodule Posting do
   end
 
   def render(assigns) do
-    assigns =
-      assigns
-      |> Map.put(
-        :url_display,
-        " " <> String.pad_trailing(assigns.url, max((assigns.url_width || 1) - 1, 0))
-      )
-
     ~H"""
-    <box style="width-screen height-screen" class="bg text">
-      <box style="grid grid-cols-1 width-full height-full">
-        <box style="height-3" class="bg">
-          <box style="inline width-screen height-1">
+    <box class="width-screen height-screen bg padding-top-1">
+      <box class="grid grid-cols-1 width-full height-full padding-left-2 padding-right-2">
+        <box class="height-3 padding-top-1 padding-bottom-1">
+          <box class="inline width-full height-1">
             <box class="bold text-primary">Req It Ralph</box>
             <box class="text-muted"> 0.0.1</box>
             <box class="text-muted"> {@theme_mode}/{@actual_theme_mode} ({@theme_status})</box>
             <box class="width-full text-right text-muted">{@user_host}</box>
           </box>
-          <box class="height-1 width-full bg">
-          </box>
-          <box style="grid grid-cols-4 height-1">
-            <box style="text-primary width-1">▐</box>
-            <.dropdown
-              id="method"
-              selected={@method}
-              br-change="method_changed"
-              class="width-10"
-              item_style="bg-panel text"
-              menu_style="bg-panel text"
-              menu_top={1}
-            >
-              <:item :for={method <- @methods} value={method}>{method}</:item>
-            </.dropdown>
-            <.input
-              id="url"
-              input-value={@url}
-              input-cursor={@url_cursor}
-              input-placeholder="Enter URL"
-              br-change="url_changed"
-              style="width-full"
-            >
-              {@url_display}
-            </.input>
-            <box class="width-8 inline">
-              <box class="bg-primary text-bg bold">{"  Send "}</box>
-              <box class="bg-primary text-bg">▐</box>
-            </box>
-          </box>
         </box>
-        <box style="height-1 bg">
+        <box style="grid grid-cols-5 height-2 padding-bottom-1">
+          <box style="text-primary width-1">▐</box>
+          <.dropdown
+            id="method"
+            selected={@method}
+            br-change="method_changed"
+            class="width-10"
+            item_style="bg-panel text"
+            menu_style="bg-panel text"
+            menu_top={1}
+          >
+            <:item :for={method <- @methods} value={method}>{method}</:item>
+          </.dropdown>
+          <.input
+            id="url"
+            input-value={@url}
+            input-placeholder="Enter URL"
+            br-change="url_changed"
+            style="width-full"
+          />
+          <box class="width-8 bg-primary text-bg bold">{"  Send "}</box>
+          <box style="bg-primary text-bg width-1">▐</box>
         </box>
         <box style="grid grid-cols-2 height-full">
           <.list
@@ -180,22 +159,22 @@ defmodule Posting do
               <box>{"  6  }"}</box>
             </box>
           </box>
-        </box>
-        <box style="inline height-1 width-screen">
-          <box class="bg-primary text-bg bold">{" ^j "}</box>
-          <box> Send  </box>
-          <box class="bg-primary text-bg bold">{" ^t "}</box>
-          <box> Method  </box>
-          <box class="bg-primary text-bg bold">{" Tab "}</box>
-          <box> Next  </box>
-          <box class="bg-primary text-bg bold">{" F1 "}</box>
-          <box> Help  </box>
-          <box class="bg-primary text-bg bold">{" F2 "}</box>
-          <box> Debug  </box>
-          <box class="bg-primary text-bg bold">{" F3 "}</box>
-          <box> Theme  </box>
-          <box class="bg-primary text-bg bold">{" q "}</box>
-          <box> Quit </box>
+          <box style="inline height-1 width-screen bg-panel">
+            <box class="bg-primary text-bg bold">{" ^j "}</box>
+            <box> Send  </box>
+            <box class="bg-primary text-bg bold">{" ^t "}</box>
+            <box> Method  </box>
+            <box class="bg-primary text-bg bold">{" Tab "}</box>
+            <box> Next  </box>
+            <box class="bg-primary text-bg bold">{" F1 "}</box>
+            <box> Help  </box>
+            <box class="bg-primary text-bg bold">{" F2 "}</box>
+            <box> Debug  </box>
+            <box class="bg-primary text-bg bold">{" F3 "}</box>
+            <box> Theme  </box>
+            <box class="bg-primary text-bg bold">{" q "}</box>
+            <box> Quit </box>
+          </box>
         </box>
       </box>
       <.modal :if={@show_help} id="help" width={56} height={15} br-change="help_closed">
@@ -251,8 +230,8 @@ defmodule Posting do
     """
   end
 
-  def handle_event("url_changed", %{value: value, cursor: cursor}, term) do
-    {:noreply, assign(term, url: value, url_cursor: cursor)}
+  def handle_event("url_changed", %{value: value}, term) do
+    {:noreply, assign(term, url: value)}
   end
 
   def handle_event("method_changed", %{value: method, index: index}, term),
@@ -311,16 +290,7 @@ defmodule Posting do
   def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
   def handle_event(_, _, term), do: {:noreply, term}
 
-  def handle_info(:resize, term) do
-    {screen_width, screen_height} = BackBreeze.screen_dimensions(term.terminal)
-
-    {:noreply,
-     assign(term,
-       url_width: screen_width - 18,
-       screen_width: screen_width,
-       screen_height: screen_height
-     )}
-  end
+  def handle_info(:resize, term), do: {:noreply, term}
 
   def handle_info(_, term), do: {:noreply, term}
 
@@ -356,7 +326,7 @@ end
 Breeze.Example.run(
   view: Posting,
   reload: true,
-  theme: :system,
+  theme: Breeze.Theme.builtin(:gruvbox),
   hide_cursor: true,
   global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
 )

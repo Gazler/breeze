@@ -21,7 +21,7 @@ defmodule CrashHandlerExample do
       <box style="height-1">
       </box>
       <box style="grid grid-cols-1 grid-rows-2 height-full">
-        <box id="boom" focusable style="border-rounded width-32 height-3 focus:border-4">
+        <box id="boom" focusable style="border-rounded width-32 height-5 focus:border-4">
           <box>Press c to raise</box>
           <box>Counter {@counter}</box>
         </box>

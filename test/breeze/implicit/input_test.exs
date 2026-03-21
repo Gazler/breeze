@@ -98,6 +98,63 @@ defmodule Breeze.Implicit.InputTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule BlockInputView do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term) do
+      {:ok, term |> Breeze.View.focus("url") |> Breeze.View.assign(url: "hello world")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-20">
+        <.input id="url" input-value={@url} br-change="url_changed" style="width-full">
+          {@url}
+        </.input>
+      </box>
+      """
+    end
+
+    def handle_event("url_changed", %{value: value}, term) do
+      {:noreply, Breeze.View.assign(term, url: value)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def handle_info(:append_bang, term) do
+      {:noreply, Breeze.View.assign(term, url: term.assigns.url <> "!")}
+    end
+
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule PaddedBlockInputView do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term) do
+      {:ok, term |> Breeze.View.focus("url") |> Breeze.View.assign(url: "hello")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-20">
+        <.input id="url" input-value={@url} br-change="url_changed" style="width-full padding-1">
+          {@url}
+        </.input>
+      </box>
+      """
+    end
+
+    def handle_event("url_changed", %{value: value}, term) do
+      {:noreply, Breeze.View.assign(term, url: value)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   test "init returns normalized state and cursor animation metadata" do
     assert {:ok, %{cursor: 0, value: "", placeholder: nil},
             rerender_every: 500, active_when_focused: true} =
@@ -134,11 +191,33 @@ defmodule Breeze.Implicit.InputTest do
              })
   end
 
+  test "init preserves the previous cursor when rerendering the same value without input-cursor" do
+    assert {:ok, %{value: "hello", cursor: 2, placeholder: nil},
+            rerender_every: 500, active_when_focused: true} =
+             Input.init([], %{:"input-value" => "hello"}, %{
+               value: "hello",
+               cursor: 2,
+               placeholder: nil
+             })
+  end
+
+  test "init moves the cursor to the end when the value changes without input-cursor" do
+    assert {:ok, %{value: "hello!", cursor: 6, placeholder: nil},
+            rerender_every: 500, active_when_focused: true} =
+             Input.init([], %{:"input-value" => "hello!"}, %{
+               value: "hello",
+               cursor: 2,
+               placeholder: nil
+             })
+  end
+
   test "renders placeholder content when the value is empty" do
-    assert {:ok, %Box{content: " Search docs"}, overlays: [%{visible?: true}]} =
+    box = %Box{content: "", style: %BackBreeze.Style{padding_left: 1}}
+
+    assert {:ok, %Box{content: "Search docs"}, overlays: [%{visible?: true, x: 1, char: "S"}]} =
              Input.animate(
                :root,
-               %Box{content: "", style: %BackBreeze.Style{}},
+               box,
                [focused: true],
                %{value: "", cursor: 0, placeholder: "Search docs"},
                %{layout: %{left: 0, top: 0}, now: 0, last_interaction_at: nil}
@@ -168,10 +247,10 @@ defmodule Breeze.Implicit.InputTest do
   end
 
   test "animate can return geometry-aware overlay data" do
-    box = %Box{style: %BackBreeze.Style{border: BackBreeze.Border.line()}}
+    box = %Box{style: %BackBreeze.Style{border: BackBreeze.Border.line(), padding_left: 1}}
     theme = Breeze.Theme.Builtin.nebula()
 
-    assert {:ok, %Box{content: " hello"},
+    assert {:ok, %Box{content: "hello"},
             overlays: [
               %{
                 x: 15,
@@ -203,11 +282,11 @@ defmodule Breeze.Implicit.InputTest do
 
   test "animate scrolls overflowing content and pins the cursor to the edge" do
     box = %Box{
-      content: " hello world",
-      style: %BackBreeze.Style{border: BackBreeze.Border.line()}
+      content: "hello world",
+      style: %BackBreeze.Style{border: BackBreeze.Border.line(), padding_left: 1}
     }
 
-    assert {:ok, %Box{content: "world "}, overlays: [%{x: 12, y: 5, char: " ", visible?: true}]} =
+    assert {:ok, %Box{content: "orld"}, overlays: [%{x: 12, y: 5, char: " ", visible?: true}]} =
              Input.animate(
                :root,
                box,
@@ -224,10 +303,10 @@ defmodule Breeze.Implicit.InputTest do
   test "animate keeps overflow content stable during async overlay passes" do
     box = %Box{
       content: "istory                  ",
-      style: %BackBreeze.Style{border: BackBreeze.Border.line()}
+      style: %BackBreeze.Style{border: BackBreeze.Border.line(), padding_left: 1}
     }
 
-    assert {:ok, %Box{content: "?include=author,history "},
+    assert {:ok, %Box{content: "include=author,history"},
             overlays: [%{x: 30, y: 5, char: " ", visible?: true}]} =
              Input.animate(
                :root,
@@ -401,6 +480,37 @@ defmodule Breeze.Implicit.InputTest do
     refute box.content =~ "?include=author,history "
   end
 
+  test "public input block keeps its left inset after change rerenders" do
+    terminal = %Termite.Terminal{size: %{width: 40, height: 10}}
+    {:ok, pid} = ChildServer.start(view: BlockInputView, terminal: terminal)
+
+    assert {:ok, _acc, initial_box} = ChildServer.render(pid, terminal: terminal)
+    assert initial_box.content =~ " hello world"
+
+    assert {:noreply, "url"} = ChildServer.dispatch_info(pid, :append_bang, terminal)
+
+    assert {:ok, _acc, next_box} = ChildServer.render(pid, terminal: terminal)
+
+    assert next_box.content =~ " hello world!"
+  end
+
+  test "public input block keeps padding inside the box and cursor aligned" do
+    terminal = %Termite.Terminal{size: %{width: 24, height: 10}}
+    {:ok, pid} = ChildServer.start(view: PaddedBlockInputView, terminal: terminal)
+
+    assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
+
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+
+    assert plain_content =~ "\n hello"
+
+    assert %Breeze.Term{
+             elements: %{
+               "url" => %Breeze.Viewport{left: 0, top: 0}
+             }
+           } = :sys.get_state(pid)
+  end
+
   test "child server delete updates a scrolled input through the normal key path" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = ChildServer.start(view: OverflowInputView, terminal: terminal)
@@ -425,7 +535,7 @@ defmodule Breeze.Implicit.InputTest do
       style: %BackBreeze.Style{border: BackBreeze.Border.line()}
     }
 
-    assert {:ok, %Box{content: "world "}, overlays: [%{x: 12, y: 5, char: " ", visible?: true}]} =
+    assert {:ok, %Box{content: "world"}, overlays: [%{x: 12, y: 5, char: " ", visible?: true}]} =
              Input.animate(
                :root,
                box,

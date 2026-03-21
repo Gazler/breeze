@@ -95,20 +95,37 @@ defmodule Breeze.Implicit.Tabs do
     if is_nil(viewport_width) or viewport_width <= 0 do
       current_offset
     else
-      cumulative = widths |> Enum.take(selected_index) |> Enum.sum()
+      tab_starts = prefix_offsets(widths)
+      cumulative = Enum.at(tab_starts, selected_index, 0)
       tab_width = Enum.at(widths, selected_index, 0)
+      selected_end = cumulative + tab_width
 
       cond do
         cumulative < current_offset ->
           cumulative
 
-        cumulative + tab_width > current_offset + viewport_width ->
-          cumulative + tab_width - viewport_width
+        selected_end > current_offset + viewport_width ->
+          tab_starts
+          |> Enum.take(selected_index + 1)
+          |> Enum.filter(fn start -> selected_end - start <= viewport_width end)
+          |> case do
+            [start | _] -> start
+            [] -> cumulative
+          end
 
         true ->
           current_offset
       end
     end
+  end
+
+  defp prefix_offsets(widths) do
+    {offsets, _acc} =
+      Enum.map_reduce(widths, 0, fn width, offset ->
+        {offset, offset + width}
+      end)
+
+    offsets
   end
 
   defp emit_change(state) do

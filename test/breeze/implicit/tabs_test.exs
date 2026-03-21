@@ -49,5 +49,39 @@ defmodule Breeze.Implicit.TabsTest do
       assert Tabs.handle_event(nil, %{"key" => "PageDown"}, state) ==
                {{:delegate, "panel-overview"}, state}
     end
+
+    test "repeated horizontal navigation computes scroll offsets without crashing" do
+      state = %{
+        values: [
+          "overview",
+          "requests",
+          "responses",
+          "headers",
+          "cookies",
+          "timeline",
+          "inspector",
+          "settings",
+          "shortcuts",
+          "advanced"
+        ],
+        widths: Enum.map(~w(Overview Requests Responses Headers Cookies Timeline Inspector Settings Shortcuts Advanced), &(String.length(&1) + 2)),
+        selected: "overview",
+        selected_index: 0,
+        offset_x: 0,
+        viewport_width: 38,
+        delegate_target: "panel-overview"
+      }
+
+      final_state =
+        Enum.reduce(1..20, state, fn _, acc ->
+          assert {{:change, _payload}, next_state} =
+                   Tabs.handle_event(nil, %{"key" => "ArrowRight"}, acc)
+
+          next_state
+        end)
+
+      assert is_integer(final_state.offset_x)
+      assert final_state.offset_x >= 0
+    end
   end
 end

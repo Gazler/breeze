@@ -75,7 +75,7 @@ defmodule Breeze.RendererTest do
 
     def render(assigns) do
       ~H"""
-      <.panel width={7} height={1} class="text-3" style={%{background_color: 0}}>Hello</.panel>
+      <.panel width={7} height={3} class="text-3" style={%{background_color: 0}}>Hello</.panel>
       """
     end
   end
@@ -88,7 +88,7 @@ defmodule Breeze.RendererTest do
 
     def render(assigns) do
       ~H"""
-      <.panel id="theme-demo" width={6} height={2} scroll>
+      <.panel id="theme-demo" width={8} height={4} scroll>
         <:title>Demo</:title>
         <box>AAAAAA</box>
         <box>BBBBBB</box>
@@ -311,7 +311,7 @@ defmodule Breeze.RendererTest do
     def render(assigns) do
       ~H"""
       <box id="parent" implicit={ParentImplicit}>
-        <box id="child" implicit={ScrollImplicit} style="border width-6 height-2 overflow-hidden">
+        <box id="child" implicit={ScrollImplicit} style="border width-8 height-4 overflow-hidden">
           <box>AAAAAA</box>
           <box>BBBBBB</box>
           <box>CCCCCC</box>
@@ -350,7 +350,7 @@ defmodule Breeze.RendererTest do
 
     test "forwards inline styles through block components" do
       assert Renderer.render_to_string(PanelStyleExample, %{}) ==
-               "\e[48;5;0;38;5;7m╭───────╮\e[0m\n\e[48;5;0;38;5;7m│\e[0m\e[48;5;0;38;5;3mHello  \e[0m\e[48;5;0;38;5;7m│\e[0m\n\e[48;5;0;38;5;7m╰───────╯\e[0m"
+               "\e[48;5;0;38;5;7m╭─────╮\e[0m\n\e[48;5;0;38;5;7m│\e[0m\e[48;5;0;38;5;3mHello\e[0m\e[48;5;0;38;5;7m│\e[0m\n\e[48;5;0;38;5;7m╰─────╯\e[0m"
     end
 
     test "resolves semantic tokens against custom themes" do
@@ -561,9 +561,9 @@ defmodule Breeze.RendererTest do
 
       assert box.content ==
                """
-               ┌───────┐
-               │  Hey  │
-               └───────┘\
+               ┌─────┐
+               │ Hey │
+               └─────┘\
                """
     end
 

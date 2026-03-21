@@ -116,20 +116,29 @@ defmodule Breeze.Blocks do
 
     menu_width = assigns[:menu_width] || width
     menu_height = max(length(items_with_labels), 1)
-    trigger_content = build_dropdown_trigger(selected_label, width)
+    trigger_content_width = max(width - 1, 0)
+    trigger_content = build_dropdown_trigger(selected_label, trigger_content_width)
+
+    trigger_visual_class =
+      merge_class(
+        "bg-primary text-bg bold focus:inverse",
+        class_override(assigns)
+      )
 
     assigns =
       assigns
+      |> assign(trigger_visual_class: trigger_visual_class)
       |> assign(selected_label: selected_label)
       |> assign(width: width)
+      |> assign(trigger_width: width)
       |> assign(menu_width: menu_width)
       |> assign(menu_height: menu_height)
       |> assign(trigger_content: trigger_content)
       |> assign(
         trigger_class:
           merge_class(
-            "bg-primary text-bg bold width-#{width} height-1 focus:inverse",
-            class_override(assigns)
+            "width-#{width} height-1 padding-right-1 #{trigger_visual_class}",
+            nil
           )
       )
       |> assign(
@@ -163,7 +172,7 @@ defmodule Breeze.Blocks do
       implicit={Breeze.Implicit.Dropdown}
       focusable
       dropdown-selected={@selected}
-      dropdown-trigger-width={@width}
+      dropdown-trigger-width={@trigger_width}
       dropdown-menu-width={@menu_width}
       dropdown-menu-height={@menu_height}
       dropdown-menu-top={@menu_top}
@@ -175,14 +184,14 @@ defmodule Breeze.Blocks do
       {@trigger_content}
       <box
         dropdown-indicator-closed="true"
-        class={@trigger_class}
+        class={@trigger_visual_class}
         style={Breeze.Blocks.inline_style(assigns)}
       >
         ▼
       </box>
       <box
         dropdown-indicator-open="true"
-        class={@trigger_class}
+        class={@trigger_visual_class}
         style={Breeze.Blocks.inline_style(assigns)}
       >
         ▲
@@ -208,9 +217,9 @@ defmodule Breeze.Blocks do
   end
 
   defp build_dropdown_trigger(label, width) do
-    inner_width = max(width - 4, 0)
+    inner_width = max(width - 2, 0)
     padded = String.pad_trailing(to_string(label), inner_width) |> String.slice(0, inner_width)
-    " " <> padded <> "   "
+    " " <> padded
   end
 
   attr :id, :string, required: true
@@ -236,7 +245,7 @@ defmodule Breeze.Blocks do
       |> assign(
         class:
           merge_class(
-            "border overflow-hidden focus:border-primary grid grid-cols-1 grid-rows-2",
+            "border overflow-hidden focus:border-primary",
             class_override(assigns)
           )
       )
@@ -261,7 +270,7 @@ defmodule Breeze.Blocks do
       style={Breeze.Blocks.inline_style(assigns)}
       {@rest}
     >
-      <box class="inline height-1" tab-bar="true">
+      <box class="inline width-full height-1 overflow-hidden" tab-bar="true">
         <box
           :for={t <- @tab}
           value={t.value}
@@ -292,7 +301,7 @@ defmodule Breeze.Blocks do
       assign(assigns,
         class:
           merge_class(
-            "input text mute-text-22 bg-emphasize-24 focus:text focus:mute-text-0 focus:emphasize-bg-34 placeholder:mute-text-16",
+            "input height-1 overflow-hidden padding-left-1 text mute-text-22 bg-emphasize-24 focus:text focus:mute-text-0 focus:emphasize-bg-34 placeholder:mute-text-16",
             class_override(assigns)
           )
       )
@@ -467,11 +476,11 @@ defmodule Breeze.Blocks do
         {width, height, nil, nil, nil} when is_integer(width) and is_integer(height) ->
           {
             merge_class(
-              "fixed center width-#{width + 2} height-#{height + 2} bg layer-50",
+              "fixed center width-#{width} height-#{height} bg layer-50",
               class_override(assigns, :frame_class, :frame_style)
             ),
             merge_class(
-              "absolute left-0 top-0 layer-51 width-#{width} height-#{height} border-rounded border-stroke bg",
+              "absolute left-0 top-0 right-0 bottom-0 layer-51 width-full height-full border-rounded border-stroke bg",
               class_override(assigns)
             )
           }

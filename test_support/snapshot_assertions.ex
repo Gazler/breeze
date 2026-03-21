@@ -24,6 +24,7 @@ defmodule Breeze.SnapshotAssertions do
       when is_binary(actual) and is_binary(relative_path) and is_binary(caller_file) and
              is_list(opts) do
     path = snapshot_path(relative_path, caller_file, opts)
+    actual = normalize_snapshot(actual)
 
     cond do
       update_snapshots?() ->
@@ -41,6 +42,7 @@ defmodule Breeze.SnapshotAssertions do
     end
 
     expected = File.read!(path)
+    expected = normalize_snapshot(expected)
 
     if actual != expected do
       actual_path = path <> ".actual"
@@ -72,6 +74,22 @@ defmodule Breeze.SnapshotAssertions do
 
   defp update_snapshots? do
     System.get_env("BREEZE_UPDATE_SNAPSHOTS") in ["1", "true", "TRUE"]
+  end
+
+  defp normalize_snapshot(content) do
+    trailing_newline? = String.ends_with?(content, "\n")
+
+    normalized =
+      content
+      |> String.split("\n", trim: false)
+      |> Enum.map(&String.trim_trailing(&1, " "))
+      |> Enum.join("\n")
+
+    if trailing_newline? or normalized == "" do
+      normalized
+    else
+      normalized
+    end
   end
 
   defp diff_summary(expected, actual) do

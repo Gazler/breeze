@@ -42,7 +42,7 @@ defmodule Snake do
 
   def panel(assigns) do
     ~H"""
-    <box style={"border width-#{@width} height-#{@height}"}>
+    <box style={"border width-#{@width + 2} height-#{@height + 2}"}>
       <box :if={assigns[:title]} style="absolute left-1 top-0">{render_slot(@title)}</box>
       {render_slot(@inner_block)}
     </box>
