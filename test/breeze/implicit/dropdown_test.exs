@@ -18,8 +18,7 @@ defmodule Breeze.Implicit.DropdownTest do
           id="method"
           selected={@method}
           br-change="method_changed"
-          style="bg-primary text-background bold focus:inverse width-10"
-          menu_width={12}
+          class="bg-primary text-background bold focus:inverse width-10"
         >
           <:item :for={method <- @methods} value={method}>{" #{method}"}</:item>
         </.dropdown>
@@ -34,7 +33,7 @@ defmodule Breeze.Implicit.DropdownTest do
           {_mod, state} -> state
         end)
 
-      {:noreply, term}
+      {:noreply, focus(term, "method")}
     end
 
     def handle_event(_, _, term), do: {:noreply, term}
@@ -56,8 +55,7 @@ defmodule Breeze.Implicit.DropdownTest do
             id="method"
             selected={@method}
             br-change="method_changed"
-            style="bg-primary text-background bold focus:inverse width-10"
-            menu_width={12}
+            class="bg-primary text-background bold focus:inverse width-10"
           >
             <:item :for={method <- @methods} value={method}>{" #{method}"}</:item>
           </.dropdown>
@@ -75,7 +73,7 @@ defmodule Breeze.Implicit.DropdownTest do
           {_mod, state} -> state
         end)
 
-      {:noreply, term}
+      {:noreply, focus(term, "method")}
     end
 
     def handle_event(_, _, term), do: {:noreply, term}
@@ -99,7 +97,7 @@ defmodule Breeze.Implicit.DropdownTest do
 
     assert moved_state.highlighted_index == 2
 
-    assert {{:change, %{value: "PUT", index: 2}}, selected_state, focus: nil} =
+    assert {{:change, %{value: "PUT", index: 2}}, selected_state} =
              Dropdown.handle_event(nil, %{"key" => "Enter"}, moved_state)
 
     assert selected_state.open? == false
@@ -107,16 +105,16 @@ defmodule Breeze.Implicit.DropdownTest do
     assert selected_state.selected_index == 2
   end
 
-  test "selecting an item clears focus in the child server" do
+  test "selecting an item keeps focus on the dropdown in the child server" do
     terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
     {:ok, pid} = Breeze.ChildServer.start(view: DropdownView, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "method", true} = Breeze.ChildServer.dispatch_input(pid, "\x14")
-    assert {:noreply, nil, true} = Breeze.ChildServer.dispatch_input(pid, "Enter")
+    assert {:noreply, "method", true} = Breeze.ChildServer.dispatch_input(pid, "Enter")
 
     metadata = Breeze.ChildServer.metadata(pid)
-    assert metadata.focused == nil
+    assert metadata.focused == "method"
   end
 
   test "item modifiers collapse the items when closed" do
@@ -126,11 +124,8 @@ defmodule Breeze.Implicit.DropdownTest do
       selected_index: 0,
       highlighted_index: 0,
       open?: false,
-      trigger_width: 10,
       menu_width: 12,
-      menu_height: 3,
-      menu_left: 0,
-      menu_top: 1
+      menu_height: 3
     }
 
     assert [style: "absolute left-0 top-0 width-0 height-0 overflow-hidden layer-21"] =
@@ -144,17 +139,36 @@ defmodule Breeze.Implicit.DropdownTest do
       selected_index: 1,
       highlighted_index: 1,
       open?: true,
-      trigger_width: 10,
       menu_width: 12,
-      menu_height: 4,
-      menu_left: 0,
-      menu_top: 1
+      menu_height: 4
     }
 
     assert [selected: true, style: "absolute left-0 top-1 width-12 layer-21"] =
              Dropdown.handle_modifiers(
                :child,
                [{:"dropdown-item", true}, {:"dropdown-item-index", 0}, {:value, "POST"}],
+               state
+             )
+  end
+
+  test "full-width menu modifiers keep width-full when open" do
+    state = %{
+      values: ["GET", "POST"],
+      selected: "POST",
+      selected_index: 1,
+      highlighted_index: 1,
+      open?: true,
+      menu_width: :full,
+      menu_height: 4
+    }
+
+    assert [style: "absolute left-0 top-1 width-full height-4 overflow-hidden layer-20"] =
+             Dropdown.handle_modifiers(:child, [{:"dropdown-frame", true}], state)
+
+    assert [selected: true, style: "absolute left-0 top-2 width-full layer-21"] =
+             Dropdown.handle_modifiers(
+               :child,
+               [{:"dropdown-item", true}, {:"dropdown-item-index", 1}, {:value, "POST"}],
                state
              )
   end
@@ -166,11 +180,8 @@ defmodule Breeze.Implicit.DropdownTest do
       selected_index: 1,
       highlighted_index: 1,
       open?: false,
-      trigger_width: 10,
       menu_width: 12,
-      menu_height: 4,
-      menu_left: 0,
-      menu_top: 1
+      menu_height: 4
     }
 
     open_state = %{closed_state | open?: true}
@@ -192,21 +203,14 @@ defmodule Breeze.Implicit.DropdownTest do
              Dropdown.handle_modifiers(:child, [{:"dropdown-indicator-open", true}], open_state)
   end
 
-  test "ctrl-t closes when already open" do
+  test "ctrl-t is ignored by the dropdown implicit" do
     children = [
       %{:"dropdown-item" => true, value: "GET"},
       %{:"dropdown-item" => true, value: "POST"}
     ]
 
     state = Dropdown.init(children, %{:"dropdown-selected" => "POST"}, %{})
-    assert {:noreply, open_state} = Dropdown.handle_event(nil, %{"key" => "\x14"}, state)
-    assert open_state.open? == true
-
-    assert {:noreply, closed_state} =
-             Dropdown.handle_event(nil, %{"key" => "\x14"}, open_state)
-
-    assert closed_state.open? == false
-    assert closed_state.highlighted_index == closed_state.selected_index
+    assert {:noreply, ^state} = Dropdown.handle_event(nil, %{"key" => "\x14"}, state)
   end
 
   test "opened dropdown renders its menu items" do
@@ -233,6 +237,7 @@ defmodule Breeze.Implicit.DropdownTest do
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
+    assert box.content |> String.graphemes() |> Enum.count(&(&1 == "▼")) == 1
     assert box.content =~ "▼"
     refute box.content =~ "▲"
   end

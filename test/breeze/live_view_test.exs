@@ -145,6 +145,52 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule AlternateChild do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <box id="alt">Alternate child</box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule SwitchableLiveRoot do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok, assign(term, child_view: CounterChild)}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box id="switch" focusable>switch</box>
+        <live id="preview" view={@child_view} start_opts={[]}>
+        </live>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "s"}, term) do
+      next_view =
+        case term.assigns.child_view do
+          CounterChild -> AlternateChild
+          _ -> CounterChild
+        end
+
+      {:noreply, assign(term, child_view: next_view)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule SpinnerChild do
     use Breeze.View
 
@@ -1222,5 +1268,29 @@ defmodule Breeze.LiveViewTest do
 
   def reload_config_server_opts(refresh) when is_function(refresh, 0) do
     refresh.()
+  end
+
+  test "server restarts a live child when its view changes" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: SwitchableLiveRoot,
+        terminal: terminal
+      )
+
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+
+    drain_terminal_writes()
+
+    send(pid, {terminal.reader, {:data, "s"}})
+
+    writes =
+      wait_until(fn ->
+        writes = drain_terminal_writes()
+        if IO.iodata_to_binary(writes) =~ "Alternate child", do: writes, else: false
+      end)
+
+    assert IO.iodata_to_binary(writes) =~ "Alternate child"
   end
 end

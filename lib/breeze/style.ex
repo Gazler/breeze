@@ -24,6 +24,32 @@ defmodule Breeze.Style do
     Enum.reduce(modifiers, style_state, &put_style(&2, &1))
   end
 
+  @spec resolve_dimensions(term(), term()) :: %{width: term(), height: term()}
+  def resolve_dimensions(class, style \\ nil) do
+    theme = Theme.new(nil)
+
+    style_state =
+      empty()
+      |> put_class(class)
+      |> put_style(style)
+
+    {bb_style, _attributes} =
+      style_state.class
+      |> normalize_class_input()
+      |> String.split(" ", trim: true)
+      |> Enum.map(&String.split(&1, ":"))
+      |> Enum.sort_by(&length/1)
+      |> Enum.reduce({%BackBreeze.Style{}, %{}}, fn style, acc ->
+        style = resolve_style_token(style, [])
+        apply_style(style, acc, theme)
+      end)
+
+    {bb_style, _attributes} =
+      merge_style_map(normalize_style_map(style_state.style), {bb_style, %{}}, theme)
+
+    %{width: bb_style.width, height: bb_style.height}
+  end
+
   @spec to_element(state(), keyword()) :: Breeze.Element.t()
   def to_element(style_state, opts) do
     theme = Theme.new(Keyword.get(opts, :theme), terminal: Keyword.get(opts, :terminal))
@@ -65,6 +91,7 @@ defmodule Breeze.Style do
         end
       end)
       |> apply_tone(attributes, theme)
+      |> maybe_put_default_scrollbar_foreground(attributes)
 
     struct(Breeze.Element, %{style: Map.from_struct(bb_style), attributes: attributes})
   end
@@ -341,6 +368,11 @@ defmodule Breeze.Style do
   defp apply_style("scrollbar-arrows", {style, attrs}, _theme),
     do: {BackBreeze.Style.scrollbar(style, %{arrows: true}), attrs}
 
+  defp apply_style("scrollbar-" <> color, {style, attrs}, theme),
+    do:
+      {put_scrollbar_color(style, Theme.resolve_color(theme, color)),
+       Map.put(attrs, :scrollbar_color_explicit, true)}
+
   defp apply_style("border-rounded", {style, attrs}, _theme),
     do: {BackBreeze.Style.border(style, :rounded), attrs}
 
@@ -492,6 +524,11 @@ defmodule Breeze.Style do
   defp merge_style_entry(:scrollbar, value, {style, attrs}, _theme),
     do: {%{style | scrollbar: value}, attrs}
 
+  defp merge_style_entry(:scrollbar_color, value, {style, attrs}, theme),
+    do:
+      {put_scrollbar_color(style, Theme.resolve_color(theme, value)),
+       Map.put(attrs, :scrollbar_color_explicit, true)}
+
   defp merge_style_entry(:foreground_color, value, {style, attrs}, theme),
     do: {%{style | foreground_color: Theme.resolve_color(theme, value)}, attrs}
 
@@ -557,6 +594,25 @@ defmodule Breeze.Style do
   end
 
   defp normalize_style_key(key), do: key |> to_string() |> normalize_style_key()
+
+  defp put_scrollbar_color(style, nil), do: style
+
+  defp put_scrollbar_color(style, color) do
+    if style.scrollbar do
+      {scrollbar, style} = BackBreeze.Scrollbar.normalize(style.scrollbar, style)
+      %{style | scrollbar: BackBreeze.Scrollbar.put_color(scrollbar, color)}
+    else
+      style
+    end
+  end
+
+  defp maybe_put_default_scrollbar_foreground(style, attrs) do
+    if Map.get(attrs, :scrollbar_color_explicit) do
+      style
+    else
+      put_scrollbar_color(style, style.foreground_color)
+    end
+  end
 
   defp normalize_border(:line), do: BackBreeze.Border.line()
   defp normalize_border(:rounded), do: BackBreeze.Border.rounded()

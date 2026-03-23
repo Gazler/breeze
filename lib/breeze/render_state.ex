@@ -25,7 +25,10 @@ defmodule Breeze.RenderState do
 
     {implicits, implicit_meta, _current, _mod, _last_id, _root_attrs} = implicit_build_state
 
-    raw_dimensions = build_dimensions(sorted_elements, acc.dimensions)
+    raw_dimensions =
+      build_dimensions(sorted_elements, acc.dimensions)
+      |> Map.merge(Map.get(acc, :live_dimensions, %{}))
+
     {elements, mouse_targets} = build_layout_maps(raw_dimensions)
 
     %{
