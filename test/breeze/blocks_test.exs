@@ -2,6 +2,76 @@ defmodule Breeze.BlocksTest do
   use ExUnit.Case, async: true
 
   alias Breeze.Blocks
+  alias Breeze.ChildServer
+
+  defmodule UnderlineTabsExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.tabs id="tabs" selected="overview" variant="underline" style="width-24 height-5">
+        <:tab value="overview" label="Overview">
+          <box>Overview body</box>
+        </:tab>
+        <:tab value="details" label="Details">
+          <box>Details body</box>
+        </:tab>
+      </.tabs>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule HighlightTabsExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.tabs id="tabs" selected="overview" highlight="error" style="width-24 height-5">
+        <:tab value="overview" label="Overview">
+          <box>Overview body</box>
+        </:tab>
+        <:tab value="details" label="Details">
+          <box>Details body</box>
+        </:tab>
+      </.tabs>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule PerTabHighlightTabsExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.tabs id="tabs" selected="details" highlight="accent" style="width-24 height-5">
+        <:tab value="overview" label="Overview">
+          <box>Overview body</box>
+        </:tab>
+        <:tab value="details" label="Details" highlight="error">
+          <box>Details body</box>
+        </:tab>
+      </.tabs>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
 
   describe "merge_class/2" do
     test "matches merge_style semantics" do
@@ -45,5 +115,40 @@ defmodule Breeze.BlocksTest do
              ) ==
                "border width-32 height-8 overflow-scroll focus:border-2"
     end
+  end
+
+  test "tabs supports an underline variant" do
+    {:ok, pid} = ChildServer.start(view: UnderlineTabsExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "tabs", implicit_state: %{})
+
+    assert box.content =~ "Overview"
+    assert box.content =~ "Details"
+    assert box.content =~ "\e[38;5;4m"
+    assert box.content =~ "48;5;4;"
+    assert box.content =~ "Overview body"
+  end
+
+  test "tabs accepts a configurable highlight color" do
+    {:ok, pid} = ChildServer.start(view: HighlightTabsExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "tabs", implicit_state: %{})
+
+    assert box.content =~ "Overview"
+    assert box.content =~ "\e[38;5;1m"
+    assert box.content =~ "48;5;1;"
+    assert box.content =~ "Overview body"
+  end
+
+  test "tabs allow an individual tab highlight override" do
+    {:ok, pid} = ChildServer.start(view: PerTabHighlightTabsExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "tabs", implicit_state: %{})
+
+    assert box.content =~ "Overview"
+    assert box.content =~ "Details"
+    assert box.content =~ "\e[38;5;5m"
+    assert box.content =~ "48;5;1;"
+    assert box.content =~ "Details body"
   end
 end

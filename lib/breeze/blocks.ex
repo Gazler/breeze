@@ -224,6 +224,8 @@ defmodule Breeze.Blocks do
 
   attr :id, :string, required: true
   attr :selected, :string, default: nil
+  attr :variant, :string, default: "default"
+  attr :highlight, :string, default: "primary"
   attr :class, :string, default: nil
   attr :style, :any, default: nil
   attr :item_class, :string, default: nil
@@ -233,30 +235,76 @@ defmodule Breeze.Blocks do
   slot :tab do
     attr :value, :string, required: true
     attr :label, :string, required: true
+    attr :highlight, :string, default: nil
   end
 
-  def tabs(assigns) do
+  def tabs(%{variant: "underline"} = assigns) do
     active =
       Enum.find(assigns.tab, List.first(assigns.tab), &(&1.value == assigns[:selected]))
+
+    highlight = Map.get(assigns, :highlight, "primary")
+    highlight_text_class = semantic_class("text", highlight)
+    highlight_bg_class = semantic_class("bg", highlight)
 
     assigns =
       assigns
       |> assign(active: active)
+      |> assign(highlight: highlight)
+      |> assign(highlight_text_class: highlight_text_class)
+      |> assign(highlight_bg_class: highlight_bg_class)
       |> assign(
         class:
           merge_class(
-            "border overflow-hidden focus:border-primary",
+            "overflow-hidden",
             class_override(assigns)
           )
       )
       |> assign(
         item_class:
           merge_class(
-            "selected:bold selected:text-primary focus:selected:bg-primary focus:selected:text overflow-scroll",
+            "selected:bold selected:#{highlight_text_class} focus:selected:#{highlight_bg_class} focus:selected:text-bg overflow-hidden",
             class_override(assigns, :item_class, :item_style)
           )
       )
 
+    render_underline_tabs(assigns)
+  end
+
+  def tabs(assigns) do
+    active =
+      Enum.find(assigns.tab, List.first(assigns.tab), &(&1.value == assigns[:selected]))
+
+    highlight = Map.get(assigns, :highlight, "primary")
+    highlight_text_class = semantic_class("text", highlight)
+    highlight_bg_class = semantic_class("bg", highlight)
+    highlight_border_class = semantic_class("border", highlight)
+
+    assigns =
+      assigns
+      |> assign(active: active)
+      |> assign(highlight: highlight)
+      |> assign(highlight_text_class: highlight_text_class)
+      |> assign(highlight_bg_class: highlight_bg_class)
+      |> assign(highlight_border_class: highlight_border_class)
+      |> assign(
+        class:
+          merge_class(
+            "border overflow-hidden focus:#{highlight_border_class}",
+            class_override(assigns)
+          )
+      )
+      |> assign(
+        item_class:
+          merge_class(
+            "selected:bold selected:#{highlight_text_class} focus:selected:#{highlight_bg_class} focus:selected:text-bg overflow-scroll",
+            class_override(assigns, :item_class, :item_style)
+          )
+      )
+
+    render_default_tabs(assigns)
+  end
+
+  defp render_default_tabs(assigns) do
     ~H"""
     <box
       id={@id}
@@ -275,12 +323,56 @@ defmodule Breeze.Blocks do
           :for={t <- @tab}
           id={"#{@id}-tab-#{t.value}"}
           value={t.value}
+          focus-with-owner="true"
           tab-label={t.label}
-          class={@item_class}
+          class={Breeze.Blocks.tab_item_class(@item_class, t, @highlight)}
           style={Breeze.Blocks.inline_style(assigns, :item_class, :item_style)}
         >
           {" #{t.label} "}
         </box>
+      </box>
+      <box class="height-full overflow-hidden">{render_slot(@active)}</box>
+    </box>
+    """
+  end
+
+  defp render_underline_tabs(assigns) do
+    ~H"""
+    <box
+      id={@id}
+      implicit={Breeze.Implicit.Tabs}
+      focusable
+      tab-delegate={if @active do
+      "#{@id}-panel-#{@active.value}"
+    end}
+      tab-selected={@active.value}
+      class={@class}
+      style={Breeze.Blocks.inline_style(assigns)}
+      {@rest}
+    >
+      <box class="inline width-full height-1 overflow-hidden" tab-bar="true">
+        <box
+          :for={t <- @tab}
+          id={"#{@id}-tab-#{t.value}"}
+          value={t.value}
+          focus-with-owner="true"
+          tab-label={t.label}
+          class={Breeze.Blocks.tab_item_class(@item_class, t, @highlight) <> " width-#{String.length(t.label) + 2}"}
+          style={%{height: 1, overflow: :hidden}}
+        >
+          {" #{t.label} "}
+        </box>
+      </box>
+      <box class="inline width-full height-1 overflow-hidden" tab-bar="true">
+        <box
+          :for={t <- @tab}
+          value={t.value}
+          class={Breeze.Blocks.tab_indicator_class(t, @highlight) <>
+      " width-#{String.length(t.label) + 2} height-1 overflow-hidden content-repeat-x"}
+        >
+          ━
+        </box>
+        <box class="width-full text-mute-40 overflow-hidden content-repeat-x">━</box>
       </box>
       <box class="height-full overflow-hidden">{render_slot(@active)}</box>
     </box>
@@ -603,4 +695,24 @@ defmodule Breeze.Blocks do
       parts -> parts |> Enum.drop(-1) |> Enum.join("-")
     end
   end
+
+  @doc false
+  def tab_item_class(base_class, tab, default_highlight) do
+    highlight = Map.get(tab, :highlight) || default_highlight
+    highlight_text_class = semantic_class("text", highlight)
+    highlight_bg_class = semantic_class("bg", highlight)
+
+    "#{base_class} selected:#{highlight_text_class} focus:selected:#{highlight_bg_class}"
+  end
+
+  @doc false
+  def tab_indicator_class(tab, default_highlight) do
+    highlight = Map.get(tab, :highlight) || default_highlight
+    highlight_class = semantic_class("text", highlight)
+
+    "text-mute-40 selected:text-mute-0 selected:#{highlight_class} focus:selected:#{highlight_class}"
+  end
+
+  defp semantic_class(prefix, nil), do: prefix
+  defp semantic_class(prefix, name), do: "#{prefix}-#{name}"
 end

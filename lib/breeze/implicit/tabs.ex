@@ -94,9 +94,28 @@ defmodule Breeze.Implicit.Tabs do
 
   def handle_modifiers(:child, flags, state) do
     cond do
-      Keyword.has_key?(flags, :"tab-bar") -> [scroll_x: state.offset_x]
-      state.selected == Keyword.get(flags, :value) -> [selected: true]
-      true -> []
+      Keyword.has_key?(flags, :"tab-bar") ->
+        [scroll_x: state.offset_x]
+
+      Keyword.get(flags, :"tab-indicator-active") &&
+          state.selected == Keyword.get(flags, :"tab-value") ->
+        []
+
+      Keyword.get(flags, :"tab-indicator-active") ->
+        [style: "width-0 height-0 overflow-hidden"]
+
+      Keyword.get(flags, :"tab-indicator-inactive") &&
+          state.selected == Keyword.get(flags, :"tab-value") ->
+        [style: "width-0 height-0 overflow-hidden"]
+
+      Keyword.get(flags, :"tab-indicator-inactive") ->
+        []
+
+      state.selected == Keyword.get(flags, :value) ->
+        [selected: true]
+
+      true ->
+        []
     end
   end
 

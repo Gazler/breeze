@@ -224,9 +224,16 @@ defmodule Breeze.Renderer do
   defp build_tree([], box, children, style_state, flags, acc, opts) do
     %{focusables: focusables} = acc
 
+    focused_target = Keyword.get(opts, :focused)
+    owned_focus_target = Keyword.get(flags, :implicit_owner)
+    node_focus_target = Keyword.get(flags, :id) || owned_focus_target
+
     focused =
-      (Keyword.get(flags, :id) || Keyword.get(flags, :implicit_owner)) ==
-        Keyword.get(opts, :focused)
+      Keyword.get(flags, :focused, false) or
+        (not is_nil(focused_target) &&
+           Keyword.has_key?(flags, :"focus-with-owner") &&
+           owned_focus_target == focused_target) or
+        (not is_nil(focused_target) && node_focus_target == focused_target)
 
     flags = if focused, do: Keyword.put(flags, :focused, focused), else: flags
 

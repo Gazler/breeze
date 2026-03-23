@@ -92,9 +92,10 @@ defmodule Breeze.RemoteInspector.View do
           <.tabs
             id="remote-inspector-tabs"
             selected={@panel_tab}
+            highlight="primary"
             br-change="tab_changed"
             class="width-full height-full border-rounded"
-            item_class="selected:bg-primary selected:text selected:bold width-13"
+            item_class="width-13"
           >
             <:tab value="overview" label="Overview">
               <.overview_tab

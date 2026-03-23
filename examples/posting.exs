@@ -100,64 +100,105 @@ defmodule Posting do
             </.list>
             <box style="grid grid-cols-1 grid-rows-2 height-full">
               <box style="border-rounded overflow-hidden" class="bg">
-                <box style="grid grid-cols-1 grid-rows-3 height-full">
-                  <box class="height-1 text-primary"> Headers  Body  Query  Auth  Info  Options </box>
-                  <.scroll
-                    id="request-headers-scroll"
-                    class="height-full overflow-scroll bg"
-                    style={%{scrollbar: %{arrows: true}}}
-                  >
-                    <box class="inline width-full">
-                      <box class="text-primary width-18">Content-Type</box>
-                      <box>application/json</box>
+                <.tabs
+                  id="request-tabs"
+                  selected={@request_tab}
+                  variant="underline"
+                  br-change="request_tab"
+                  class="width-full height-full"
+                >
+                  <:tab value="headers" label="Headers">
+                    <box style="grid grid-cols-1 grid-rows-2 height-full">
+                      <.scroll
+                        id="request-headers-scroll"
+                        class="height-full overflow-scroll bg"
+                        style={%{scrollbar: %{arrows: true}}}
+                      >
+                        <box class="inline width-full">
+                          <box class="text-primary width-18">Content-Type</box>
+                          <box>application/json</box>
+                        </box>
+                        <box class="inline width-full">
+                          <box class="text-primary width-18">Referer</box>
+                          <box>https://example.com/</box>
+                        </box>
+                        <box class="inline width-full">
+                          <box class="text-primary width-18">Accept-Encoding</box>
+                          <box>gzip</box>
+                        </box>
+                        <box class="inline width-full">
+                          <box class="text-primary width-18">Cache-Control</box>
+                          <box>no-cache</box>
+                        </box>
+                        <box class="inline width-full">
+                          <box class="text-primary width-18">X-Test-Header</box>
+                          <box>one</box>
+                        </box>
+                        <box class="inline width-full">
+                          <box class="text-primary width-18">X-Test-Header</box>
+                          <box>two</box>
+                        </box>
+                        <box class="inline width-full">
+                          <box class="text-primary width-18">X-Test-Header</box>
+                          <box>three</box>
+                        </box>
+                        <box class="inline width-full">
+                          <box class="text-primary width-18">X-Test-Header</box>
+                          <box>four</box>
+                        </box>
+                      </.scroll>
+                      <box style="grid grid-cols-3 height-1">
+                        <box class="width-8 text-muted">Name</box>
+                        <box id="request-header-value" class="focus:inverse" focusable>
+                          Value input
+                        </box>
+                        <box class="width-7 bg-primary text-bg bold">{" Add "}</box>
+                      </box>
                     </box>
-                    <box class="inline width-full">
-                      <box class="text-primary width-18">Referer</box>
-                      <box>https://example.com/</box>
-                    </box>
-                    <box class="inline width-full">
-                      <box class="text-primary width-18">Accept-Encoding</box>
-                      <box>gzip</box>
-                    </box>
-                    <box class="inline width-full">
-                      <box class="text-primary width-18">Cache-Control</box>
-                      <box>no-cache</box>
-                    </box>
-                    <box class="inline width-full">
-                      <box class="text-primary width-18">X-Test-Header</box>
-                      <box>one</box>
-                    </box>
-                    <box class="inline width-full">
-                      <box class="text-primary width-18">X-Test-Header</box>
-                      <box>two</box>
-                    </box>
-                    <box class="inline width-full">
-                      <box class="text-primary width-18">X-Test-Header</box>
-                      <box>three</box>
-                    </box>
-                    <box class="inline width-full">
-                      <box class="text-primary width-18">X-Test-Header</box>
-                      <box>four</box>
-                    </box>
-                  </.scroll>
-                  <box style="grid grid-cols-3 height-1">
-                    <box class="width-8 text-muted">Name</box>
-                    <box class="focus:inverse" focusable>{" Value input "}</box>
-                    <box class="width-7 bg-primary text-bg bold">{" Add "}</box>
-                  </box>
-                </box>
+                  </:tab>
+                  <:tab value="body" label="Body">
+                    <box class="text-muted">No request body</box>
+                  </:tab>
+                  <:tab value="query" label="Query">
+                    <box class="text-muted">No query parameters</box>
+                  </:tab>
+                  <:tab value="auth" label="Auth">
+                    <box class="text-muted">No auth configured</box>
+                  </:tab>
+                  <:tab value="info" label="Info">
+                    <box class="text-muted">Request metadata</box>
+                  </:tab>
+                  <:tab value="options" label="Options">
+                    <box class="text-muted">No request options</box>
+                  </:tab>
+                </.tabs>
               </box>
               <box style="border-rounded overflow-hidden" class="bg">
-                <box style="inline">
-                  <box class="text-primary bold"> Body </box>
-                  <box class="text-muted"> Headers  Cookies  Trace </box>
-                </box>
-                <box>{"  1  {"}</box>
-                <box>{"  2    \"title\": \"foo\","}</box>
-                <box>{"  3    \"body\": \"bar\","}</box>
-                <box>{"  4    \"userId\": 1,"}</box>
-                <box>{"  5    \"id\": 101"}</box>
-                <box>{"  6  }"}</box>
+                <.tabs
+                  id="response-tabs"
+                  selected={@response_tab}
+                  variant="underline"
+                  br-change="response_tab"
+                  class="width-full height-full"
+                >
+                  <:tab value="body" label="Body">
+                    <box>{"  1  {"}</box>
+                    <box>{"  2    \"title\": \"foo\","}</box>
+                    <box>{"  3    \"body\": \"bar\","}</box>
+                    <box>{"  4    \"userId\": 1,"}</box>
+                    <box>{"  5    \"id\": 101"}</box>
+                    <box>{"  6  }"}</box>
+                  </:tab>
+                  <:tab value="headers" label="Headers">
+                    <box class="text-muted">Response headers</box>
+                  </:tab>
+                  <:tab value="cookies" label="Cookies">
+                    <box class="text-muted">No cookies</box>
+                  </:tab>
+                  <:tab value="trace" label="Trace">
+                    <box class="text-muted">No trace data</box>
+                  </:tab>
+                </.tabs>
               </box>
             </box>
           </box>

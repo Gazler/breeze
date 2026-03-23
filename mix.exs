@@ -39,7 +39,7 @@ defmodule Breeze.MixProject do
   defp deps do
     [
       {:termite, github: "Gazler/termite", override: true},
-      {:back_breeze, github: "Gazler/back_breeze", branch: "feat/border-box", override: true},
+      {:back_breeze, github: "Gazler/back_breeze"},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
       {:telemetry, "~> 1.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}

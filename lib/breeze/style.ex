@@ -122,6 +122,9 @@ defmodule Breeze.Style do
   defp apply_style("overflow-scroll", {style, attrs}, _theme),
     do: {BackBreeze.Style.overflow(style, :scroll), attrs}
 
+  defp apply_style("content-repeat-x", {style, attrs}, _theme),
+    do: {BackBreeze.Style.repeat_x(style), attrs}
+
   defp apply_style("overflow-" <> overflow, {style, attrs}, _theme),
     do: {BackBreeze.Style.overflow(style, String.to_existing_atom(overflow)), attrs}
 
@@ -453,6 +456,9 @@ defmodule Breeze.Style do
 
   defp merge_style_entry(:overflow, value, {style, attrs}, _theme),
     do: {%{style | overflow: value}, attrs}
+
+  defp merge_style_entry(:repeat_x, value, {style, attrs}, _theme),
+    do: {%{style | repeat_x: truthy?(value)}, attrs}
 
   defp merge_style_entry(:scrollbar, value, {style, attrs}, _theme),
     do: {%{style | scrollbar: value}, attrs}
