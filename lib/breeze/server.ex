@@ -214,6 +214,7 @@ defmodule Breeze.Server do
     }
 
     state = maybe_start_reloader(state)
+    if Breeze.Inspector.enabled?(state), do: Breeze.RemoteInspector.register_app(self())
 
     {:ok, render_base(state)}
   end
@@ -737,8 +738,8 @@ defmodule Breeze.Server do
               |> increment_debug_stat(:render_base_count)
               |> Map.put(:base_output, base_output)
               |> Map.put(:rendered_elements, viewports_from_acc(acc))
-              |> merge_inspector_render_data(acc)
               |> Map.put(:rendered_boxes, acc.boxes)
+              |> merge_inspector_render_data(acc)
               |> Map.put(:decorations, decorations)
               |> Map.put(:focused, focused)
               |> Map.put(:last_render_at, System.monotonic_time(:millisecond))
@@ -1945,12 +1946,13 @@ defmodule Breeze.Server do
 
   defp merge_inspector_render_data(state, acc) do
     metadata = safe_root_metadata(state)
-    %{viewports: viewports, bounds: bounds, flags: flags} = inspector_nodes(acc)
+    %{viewports: viewports, bounds: bounds, flags: flags, boxes: boxes} = inspector_nodes(acc)
 
     state
     |> Map.put(:rendered_viewports, viewports)
     |> Map.put(:rendered_mouse_targets, bounds)
     |> Map.put(:rendered_flags, flags)
+    |> Map.update(:rendered_boxes, boxes, &Map.merge(&1, boxes))
     |> Map.put(:rendered_focus_meta, Map.get(metadata, :focus_meta, %{}))
     |> Map.put(:rendered_implicit_state, Map.get(metadata, :implicit_state, %{}))
     |> Map.put(:rendered_implicit_meta, Map.get(metadata, :implicit_meta, %{}))
@@ -1972,10 +1974,13 @@ defmodule Breeze.Server do
   end
 
   defp inspector_nodes(acc) do
+    source_boxes = Map.get(acc, :boxes, %{})
+
     acc.elements
     |> Enum.sort()
     |> Enum.zip(acc.dimensions)
-    |> Enum.reduce(%{viewports: %{}, bounds: %{}, flags: %{}}, fn {{idx, flags}, dims}, acc ->
+    |> Enum.reduce(%{viewports: %{}, bounds: %{}, flags: %{}, boxes: %{}}, fn {{idx, flags}, dims},
+                                                                              node_acc ->
       key = inspector_node_key(idx, flags)
       viewport = Breeze.Viewport.from_dimensions(dims)
 
@@ -1991,9 +1996,20 @@ defmodule Breeze.Server do
       }
 
       %{
-        viewports: Map.put(acc.viewports, key, viewport),
-        bounds: Map.put(acc.bounds, key, bounds),
-        flags: Map.put(acc.flags, key, normalized_flags)
+        viewports: Map.put(node_acc.viewports, key, viewport),
+        bounds: Map.put(node_acc.bounds, key, bounds),
+        flags: Map.put(node_acc.flags, key, normalized_flags),
+        boxes:
+          case Map.get(node_acc.boxes, key) do
+            nil ->
+              case Map.get(source_boxes, idx) || Map.get(source_boxes, Keyword.get(flags, :id)) do
+                nil -> node_acc.boxes
+                box -> Map.put(node_acc.boxes, key, box)
+              end
+
+            _box ->
+              node_acc.boxes
+          end
       }
     end)
   end
@@ -2008,9 +2024,10 @@ defmodule Breeze.Server do
   defp push_inspector_snapshot_now(%{inspector: false} = state), do: state
 
   defp push_inspector_snapshot_now(%{inspector_subscribers: subscribers} = state) do
-    if MapSet.size(subscribers) > 0 do
-      snapshot = Breeze.Inspector.snapshot(state)
+    snapshot = Breeze.Inspector.snapshot(state)
+    Breeze.RemoteInspector.publish(snapshot)
 
+    if MapSet.size(subscribers) > 0 do
       Enum.each(subscribers, fn subscriber ->
         if is_pid(subscriber), do: send(subscriber, {:inspector_snapshot, snapshot})
       end)

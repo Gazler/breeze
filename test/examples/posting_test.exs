@@ -198,6 +198,8 @@ defmodule PostingTest do
     snapshot = Breeze.Server.inspector_snapshot(pid)
     assert snapshot.selected_id == selected_id
     assert snapshot.selected.actual_id == nil
+    assert is_binary(snapshot.selected.fragment_preview)
+    assert is_binary(snapshot.selected.fragment_render)
 
     Process.exit(pid, :normal)
   end
@@ -352,7 +354,7 @@ defmodule PostingTest do
     Process.exit(pid, :normal)
   end
 
-  test "posting inspector can cycle outward to the root view" do
+  test "posting inspector only cycles outward when clicking the currently selected element again" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader
 
@@ -387,20 +389,30 @@ defmodule PostingTest do
       end)
       |> Enum.map(fn {id, _bounds} -> id end)
 
-    root_id = List.last(candidates)
-    assert is_binary(root_id)
+    parent_id = Enum.at(candidates, 1)
+    assert is_binary(parent_id)
 
-    Enum.each(1..length(candidates), fn _ ->
-      send(pid, {reader, {:data, "\e[<0;#{x};#{y}M"}})
-    end)
+    send(pid, {reader, {:data, "\e[<0;#{x};#{y}M"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).selected_id == root_id
+      Breeze.Server.inspector_snapshot(pid).selected_id == "method"
+    end)
+
+    send(pid, {reader, {:data, "\e[<0;#{x};#{y}M"}})
+
+    wait_until(fn ->
+      Breeze.Server.inspector_snapshot(pid).selected_id == parent_id
+    end)
+
+    send(pid, {reader, {:data, "\e[<0;#{x};#{y}M"}})
+
+    wait_until(fn ->
+      Breeze.Server.inspector_snapshot(pid).selected_id == "method"
     end)
 
     snapshot = Breeze.Server.inspector_snapshot(pid)
-    assert snapshot.selected_id == root_id
-    assert snapshot.selected.actual_id == nil
+    assert snapshot.selected_id == "method"
+    assert snapshot.selected.actual_id == "method"
 
     Process.exit(pid, :normal)
   end

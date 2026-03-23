@@ -238,6 +238,7 @@ defmodule Breeze.RenderState do
 
     root_attrs =
       root_attrs
+      |> Map.put(:id, id)
       |> Map.put(:"screen-width", screen_width)
       |> Map.put(:"screen-height", screen_height)
 

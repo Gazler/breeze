@@ -2,7 +2,7 @@
 Use left/right arrows while the ta
 The tab bar should scroll horizont
 [38;5;4m╭──────────────────────────────╮[0m
-[38;5;4m│[0m Overview [1;48;5;4;38;5;7m Requests [0m Responses[38;5;4m│[0m
+[38;5;4m│[0m Overview [1;38;5;4m Requests [0m Responses[38;5;4m│[0m
 [38;5;4m│[0m[1mRequests[0m                     ▲[38;5;4m│[0m
 [38;5;4m│[0mSelected tab value: requests █[38;5;4m│[0m
 [38;5;4m│[0m                             │[38;5;4m│[0m

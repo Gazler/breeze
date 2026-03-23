@@ -5,6 +5,7 @@ defmodule Breeze.Inspector do
 
   @panel_height 11
   @max_preview_lines 2
+  @max_render_preview_lines 3
 
   def panel_height, do: @panel_height
 
@@ -64,7 +65,15 @@ defmodule Breeze.Inspector do
       state
     else
       targets = targets_at(state, x, y)
-      id = next_target(targets, Map.get(state, :inspector_selected_id))
+      current = Map.get(state, :inspector_selected_id)
+      hovered = List.first(targets)
+
+      id =
+        if hovered == current do
+          next_target(targets, current)
+        else
+          hovered
+        end
 
       state
       |> Map.put(:inspector_selected_id, id)
@@ -91,6 +100,7 @@ defmodule Breeze.Inspector do
     screen = Map.get(state.terminal, :size, %{width: 0, height: 0})
     selected_id = Map.get(state, :inspector_selected_id)
     hovered_id = Map.get(state, :inspector_hovered_id)
+    focusable_ids = focusable_ids(state)
 
     %{
       enabled?: enabled?(state),
@@ -100,10 +110,29 @@ defmodule Breeze.Inspector do
       focused: Map.get(state, :focused),
       root_view: Map.get(state, :view),
       theme: Map.get(state, :theme),
+      source: %{
+        node: node(),
+        server_pid: self(),
+        view_pid: Map.get(state, :view_pid)
+      },
       screen: screen,
+      last_render_at: Map.get(state, :last_render_at),
+      last_interaction_at: Map.get(state, :last_interaction_at),
+      counts: %{
+        elements: map_size(Map.get(state, :rendered_flags, %{})),
+        focusables: length(focusable_ids),
+        mouse_targets: map_size(Map.get(state, :rendered_mouse_targets, %{})),
+        children: map_size(Map.get(state, :children, %{}))
+      },
+      focus: %{
+        active_scope: active_trapped_scope_id(state, focusable_ids),
+        focusables: focusable_ids,
+        focus_memory: Map.get(state, :focus_memory, %{})
+      },
       toggle_key: toggle_key(state),
       move_key: move_key(state),
       panel_position: panel_position(state),
+      focused_entry: selected_snapshot(state, Map.get(state, :focused)),
       hovered: selected_snapshot(state, hovered_id),
       selected: selected_snapshot(state, selected_id)
     }
@@ -113,8 +142,15 @@ defmodule Breeze.Inspector do
     snapshot = snapshot(state)
 
     if snapshot.visible? do
-      hover_overlays(snapshot.hovered, snapshot.selected_id) ++
-        selected_overlays(snapshot.selected) ++ panel_overlays(snapshot, state)
+      overlays =
+        hover_overlays(snapshot.hovered, snapshot.selected_id) ++
+          selected_overlays(snapshot.selected)
+
+      if remote_delegate?() do
+        overlays
+      else
+        overlays ++ panel_overlays(snapshot, state)
+      end
     else
       []
     end
@@ -137,19 +173,23 @@ defmodule Breeze.Inspector do
   end
 
   defp inside_panel?(state, x, y) do
-    screen = Map.get(state.terminal, :size, %{width: 0, height: 0})
-    row = y - 1
-    col = x - 1
+    if remote_delegate?() do
+      false
+    else
+      screen = Map.get(state.terminal, :size, %{width: 0, height: 0})
+      row = y - 1
+      col = x - 1
 
-    panel_top =
-      case panel_position(state) do
-        :top -> 0
-        _ -> max(screen.height - @panel_height, 0)
-      end
+      panel_top =
+        case panel_position(state) do
+          :top -> 0
+          _ -> max(screen.height - @panel_height, 0)
+        end
 
-    panel_bottom = panel_top + @panel_height - 1
+      panel_bottom = panel_top + @panel_height - 1
 
-    row >= panel_top and row <= panel_bottom and col >= 0 and col < screen.width
+      row >= panel_top and row <= panel_bottom and col >= 0 and col < screen.width
+    end
   end
 
   defp next_target([], _current), do: nil
@@ -191,6 +231,9 @@ defmodule Breeze.Inspector do
           ""
       end
 
+    style = resolved_style(box, flags, state.theme)
+    padding = padding(box, style)
+
     %{
       id: id,
       actual_id: actual_id,
@@ -198,14 +241,20 @@ defmodule Breeze.Inspector do
       bounds: bounds,
       flags: flags,
       class: Map.get(flags, :class),
-      style: resolved_style(box, flags, state.theme),
+      component: Map.get(flags, :"breeze-component"),
+      style_input: Map.get(flags, :style_input),
+      style: style,
       focus_meta: focus_meta,
+      focus_path: focus_path(state, focus_meta),
+      remembered_focus: remembered_focus(state, focus_meta),
       implicit_module: implicit_module,
       implicit_state: implicit_state,
       implicit_meta: implicit_meta,
       fragment_preview: preview_fragment(fragment),
-      content_box: content_box(viewport, box),
-      padding: padding(box),
+      fragment_render: render_fragment_preview(fragment),
+      fragment_size: String.length(fragment),
+      content_box: content_box(viewport, box, style),
+      padding: padding,
       scroll: Map.get(flags, :scroll)
     }
   end
@@ -239,9 +288,74 @@ defmodule Breeze.Inspector do
 
   defp has_element?(_state, _id), do: false
 
-  defp content_box(viewport, %BackBreeze.Box{} = box) do
+  defp focusable_ids(state) do
+    state
+    |> Map.get(:rendered_flags, %{})
+    |> Enum.filter(fn {_id, flags} ->
+      Map.get(normalize_flags(flags), :focusable, false)
+    end)
+    |> Enum.map(fn {id, _flags} -> id end)
+    |> Enum.sort()
+  end
+
+  defp active_trapped_scope_id(state, focusable_ids) do
+    focus_meta = Map.get(state, :rendered_focus_meta, %{})
+
+    focusable_ids
+    |> Enum.flat_map(fn id ->
+      case Map.get(focus_meta, id) do
+        nil ->
+          []
+
+        meta ->
+          trapped_ancestors =
+            Enum.filter(Map.get(meta, :scope_path, []), &trapped_scope_id?(focus_meta, &1))
+
+          if Map.get(meta, :focus_scope) == :trap do
+            trapped_ancestors ++ [Map.get(meta, :id)]
+          else
+            trapped_ancestors
+          end
+      end
+    end)
+    |> List.last()
+  end
+
+  defp trapped_scope_id?(focus_meta, scope_id) do
+    match?(%{focus_scope: :trap}, Map.get(focus_meta, scope_id))
+  end
+
+  defp focus_path(_state, %{} = focus_meta) do
+    (Map.get(focus_meta, :scope_path, []) ++ [Map.get(focus_meta, :id)])
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp focus_path(_state, _focus_meta), do: []
+
+  defp remembered_focus(state, %{} = focus_meta) do
+    focus_memory = Map.get(state, :focus_memory, %{})
+
+    %{
+      root: Map.get(focus_memory, :__root__),
+      scope: Map.get(focus_memory, Map.get(focus_meta, :id)),
+      trapped_scope:
+        focus_meta
+        |> Map.get(:scope_path, [])
+        |> Enum.reverse()
+        |> Enum.find(&trapped_scope_id?(Map.get(state, :rendered_focus_meta, %{}), &1))
+        |> then(&Map.get(focus_memory, &1))
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+  end
+
+  defp remembered_focus(_state, _focus_meta), do: %{}
+
+  defp content_box(viewport, %BackBreeze.Box{} = box, style) do
+    style = merge_box_style(box, style)
+
     %{left: left_inset, right: right_inset, top: top_inset, bottom: bottom_inset} =
-      inner_insets(box)
+      inner_insets(style)
 
     %{
       left: viewport.left + left_inset,
@@ -251,11 +365,25 @@ defmodule Breeze.Inspector do
     }
   end
 
-  defp content_box(viewport, _box) do
+  defp content_box(viewport, _box, style) when is_map(style) do
+    %{left: left_inset, right: right_inset, top: top_inset, bottom: bottom_inset} =
+      inner_insets(style)
+
+    %{
+      left: viewport.left + left_inset,
+      top: viewport.top + top_inset,
+      width: max((viewport.width || 0) - left_inset - right_inset, 0),
+      height: max(viewport.height - top_inset - bottom_inset, 0)
+    }
+  end
+
+  defp content_box(viewport, _box, _style) do
     %{left: viewport.left, top: viewport.top, width: viewport.width || 0, height: viewport.height}
   end
 
-  defp padding(%BackBreeze.Box{style: style}) do
+  defp padding(%BackBreeze.Box{style: box_style}, style) do
+    style = merge_box_style(%BackBreeze.Box{style: box_style}, style)
+
     %{
       top: style_value(style, :padding_top),
       right: style_value(style, :padding_right),
@@ -264,7 +392,16 @@ defmodule Breeze.Inspector do
     }
   end
 
-  defp padding(_box), do: %{top: 0, right: 0, bottom: 0, left: 0}
+  defp padding(_box, style) when is_map(style) do
+    %{
+      top: style_value(style, :padding_top),
+      right: style_value(style, :padding_right),
+      bottom: style_value(style, :padding_bottom),
+      left: style_value(style, :padding_left)
+    }
+  end
+
+  defp padding(_box, _style), do: %{top: 0, right: 0, bottom: 0, left: 0}
 
   defp resolved_style(%BackBreeze.Box{style: style}, _flags, _theme) when is_map(style), do: style
 
@@ -305,6 +442,24 @@ defmodule Breeze.Inspector do
     }
   end
 
+  defp inner_insets(%{border: border} = style) when is_map(style) do
+    %{
+      left: border_inset(border, :left) + style_value(style, :padding_left),
+      right: border_inset(border, :right) + style_value(style, :padding_right),
+      top: border_inset(border, :top) + style_value(style, :padding_top),
+      bottom: border_inset(border, :bottom) + style_value(style, :padding_bottom)
+    }
+  end
+
+  defp inner_insets(style) when is_map(style) do
+    %{
+      left: style_value(style, :padding_left),
+      right: style_value(style, :padding_right),
+      top: style_value(style, :padding_top),
+      bottom: style_value(style, :padding_bottom)
+    }
+  end
+
   defp border_inset(border, side) do
     if Map.get(border, side), do: 1, else: 0
   end
@@ -315,6 +470,24 @@ defmodule Breeze.Inspector do
       _ -> 0
     end
   end
+
+  defp merge_box_style(%BackBreeze.Box{style: box_style}, resolved_style)
+       when is_map(box_style) and is_map(resolved_style) do
+    box_style =
+      case box_style do
+        %{__struct__: _struct} -> Map.from_struct(box_style)
+        other -> other
+      end
+
+    Map.merge(resolved_style, box_style, fn _key, resolved, box ->
+      case box do
+        nil -> resolved
+        _ -> box
+      end
+    end)
+  end
+
+  defp merge_box_style(_box, resolved_style), do: resolved_style
 
   defp selected_overlays(nil), do: []
 
@@ -586,6 +759,13 @@ defmodule Breeze.Inspector do
     |> truncate(140)
   end
 
+  defp render_fragment_preview(fragment) do
+    fragment
+    |> String.split("\n")
+    |> Enum.take(@max_render_preview_lines)
+    |> Enum.join("\n")
+  end
+
   defp compact_inspect(value, width) do
     value
     |> inspect(pretty: true, limit: 8, printable_limit: width)
@@ -626,6 +806,8 @@ defmodule Breeze.Inspector do
 
     %{width: 4, foreground_color: swatch_color, background_color: palette.background}
   end
+
+  defp remote_delegate?, do: Breeze.RemoteInspector.available?()
 
   defp truncate(text, width) when is_integer(width) and width > 3 do
     if String.length(text) > width do
