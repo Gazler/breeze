@@ -3,6 +3,7 @@ defmodule Breeze.Renderer do
 
   alias BackBreeze.Box
   alias Breeze.Style, as: RenderStyle
+  alias Breeze.Theme
 
   def render_to_string(mod, assigns, opts \\ []) do
     {_, %{content: content}} = render(mod, assigns, opts)
@@ -60,6 +61,8 @@ defmodule Breeze.Renderer do
       profile(profile_scope, profile_label, :layout_us, fn ->
         BackBreeze.Box.render_with_dimensions(box, opts)
       end)
+
+    box = maybe_dim_screen_backdrop(box, acc, dimensions, root_children, opts)
 
     emit_metric(profile_scope, profile_label, :element_count, map_size(acc.elements))
 
@@ -400,6 +403,174 @@ defmodule Breeze.Renderer do
   defp normalize_animation_result({:ok, %Box{} = box, _opts}), do: {box, %{}}
   defp normalize_animation_result({:ok, %Box{} = box}), do: {box, %{}}
   defp normalize_animation_result(%Box{} = box), do: {box, %{}}
+
+  defp maybe_dim_screen_backdrop(
+         %{layer_map: layer_map} = box,
+         acc,
+         dimensions,
+         _root_children,
+         opts
+       )
+       when is_map(layer_map) and map_size(layer_map) > 0 do
+    theme = Theme.new(Keyword.get(opts, :theme_source, Keyword.get(opts, :theme)))
+
+    if screen_dimming_supported?(theme) do
+      regions = screen_dim_regions(acc, dimensions)
+
+      if regions == [] do
+        box
+      else
+        background = Theme.resolve_color(theme, :background_color)
+        layer_map = dim_layer_map_outside_regions(box.layer_map, regions, background, 0.45)
+
+        %{
+          box
+          | layer_map: layer_map,
+            content: Box.layer_map_to_content(layer_map, box.width, box.height)
+        }
+      end
+    else
+      box
+    end
+  end
+
+  defp maybe_dim_screen_backdrop(box, _acc, _dimensions, _root_children, _opts), do: box
+
+  defp screen_dimming_supported?(theme) do
+    case theme.mode do
+      :system16 -> false
+      _ -> rgb_color?(Theme.resolve_color(theme, :background_color))
+    end
+  end
+
+  defp screen_dim_regions(acc, dimensions) do
+    acc.elements
+    |> Enum.sort()
+    |> Enum.zip(dimensions)
+    |> Enum.flat_map(fn {{_idx, flags}, dims} ->
+      if Keyword.get(flags, :"screen-dim") do
+        [
+          %{
+            left: Map.get(dims, :left, 0),
+            top: Map.get(dims, :top, 0),
+            right: Map.get(dims, :left, 0) + max(Map.get(dims, :width, 0) - 1, 0),
+            bottom: Map.get(dims, :top, 0) + max(Map.get(dims, :height, 0) - 1, 0)
+          }
+        ]
+      else
+        []
+      end
+    end)
+  end
+
+  defp dim_layer_map_outside_regions(layer_map, regions, background, amount) do
+    {dimmed_map, _seq_cache} =
+      Enum.reduce(layer_map, {%{}, %{}}, fn
+        {key, value}, {acc, seq_cache} when key == :__wide_glyphs__ ->
+          {Map.put(acc, key, value), seq_cache}
+
+        {{y, x} = key, {char, seq}}, {acc, seq_cache} ->
+          if point_in_any_region?(x, y, regions) do
+            {Map.put(acc, key, {char, seq}), seq_cache}
+          else
+            {dimmed_seq, seq_cache} = dim_ansi_sequence(seq, background, amount, seq_cache)
+            {Map.put(acc, key, {char, dimmed_seq}), seq_cache}
+          end
+      end)
+
+    dimmed_map
+  end
+
+  defp point_in_any_region?(x, y, regions) do
+    Enum.any?(regions, fn region ->
+      x >= region.left and x <= region.right and y >= region.top and y <= region.bottom
+    end)
+  end
+
+  defp dim_ansi_sequence(seq, _background, _amount, cache) when seq in ["", nil] do
+    {seq || "", cache}
+  end
+
+  defp dim_ansi_sequence(seq, background, amount, cache) do
+    case cache do
+      %{^seq => dimmed_seq} ->
+        {dimmed_seq, cache}
+
+      _ ->
+        dimmed_seq = dim_ansi_sgr_sequence(seq, background, amount)
+
+        {dimmed_seq, Map.put(cache, seq, dimmed_seq)}
+    end
+  end
+
+  defp dim_ansi_sgr_sequence(seq, background, amount) do
+    Regex.replace(~r/\e\[([0-9;]+)m/, seq, fn _, params ->
+      params =
+        params
+        |> String.split(";", trim: true)
+        |> dim_sgr_params(background, amount, [])
+        |> Enum.join(";")
+
+      "\e[" <> params <> "m"
+    end)
+  end
+
+  defp dim_sgr_params(["38", "2", red, green, blue | rest], background, amount, acc) do
+    {dim_red, dim_green, dim_blue} =
+      Theme.blend(
+        {String.to_integer(red), String.to_integer(green), String.to_integer(blue)},
+        background,
+        amount
+      )
+
+    dim_sgr_params(
+      rest,
+      background,
+      amount,
+      acc ++
+        [
+          "38",
+          "2",
+          Integer.to_string(dim_red),
+          Integer.to_string(dim_green),
+          Integer.to_string(dim_blue)
+        ]
+    )
+  end
+
+  defp dim_sgr_params(["48", "2", red, green, blue | rest], background, amount, acc) do
+    {dim_red, dim_green, dim_blue} =
+      Theme.blend(
+        {String.to_integer(red), String.to_integer(green), String.to_integer(blue)},
+        background,
+        amount
+      )
+
+    dim_sgr_params(
+      rest,
+      background,
+      amount,
+      acc ++
+        [
+          "48",
+          "2",
+          Integer.to_string(dim_red),
+          Integer.to_string(dim_green),
+          Integer.to_string(dim_blue)
+        ]
+    )
+  end
+
+  defp dim_sgr_params([param | rest], background, amount, acc) do
+    dim_sgr_params(rest, background, amount, acc ++ [param])
+  end
+
+  defp dim_sgr_params([], _background, _amount, acc), do: acc
+
+  defp rgb_color?({red, green, blue}) when red in 0..255 and green in 0..255 and blue in 0..255,
+    do: true
+
+  defp rgb_color?(_), do: false
 
   defp namespace_live_acc(acc, prefix) do
     acc

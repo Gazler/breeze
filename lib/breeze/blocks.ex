@@ -553,6 +553,7 @@ defmodule Breeze.Blocks do
   attr :inset, :integer, default: nil
   attr :inset_x, :integer, default: nil
   attr :inset_y, :integer, default: nil
+  attr :dim, :boolean, default: false
   attr :class, :string, default: nil
   attr :style, :any, default: nil
   attr :frame_class, :string, default: nil
@@ -619,6 +620,7 @@ defmodule Breeze.Blocks do
       focusable
       focus-scope="trap"
       implicit={Breeze.Implicit.Modal}
+      screen-dim={@dim}
       class={@frame_class}
       style={Breeze.Blocks.inline_style(assigns, :frame_class, :frame_style)}
       {@rest}

@@ -82,7 +82,12 @@ defmodule Breeze.ExampleSnapshotTest do
   end
 
   test "modal example snapshots opening and confirming the modal" do
-    session = Breeze.Test.start!(ModalExample, size: {80, 24})
+    session =
+      Breeze.Test.start!(ModalExample,
+        size: {80, 24},
+        theme: Breeze.Theme.builtin(:gruvbox)
+      )
+
     on_exit(fn -> Breeze.Test.stop(session) end)
 
     assert_snapshot(Breeze.Test.render!(session), "examples/modal/initial.ansi",
@@ -103,7 +108,12 @@ defmodule Breeze.ExampleSnapshotTest do
   end
 
   test "modal example snapshots opening the inset modal" do
-    session = Breeze.Test.start!(ModalExample, size: {80, 24})
+    session =
+      Breeze.Test.start!(ModalExample,
+        size: {80, 24},
+        theme: Breeze.Theme.builtin(:gruvbox)
+      )
+
     on_exit(fn -> Breeze.Test.stop(session) end)
 
     assert {:noreply, _focused, true} = Breeze.Test.input(session, "3")

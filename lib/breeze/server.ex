@@ -1147,7 +1147,7 @@ defmodule Breeze.Server do
       [
         "\e[",
         Integer.to_string(row + 1),
-        ";1H\e[2K",
+        ";1H",
         line
       ]
     else

@@ -224,7 +224,7 @@ defmodule Posting do
           </box>
         </box>
       </box>
-      <.modal :if={@show_help} id="help" width={56} height={15} br-change="help_closed">
+      <.modal :if={@show_help} screen-dim id="help" width={56} height={15} br-change="help_closed">
         <:title>Keyboard Shortcuts</:title>
         <box>
         </box>

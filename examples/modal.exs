@@ -6,27 +6,68 @@ defmodule ModalExample do
     {:ok,
      term
      |> focus("open-modal")
-     |> assign(show_modal: false, selected_action: "none", modal_variant: :centered)}
+     |> assign(
+       show_modal: false,
+       selected_action: "none",
+       modal_variant: :centered,
+       spotlight: false,
+       modal_dim: false
+     )}
   end
 
   def render(assigns) do
     ~H"""
-    <box style="width-screen height-screen">
+    <box style="width-screen height-screen bg">
       <box style="bold">Modal example</box>
-      <box>Press Enter, m, or 1/2/3 to open a modal.</box>
-      <box>Tab should stay inside the modal until it closes.</box>
-      <box>Escape closes the modal. q quits the example.</box>
+      <box>Press Enter, m, or 1-7 to open an example.</box>
+      <box>Modal variants trap Tab; the screen-dim example does not.</box>
+      <box>Escape closes the active example. q quits the example.</box>
       <box>
       </box>
-      <box style="bold">Modal sizes</box>
-      <box id="open-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
-        <box style="bold text-center">Centered</box>
+      <box style="bold">Normal</box>
+      <box style="grid grid-cols-3 width-60">
+        <box id="open-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
+          <box style="bold text-center">Centered</box>
+        </box>
+        <box id="open-wide-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
+          <box style="bold text-center">Wide</box>
+        </box>
+        <box id="open-inset-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
+          <box style="bold text-center">Inset</box>
+        </box>
       </box>
-      <box id="open-wide-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
-        <box style="bold text-center">Wide</box>
+      <box>
       </box>
-      <box id="open-inset-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
-        <box style="bold text-center">Inset</box>
+      <box style="bold">Dimmed</box>
+      <box style="grid grid-cols-3 width-60">
+        <box id="open-dim-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
+          <box style="bold text-center">Centered</box>
+        </box>
+        <box
+          id="open-dim-wide-modal"
+          focusable
+          style="border-rounded width-20 height-5 focus:border-4"
+        >
+          <box style="bold text-center">Wide</box>
+        </box>
+        <box
+          id="open-dim-inset-modal"
+          focusable
+          style="border-rounded width-20 height-5 focus:border-4"
+        >
+          <box style="bold text-center">Inset</box>
+        </box>
+      </box>
+      <box>
+      </box>
+      <box style="bold">Non-modal screen dim</box>
+      <box
+        id="spotlight"
+        screen-dim={@spotlight}
+        focusable
+        style="border-rounded width-20 height-5 focus:border-4"
+      >
+        <box style="bold text-center">Spotlight</box>
       </box>
       <box>
       </box>
@@ -39,6 +80,7 @@ defmodule ModalExample do
         id="example-modal"
         width={48}
         height={12}
+        dim={@modal_dim}
         br-change="close_modal"
       >
         <:title>Focused Widget Help</:title>
@@ -80,6 +122,7 @@ defmodule ModalExample do
         id="wide-modal"
         width={66}
         height={14}
+        dim={@modal_dim}
         br-change="close_modal"
       >
         <:title>Wide Modal</:title>
@@ -112,6 +155,7 @@ defmodule ModalExample do
         id="inset-modal"
         inset_x={4}
         inset_y={2}
+        dim={@modal_dim}
         br-change="close_modal"
       >
         <:title>Inset Modal</:title>
@@ -139,6 +183,17 @@ defmodule ModalExample do
           <box style="bold text-center">Close</box>
         </box>
       </.modal>
+      <box
+        :if={@show_modal and @modal_variant == :spotlight}
+        id="screen-dim-demo"
+        screen-dim
+        class="fixed left-18 top-6 width-44 height-8 bg layer-50 border-rounded border-stroke"
+      >
+        <box class="absolute left-2 top-0 bold text">Screen dim only</box>
+        <box>This is a plain box using screen-dim.</box>
+        <box>Background focus still works outside it.</box>
+        <box>Press Escape or 7 to dismiss.</box>
+      </box>
     </box>
     """
   end
@@ -146,31 +201,82 @@ defmodule ModalExample do
   def handle_event("close_modal", _, term), do: {:noreply, assign(term, show_modal: false)}
 
   def handle_event(_, %{"key" => "1"}, term),
-    do: {:noreply, assign(term, show_modal: true, modal_variant: :centered)}
+    do: {:noreply, open_modal(term, :centered, false)}
 
   def handle_event(_, %{"key" => "2"}, term),
-    do: {:noreply, assign(term, show_modal: true, modal_variant: :wide)}
+    do: {:noreply, open_modal(term, :wide, false)}
 
   def handle_event(_, %{"key" => "3"}, term),
-    do: {:noreply, assign(term, show_modal: true, modal_variant: :inset)}
+    do: {:noreply, open_modal(term, :inset, false)}
+
+  def handle_event(_, %{"key" => "4"}, term),
+    do: {:noreply, open_modal(term, :centered, true)}
+
+  def handle_event(_, %{"key" => "5"}, term),
+    do: {:noreply, open_modal(term, :wide, true)}
+
+  def handle_event(_, %{"key" => "6"}, term),
+    do: {:noreply, open_modal(term, :inset, true)}
+
+  def handle_event(
+        _,
+        %{"key" => "7"},
+        %{assigns: %{show_modal: true, modal_variant: :spotlight}} = term
+      ),
+      do: {:noreply, assign(term, show_modal: false)}
+
+  def handle_event(_, %{"key" => "7"}, term),
+    do: {:noreply, open_modal(term, :spotlight, false)}
 
   def handle_event(_, %{"key" => key}, %{assigns: %{show_modal: false}} = term)
       when key in ["Enter", "m"] and term.focused == "open-modal" do
-    {:noreply, assign(term, show_modal: true, modal_variant: :centered)}
+    {:noreply, open_modal(term, :centered, false)}
   end
 
   def handle_event(_, %{"key" => key}, %{assigns: %{show_modal: false}} = term)
       when key in ["Enter", "m"] and term.focused == "open-wide-modal" do
-    {:noreply, assign(term, show_modal: true, modal_variant: :wide)}
+    {:noreply, open_modal(term, :wide, false)}
   end
 
   def handle_event(_, %{"key" => key}, %{assigns: %{show_modal: false}} = term)
       when key in ["Enter", "m"] and term.focused == "open-inset-modal" do
-    {:noreply, assign(term, show_modal: true, modal_variant: :inset)}
+    {:noreply, open_modal(term, :inset, false)}
+  end
+
+  def handle_event(_, %{"key" => key}, %{assigns: %{show_modal: false}} = term)
+      when key in ["Enter", "m"] and term.focused == "open-dim-modal" do
+    {:noreply, open_modal(term, :centered, true)}
+  end
+
+  def handle_event(_, %{"key" => key}, %{assigns: %{show_modal: false}} = term)
+      when key in ["Enter", "m"] and term.focused == "open-dim-wide-modal" do
+    {:noreply, open_modal(term, :wide, true)}
+  end
+
+  def handle_event(_, %{"key" => key}, %{assigns: %{show_modal: false}} = term)
+      when key in ["Enter", "m"] and term.focused == "open-dim-inset-modal" do
+    {:noreply, open_modal(term, :inset, true)}
+  end
+
+  def handle_event(_, %{"key" => key}, %{assigns: %{show_modal: false}} = term)
+      when key in ["Enter", "m"] and term.focused == "spotlight" do
+    {:noreply, assign(term, spotlight: !term.assigns.spotlight)}
+  end
+
+  def handle_event(_, %{"key" => key}, %{assigns: %{show_modal: false}} = term)
+      when key in ["Enter", "m"] and term.focused == "open-screen-dim" do
+    {:noreply, open_modal(term, :spotlight, false)}
   end
 
   def handle_event(_, %{"key" => "m"}, term),
-    do: {:noreply, assign(term, show_modal: true, modal_variant: :centered)}
+    do: {:noreply, open_modal(term, :centered, false)}
+
+  def handle_event(
+        _,
+        %{"key" => "Escape"},
+        %{assigns: %{show_modal: true, modal_variant: :spotlight}} = term
+      ),
+      do: {:noreply, assign(term, show_modal: false)}
 
   def handle_event(
         _,
@@ -198,12 +304,17 @@ defmodule ModalExample do
   def handle_event(_, _, term), do: {:noreply, term}
 
   def handle_info(_, term), do: {:noreply, term}
+
+  defp open_modal(term, modal_variant, modal_dim) do
+    assign(term, show_modal: true, modal_variant: modal_variant, modal_dim: modal_dim)
+  end
 end
 
 Breeze.Example.run(
   [
     view: ModalExample,
     hide_cursor: true,
+    theme: Breeze.Theme.builtin(:gruvbox),
     global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
   ],
   keep_alive: :infinity
