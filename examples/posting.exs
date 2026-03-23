@@ -6,7 +6,6 @@ defmodule Posting do
   alias Breeze.Theme
 
   @methods ["GET", "POST", "PUT", "PATCH", "DELETE"]
-
   @collection [
     {"echo_get", "GET  echo"},
     {"echo_post", "POST echo post"},
@@ -47,7 +46,10 @@ defmodule Posting do
         actual_theme_mode: term.theme.mode,
         theme_status: Breeze.Theme.probe_status(term.theme) || :ready,
         show_debug: System.get_env("BREEZE_DEBUG") == "1",
-        show_help: false
+        show_help: false,
+        request_headers: [],
+        request_header_name: "",
+        request_header_value: ""
       )
 
     {:ok, term}
@@ -55,7 +57,7 @@ defmodule Posting do
 
   def render(assigns) do
     ~H"""
-    <box class="width-screen height-screen bg padding-top-1">
+    <box class="width-screen height-screen bg">
       <box class="grid grid-cols-1 width-full height-full padding-left-2 padding-right-2">
         <box class="height-3 padding-top-1 padding-bottom-1">
           <box class="inline width-full height-1">
@@ -110,49 +112,49 @@ defmodule Posting do
                   <:tab value="headers" label="Headers">
                     <box style="grid grid-cols-1 grid-rows-2 height-full">
                       <.scroll
-                        id="request-headers-scroll"
+                        id="request-tabs-panel-headers"
+                        scroll-autoscroll="bottom"
                         class="height-full overflow-scroll bg"
                         style={%{scrollbar: %{arrows: true}}}
                       >
-                        <box class="inline width-full">
-                          <box class="text-primary width-18">Content-Type</box>
-                          <box>application/json</box>
+                        <box
+                          :if={@request_headers == []}
+                          class="width-full height-full bg overflow-hidden"
+                        >
+                          <box
+                            class="absolute left-0 top-0 width-full height-full text-mute-70 overflow-hidden content-repeat"
+                          >
+                            ╱
+                          </box>
+                          <box class="absolute center text-center bold text-mute-40">No Headers</box>
                         </box>
-                        <box class="inline width-full">
-                          <box class="text-primary width-18">Referer</box>
-                          <box>https://example.com/</box>
-                        </box>
-                        <box class="inline width-full">
-                          <box class="text-primary width-18">Accept-Encoding</box>
-                          <box>gzip</box>
-                        </box>
-                        <box class="inline width-full">
-                          <box class="text-primary width-18">Cache-Control</box>
-                          <box>no-cache</box>
-                        </box>
-                        <box class="inline width-full">
-                          <box class="text-primary width-18">X-Test-Header</box>
-                          <box>one</box>
-                        </box>
-                        <box class="inline width-full">
-                          <box class="text-primary width-18">X-Test-Header</box>
-                          <box>two</box>
-                        </box>
-                        <box class="inline width-full">
-                          <box class="text-primary width-18">X-Test-Header</box>
-                          <box>three</box>
-                        </box>
-                        <box class="inline width-full">
-                          <box class="text-primary width-18">X-Test-Header</box>
-                          <box>four</box>
+                        <box :for={{name, value} <- @request_headers} class="inline width-full">
+                          <box class="text-primary width-18">{name}</box>
+                          <box>{value}</box>
                         </box>
                       </.scroll>
-                      <box style="grid grid-cols-3 height-1">
-                        <box class="width-8 text-muted">Name</box>
-                        <box id="request-header-value" class="focus:inverse" focusable>
-                          Value input
+                      <box style="grid grid-cols-3 gap-x-1 height-1">
+                        <.input
+                          id="request-header-name"
+                          input-value={@request_header_name}
+                          input-placeholder="Header name"
+                          br-change="request_header_name_changed"
+                          style="width-20"
+                        />
+                        <.input
+                          id="request-header-value"
+                          input-value={@request_header_value}
+                          input-placeholder="Header value"
+                          br-change="request_header_value_changed"
+                          style="width-full"
+                        />
+                        <box
+                          id="request-header-add"
+                          class="width-7 bg-primary text-bg bold focus:inverse"
+                          focusable
+                        >
+                          {" Add "}
                         </box>
-                        <box class="width-7 bg-primary text-bg bold">{" Add "}</box>
                       </box>
                     </box>
                   </:tab>
@@ -292,6 +294,12 @@ defmodule Posting do
   def handle_event("method_changed", %{value: method, index: index}, term),
     do: {:noreply, assign(term, method: method, method_index: index)}
 
+  def handle_event("request_header_name_changed", %{value: value}, term),
+    do: {:noreply, assign(term, request_header_name: value)}
+
+  def handle_event("request_header_value_changed", %{value: value}, term),
+    do: {:noreply, assign(term, request_header_value: value)}
+
   def handle_event(_, %{"key" => "\x14"}, term) do
     term =
       update_implicit(term, "method", fn
@@ -314,6 +322,14 @@ defmodule Posting do
 
   def handle_event("response_tab", %{value: tab}, term),
     do: {:noreply, assign(term, response_tab: tab)}
+
+  def handle_event(_, %{"key" => "Enter"}, %{focused: "request-header-name"} = term),
+    do: {:noreply, focus(term, "request-header-value")}
+
+  def handle_event(_, %{"key" => "Enter"}, %{focused: focused} = term)
+      when focused in ["request-header-value", "request-header-add"] do
+    {:noreply, add_request_header(term)}
+  end
 
   def handle_event("help_closed", _, term),
     do: {:noreply, term |> assign(show_help: false) |> focus("url")}
@@ -348,6 +364,22 @@ defmodule Posting do
   def handle_info(:resize, term), do: {:noreply, term}
 
   def handle_info(_, term), do: {:noreply, term}
+
+  defp add_request_header(term) do
+    name = String.trim(term.assigns.request_header_name || "")
+    value = String.trim(term.assigns.request_header_value || "")
+
+    if name == "" or value == "" do
+      term
+    else
+      assign(term,
+        request_headers: term.assigns.request_headers ++ [{name, value}],
+        request_header_name: "",
+        request_header_value: ""
+      )
+      |> focus("request-header-name")
+    end
+  end
 
   defp next_theme(:system16), do: {:system, :system}
   defp next_theme(:system), do: {:nebula, Theme.builtin(:nebula)}

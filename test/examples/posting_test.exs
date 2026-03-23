@@ -47,6 +47,40 @@ defmodule PostingTest do
     assert %{focused: "method"} = Breeze.ChildServer.metadata(pid)
   end
 
+  test "headers form adds a request header" do
+    terminal = %Termite.Terminal{size: %{width: 120, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert visible(box.content) =~ "╱╱╱"
+
+    assert {:noreply, "request-header-name", true} =
+             Breeze.ChildServer.set_focus(pid, "request-header-name")
+
+    for key <- String.graphemes("X-Demo") do
+      assert {:noreply, "request-header-name", true} = Breeze.ChildServer.dispatch_input(pid, key)
+    end
+
+    assert {:noreply, "request-header-value", true} =
+             Breeze.ChildServer.dispatch_input(pid, "Enter")
+
+    for key <- String.graphemes("true") do
+      assert {:noreply, "request-header-value", true} =
+               Breeze.ChildServer.dispatch_input(pid, key)
+    end
+
+    assert {:noreply, "request-header-name", true} =
+             Breeze.ChildServer.dispatch_input(pid, "Enter")
+
+    assert {:ok, _acc, updated_box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    rendered = visible(updated_box.content)
+
+    assert rendered =~ "X-Demo"
+    assert rendered =~ "true"
+    refute rendered =~ "╱╱╱"
+    assert %{focused: "request-header-name"} = Breeze.ChildServer.metadata(pid)
+  end
+
   defmodule FakeAdapter do
     @behaviour Termite.Terminal.Adapter
 

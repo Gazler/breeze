@@ -115,6 +115,26 @@ defmodule Breeze.Style do
     {style, Map.put(attrs, :display, %{display | rows: String.to_integer(num)})}
   end
 
+  defp apply_style("gap-x-" <> num, {style, attrs}, _theme) do
+    display =
+      case Map.get(attrs, :display) do
+        %BackBreeze.Grid{} = grid -> grid
+        _ -> %BackBreeze.Grid{}
+      end
+
+    {style, Map.put(attrs, :display, %{display | gap_x: String.to_integer(num)})}
+  end
+
+  defp apply_style("gap-y-" <> num, {style, attrs}, _theme) do
+    display =
+      case Map.get(attrs, :display) do
+        %BackBreeze.Grid{} = grid -> grid
+        _ -> %BackBreeze.Grid{}
+      end
+
+    {style, Map.put(attrs, :display, %{display | gap_y: String.to_integer(num)})}
+  end
+
   defp apply_style("layer-" <> num, {style, attrs}, _theme) do
     {style, Map.put(attrs, :layer, String.to_integer(num))}
   end
@@ -122,8 +142,14 @@ defmodule Breeze.Style do
   defp apply_style("overflow-scroll", {style, attrs}, _theme),
     do: {BackBreeze.Style.overflow(style, :scroll), attrs}
 
+  defp apply_style("content-repeat", {style, attrs}, _theme),
+    do: {BackBreeze.Style.repeat(style), attrs}
+
   defp apply_style("content-repeat-x", {style, attrs}, _theme),
     do: {BackBreeze.Style.repeat_x(style), attrs}
+
+  defp apply_style("content-repeat-y", {style, attrs}, _theme),
+    do: {BackBreeze.Style.repeat_y(style), attrs}
 
   defp apply_style("overflow-" <> overflow, {style, attrs}, _theme),
     do: {BackBreeze.Style.overflow(style, String.to_existing_atom(overflow)), attrs}
@@ -459,6 +485,9 @@ defmodule Breeze.Style do
 
   defp merge_style_entry(:repeat_x, value, {style, attrs}, _theme),
     do: {%{style | repeat_x: truthy?(value)}, attrs}
+
+  defp merge_style_entry(:repeat_y, value, {style, attrs}, _theme),
+    do: {%{style | repeat_y: truthy?(value)}, attrs}
 
   defp merge_style_entry(:scrollbar, value, {style, attrs}, _theme),
     do: {%{style | scrollbar: value}, attrs}
