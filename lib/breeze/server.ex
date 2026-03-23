@@ -91,7 +91,8 @@ defmodule Breeze.Server do
     rendered_flags: %{},
     rendered_focus_meta: %{},
     rendered_implicit_state: %{},
-    rendered_implicit_meta: %{}
+    rendered_implicit_meta: %{},
+    last_terminal_background: nil
   ]
 
   @type option ::
@@ -160,6 +161,11 @@ defmodule Breeze.Server do
     theme = Breeze.Theme.new(Keyword.get(opts, :theme), terminal: terminal)
     theme_source = Keyword.get(opts, :theme)
     apply_theme_defaults? = Breeze.Theme.defaults_enabled?(Keyword.get(opts, :theme))
+
+    store_initial_terminal_background(
+      terminal,
+      terminal_background_color(Breeze.Theme.new(:system, terminal: terminal))
+    )
 
     session = self()
 
@@ -249,6 +255,13 @@ defmodule Breeze.Server do
 
     state = Map.update!(state, :inspector_subscribers, &MapSet.put(&1, subscriber))
     {:noreply, push_inspector_snapshot_now(state)}
+  end
+
+  @impl true
+  def terminate(_reason, state) do
+    teardown_terminal(state)
+    clear_initial_terminal_background(state.terminal)
+    :ok
   end
 
   @impl true
@@ -1027,11 +1040,14 @@ defmodule Breeze.Server do
 
     composed_at = System.monotonic_time(:microsecond)
 
+    {background_prefix, next_terminal_background} =
+      terminal_background_update(state.theme, state.last_terminal_background)
+
     {terminal, write_duration} =
-      if frame_payload == state.last_frame_payload do
+      if frame_payload == state.last_frame_payload and background_prefix == "" do
         {state.terminal, 0}
       else
-        terminal = Termite.Terminal.write(state.terminal, frame_payload)
+        terminal = Termite.Terminal.write(state.terminal, background_prefix <> frame_payload)
         written_at = System.monotonic_time(:microsecond)
         {terminal, written_at - composed_at}
       end
@@ -1040,6 +1056,7 @@ defmodule Breeze.Server do
     |> Map.put(:terminal, terminal)
     |> Map.put(:decorations, decorations)
     |> Map.put(:last_frame_payload, frame_payload)
+    |> Map.put(:last_terminal_background, next_terminal_background)
     |> Map.put(:last_frame_lines, lines)
     |> Map.put(:last_overlays, overlays)
     |> put_debug_stat(:last_frame_compose_us, composed_at - started_at)
@@ -1427,6 +1444,52 @@ defmodule Breeze.Server do
       Process.exit(state.view_pid, :normal)
     end
 
+    {:stop, :normal, teardown_terminal(state)}
+  end
+
+  defp crashed?(%{crash: crash}), do: not is_nil(crash)
+
+  defp terminal_background_update(theme, last_background) do
+    case terminal_background_color(theme) do
+      color when color == last_background ->
+        {"", last_background}
+
+      {red, green, blue} = color ->
+        {"\e]11;#{hex_color(red, green, blue)}\a", color}
+
+      nil when is_tuple(last_background) ->
+        {"\e]111\a", nil}
+
+      _ ->
+        {"", nil}
+    end
+  end
+
+  defp terminal_background_color(theme) do
+    case Breeze.Theme.resolve_color(theme, :background_color) do
+      {red, green, blue} when red in 0..255 and green in 0..255 and blue in 0..255 ->
+        {red, green, blue}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp hex_color(red, green, blue) do
+    "#" <>
+      String.upcase(Base.encode16(<<red, green, blue>>))
+  end
+
+  defp terminal_background_reset_sequence({red, green, blue}, _last_background),
+    do: "\e]11;#{hex_color(red, green, blue)}\a"
+
+  defp terminal_background_reset_sequence(_initial_terminal_background, last_background)
+       when is_tuple(last_background),
+       do: "\e]111\a"
+
+  defp terminal_background_reset_sequence(_initial_terminal_background, _last_background), do: ""
+
+  defp teardown_terminal(state) do
     terminal =
       state.terminal
       |> Termite.Screen.disable_mouse()
@@ -1434,11 +1497,34 @@ defmodule Breeze.Server do
       |> Termite.Screen.show_cursor()
       |> Termite.Screen.exit_alt_screen()
 
-    terminal = Termite.Terminal.write(terminal, "\r")
-    {:stop, :normal, %{state | terminal: terminal}}
+    terminal =
+      Termite.Terminal.write(
+        terminal,
+        "\r" <>
+          terminal_background_reset_sequence(
+            initial_terminal_background(state.terminal),
+            state.last_terminal_background
+          )
+      )
+
+    %{state | terminal: terminal}
   end
 
-  defp crashed?(%{crash: crash}), do: not is_nil(crash)
+  defp store_initial_terminal_background(terminal, color) do
+    :persistent_term.put(initial_terminal_background_key(terminal), color)
+  end
+
+  defp initial_terminal_background(terminal) do
+    :persistent_term.get(initial_terminal_background_key(terminal), nil)
+  end
+
+  defp clear_initial_terminal_background(terminal) do
+    :persistent_term.erase(initial_terminal_background_key(terminal))
+  end
+
+  defp initial_terminal_background_key(terminal) do
+    {__MODULE__, :initial_terminal_background, Map.get(terminal, :reader)}
+  end
 
   defp safe_apply_input_reply(state, fun) do
     case safe_call(fn -> fun.(state) end) do

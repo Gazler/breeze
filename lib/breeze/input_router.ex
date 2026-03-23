@@ -260,15 +260,8 @@ defmodule Breeze.InputRouter do
 
   defp stop(state) do
     if Process.alive?(state.server_pid) do
-      Process.exit(state.server_pid, :normal)
+      GenServer.stop(state.server_pid, :normal, 1_000)
     end
-
-    state.terminal
-    |> Termite.Screen.disable_mouse()
-    |> Termite.Screen.clear_screen()
-    |> Termite.Screen.show_cursor()
-    |> Termite.Screen.exit_alt_screen()
-    |> Termite.Terminal.write("\r")
 
     {:stop, :normal, state}
   end
