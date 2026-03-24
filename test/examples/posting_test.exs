@@ -111,13 +111,13 @@ defmodule PostingTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      not state.input_flush_scheduled? and state.queued_input == []
+      not state.input_flush_scheduled? and :queue.is_empty(state.queued_input)
     end)
 
     state = :sys.get_state(pid)
 
     refute state.input_flush_scheduled?
-    assert state.queued_input == []
+    assert :queue.is_empty(state.queued_input)
 
     Process.exit(pid, :normal)
   end
@@ -140,7 +140,7 @@ defmodule PostingTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      not state.input_flush_scheduled? and state.queued_input == []
+      not state.input_flush_scheduled? and :queue.is_empty(state.queued_input)
     end)
 
     assert %{enabled?: false, visible?: false, selected_id: nil} =
@@ -262,7 +262,8 @@ defmodule PostingTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      Process.alive?(pid) and not state.input_flush_scheduled? and state.queued_input == []
+      Process.alive?(pid) and not state.input_flush_scheduled? and
+        :queue.is_empty(state.queued_input)
     end)
 
     assert Process.alive?(pid)

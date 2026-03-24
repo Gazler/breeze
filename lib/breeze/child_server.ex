@@ -23,16 +23,28 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, {:render_snapshot, opts})
   end
 
-  def dispatch_input(pid, input) do
-    GenServer.call(pid, {:input, input})
+  def render_server_snapshot(pid, opts) do
+    GenServer.call(pid, {:render_server_snapshot, opts})
+  end
+
+  def dispatch_input(pid, input, opts \\ []) do
+    GenServer.call(pid, {:input, input, opts})
+  end
+
+  def dispatch_inputs(pid, inputs, opts \\ []) do
+    GenServer.call(pid, {:inputs, inputs, opts})
+  end
+
+  def dispatch_inputs_and_render_server_snapshot(pid, inputs, input_opts \\ [], render_opts \\ []) do
+    GenServer.call(pid, {:inputs_and_render_server_snapshot, inputs, input_opts, render_opts})
   end
 
   def set_focus(pid, focused) do
     GenServer.call(pid, {:set_focus, focused})
   end
 
-  def dispatch_event(pid, change, event) do
-    GenServer.call(pid, {:event, change, event})
+  def dispatch_event(pid, change, event, opts \\ []) do
+    GenServer.call(pid, {:event, change, event, opts})
   end
 
   def update_assigns(pid, assigns) do
@@ -128,14 +140,79 @@ defmodule Breeze.ChildServer do
     {:reply, {:ok, acc, box, decorations}, term}
   end
 
-  def handle_call({:event, change, event}, _from, term) do
-    touched_term = touch_interaction(term)
-    reply_from_input_result(handle_event(change, event, touched_term), touched_term)
+  def handle_call({:render_server_snapshot, opts}, _from, term) do
+    {term, _acc, box, decorations} = render_term(term, opts)
+    include_layout? = Keyword.get(opts, :include_layout, false)
+
+    snapshot = %{
+      content: box.content,
+      decorations: decorations,
+      elements: if(include_layout?, do: term.elements, else: nil),
+      mouse_targets: if(include_layout?, do: term.mouse_targets, else: nil),
+      focused: term.focused,
+      theme: term.theme,
+      focus_meta: term.focus_meta,
+      implicit_state: term.implicit_state,
+      implicit_meta: term.implicit_meta
+    }
+
+    {:reply, {:ok, snapshot}, term}
   end
 
-  def handle_call({:input, input}, _from, term) do
+  def handle_call({:event, change, event, opts}, _from, term) do
     touched_term = touch_interaction(term)
-    reply_from_input_result(process_input(input, touched_term), touched_term)
+    reply_from_input_result(handle_event(change, event, touched_term), touched_term, opts)
+  end
+
+  def handle_call({:input, input, opts}, _from, term) do
+    touched_term = touch_interaction(term)
+    reply_from_input_result(process_input(input, touched_term), touched_term, opts)
+  end
+
+  def handle_call({:inputs, inputs, opts}, _from, term) do
+    touched_term = touch_interaction(term)
+
+    case process_inputs(inputs, touched_term) do
+      {:noreply, next_term, consumed} ->
+        next_term = sync_theme_assigns(next_term)
+        maybe_notify_invalidate(next_term, opts)
+        {:reply, {:noreply, next_term.focused, consumed}, next_term}
+
+      {:stop, next_term, consumed} ->
+        next_term = sync_theme_assigns(next_term)
+        maybe_notify_invalidate(next_term, opts)
+        {:stop, :normal, {:stop, next_term.focused, consumed}, next_term}
+      end
+  end
+
+  def handle_call({:inputs_and_render_server_snapshot, inputs, input_opts, render_opts}, _from, term) do
+    touched_term = touch_interaction(term)
+
+    case process_inputs(inputs, touched_term) do
+      {:noreply, next_term, _consumed} ->
+        next_term = sync_theme_assigns(next_term)
+        maybe_notify_invalidate(next_term, input_opts)
+        {next_term, _acc, box, decorations} = render_term(next_term, render_opts)
+
+        snapshot = %{
+          content: box.content,
+          decorations: decorations,
+          elements: Map.get(next_term, :elements),
+          mouse_targets: Map.get(next_term, :mouse_targets),
+          focused: next_term.focused,
+          theme: next_term.theme,
+          focus_meta: next_term.focus_meta,
+          implicit_state: next_term.implicit_state,
+          implicit_meta: next_term.implicit_meta
+        }
+
+        {:reply, {:ok, snapshot}, next_term}
+
+      {:stop, next_term, _consumed} ->
+        next_term = sync_theme_assigns(next_term)
+        maybe_notify_invalidate(next_term, input_opts)
+        {:stop, :normal, {:stop, next_term.focused, true}, next_term}
+    end
   end
 
   def handle_call({:set_focus, focused}, _from, term) do
@@ -512,7 +589,9 @@ defmodule Breeze.ChildServer do
       local_focused = strip_live_prefix(term.focused, child_id)
       if local_focused, do: Breeze.ChildServer.set_focus(pid, local_focused)
 
-      reply = Breeze.ChildServer.dispatch_input(pid, key) |> namespace_child_reply(child_id)
+      reply =
+        Breeze.ChildServer.dispatch_input(pid, key, invalidate: false)
+        |> namespace_child_reply(child_id)
 
       case reply do
         {:noreply, _focused, true} -> {:halt, reply}
@@ -843,27 +922,55 @@ defmodule Breeze.ChildServer do
     %{term | last_interaction_at: System.monotonic_time(:millisecond)}
   end
 
-  defp reply_from_input_result({:noreply, next_term}, term) do
+  defp process_inputs(inputs, term) do
+    Enum.reduce_while(inputs, {term, false}, fn input, {current_term, consumed_any?} ->
+      current_term = touch_interaction(current_term)
+
+      case process_input(input, current_term) do
+        {:noreply, next_term} ->
+          next_term = apply_focus_transitions(current_term, next_term)
+          {:cont, {next_term, consumed_any? or next_term != current_term}}
+
+        {:stop, next_term} ->
+          next_term = apply_focus_transitions(current_term, next_term)
+          {:halt, {:stop, next_term, true}}
+
+        {:noreply, focused, consumed} ->
+          next_term = %{current_term | focused: focused, allow_unfocused?: is_nil(focused)}
+          {:cont, {next_term, consumed_any? or consumed}}
+
+        {:stop, focused, consumed} ->
+          next_term = %{current_term | focused: focused, allow_unfocused?: is_nil(focused)}
+          {:halt, {:stop, next_term, consumed_any? or consumed}}
+      end
+    end)
+    |> case do
+      {:stop, next_term, consumed} -> {:stop, next_term, consumed}
+      {next_term, consumed} -> {:noreply, next_term, consumed}
+    end
+  end
+
+  defp reply_from_input_result({:noreply, next_term}, term, opts) do
     next_term = apply_focus_transitions(term, next_term)
-    notify_invalidate(next_term)
+    maybe_notify_invalidate(next_term, opts)
     {:reply, {:noreply, next_term.focused, next_term != term}, next_term}
   end
 
-  defp reply_from_input_result({:noreply, focused, consumed}, term) do
+  defp reply_from_input_result({:noreply, focused, consumed}, term, opts) do
     next_term = %{term | focused: focused, allow_unfocused?: is_nil(focused)}
-    notify_invalidate(next_term)
+    maybe_notify_invalidate(next_term, opts)
     {:reply, {:noreply, next_term.focused, consumed}, next_term}
   end
 
-  defp reply_from_input_result({:stop, next_term}, term) do
+  defp reply_from_input_result({:stop, next_term}, term, opts) do
     next_term = apply_focus_transitions(term, next_term)
-    notify_invalidate(next_term)
+    maybe_notify_invalidate(next_term, opts)
     {:stop, :normal, {:stop, next_term.focused, true}, next_term}
   end
 
-  defp reply_from_input_result({:stop, focused, consumed}, term) do
+  defp reply_from_input_result({:stop, focused, consumed}, term, opts) do
     next_term = %{term | focused: focused, allow_unfocused?: is_nil(focused)}
-    notify_invalidate(next_term)
+    maybe_notify_invalidate(next_term, opts)
     {:stop, :normal, {:stop, next_term.focused, consumed}, next_term}
   end
 

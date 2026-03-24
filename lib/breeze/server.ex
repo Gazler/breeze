@@ -41,8 +41,13 @@ defmodule Breeze.Server do
 
   @render_tracking_table __MODULE__.RenderTracking
   @flush_input_batch :flush_input_batch
+  @render_tick :render_tick
+  @cleanup_tick :cleanup_tick
   @debug_window_size 20
   @debug_rate_window_ms 1_000
+  @input_batch_delay_ms 8
+  @input_render_interval_ms 33
+  @idle_cleanup_delay_ms 250
 
   defstruct [
     :terminal,
@@ -66,7 +71,11 @@ defmodule Breeze.Server do
     :pending_started_at,
     :last_render_at,
     :last_interaction_at,
-    queued_input: [],
+    :pending_render_cause,
+    :pending_input_snapshot,
+    :render_timer,
+    :cleanup_timer,
+    queued_input: {[], []},
     input_flush_scheduled?: false,
     decorations: [],
     children: %{},
@@ -331,9 +340,33 @@ defmodule Breeze.Server do
           state
           |> maybe_render_after_input()
           |> schedule_input_flush()
+          |> schedule_idle_cleanup()
 
         {:noreply, state}
     end
+  end
+
+  def handle_info(@render_tick, state) do
+    state =
+      state
+      |> Map.put(:render_timer, nil)
+      |> then(fn state ->
+        case state.pending_render_cause do
+          nil -> state
+          cause -> state |> Map.put(:pending_render_cause, nil) |> maybe_render_base(cause)
+        end
+      end)
+
+    {:noreply, state}
+  end
+
+  def handle_info(@cleanup_tick, state) do
+    state =
+      state
+      |> Map.put(:cleanup_timer, nil)
+      |> maybe_collect_garbage_after_input()
+
+    {:noreply, state}
   end
 
   def handle_info(:animation_tick, %{decorations: []} = state) do
@@ -457,17 +490,21 @@ defmodule Breeze.Server do
     end
   end
 
-  defp flush_input_batch(%{queued_input: []} = state), do: {:noreply, state}
+  defp flush_input_batch(state) do
+    case queue_out(state.queued_input) do
+      {:empty, _queue} ->
+        {:noreply, state}
 
-  defp flush_input_batch(%{queued_input: [decoded | rest]} = state) do
-    state = %{state | queued_input: rest}
+      {{:value, decoded}, queue} ->
+        state = %{state | queued_input: queue}
 
-    case process_batched_input(decoded, state) do
-      {:stop, state} ->
-        {:stop, state}
+        case process_batched_input(decoded, state) do
+          {:stop, state} ->
+            {:stop, state}
 
-      {:noreply, state} ->
-        continue_flushing_or_pause(state)
+          {:noreply, state} ->
+            continue_flushing_or_pause(state)
+        end
     end
   end
 
@@ -477,17 +514,32 @@ defmodule Breeze.Server do
     handle_mouse(event, state)
   end
 
-  defp process_batched_input(decoded, state), do: handle_deferred_or_sync_input(decoded, state)
+  defp process_batched_input({:key, key}, state) do
+    if root_batchable_key?(state, key) and root_snapshot_batchable?(state) do
+      {keys, state} = coalesce_root_keys_from_queue(key, state, [key])
 
-  defp continue_flushing_or_pause(%{queued_input: [next | _]} = state) do
-    if sync_input_message?(next, state) do
-      flush_input_batch(state)
+      safe_apply_input_snapshot(state, keys)
     else
-      {:noreply, state}
+      state = %{state | pending_input_snapshot: nil}
+      handle_deferred_or_sync_input({:key, key}, state)
     end
   end
 
-  defp continue_flushing_or_pause(state), do: {:noreply, state}
+  defp process_batched_input(decoded, state), do: handle_deferred_or_sync_input(decoded, state)
+
+  defp continue_flushing_or_pause(state) do
+    case queue_peek(state.queued_input) do
+      {:value, next} ->
+        if sync_input_message?(next, state) do
+          flush_input_batch(state)
+        else
+          {:noreply, state}
+        end
+
+      :empty ->
+        {:noreply, state}
+    end
+  end
 
   defp handle_deferred_or_sync_input(decoded, state) do
     if sync_input_message?(decoded, state) do
@@ -539,7 +591,7 @@ defmodule Breeze.Server do
               state
               |> touch_interaction()
               |> safe_apply_input_reply(fn state ->
-                Breeze.ChildServer.dispatch_input(state.view_pid, key)
+                Breeze.ChildServer.dispatch_input(state.view_pid, key, invalidate: false)
               end)
 
             key ->
@@ -584,26 +636,42 @@ defmodule Breeze.Server do
 
   defp sync_input_message?(_, _state), do: false
 
-  defp coalesce_wheel_events_from_queue(event, %{queued_input: [next | rest]} = state, repeat) do
-    case next do
-      {:mouse, %{button: button} = next_event} ->
+  defp coalesce_wheel_events_from_queue(event, state, repeat) do
+    case queue_out(state.queued_input) do
+      {{:value, {:mouse, %{button: button} = next_event}}, queue} ->
         if button == event.button and wheel_match?(event, next_event) do
-          coalesce_wheel_events_from_queue(event, %{state | queued_input: rest}, repeat + 1)
+          coalesce_wheel_events_from_queue(event, %{state | queued_input: queue}, repeat + 1)
         else
           {Map.put(event, :repeat, repeat), state}
         end
 
-      _ ->
+      {{:value, _next}, _queue} ->
+        {Map.put(event, :repeat, repeat), state}
+
+      {:empty, _queue} ->
         {Map.put(event, :repeat, repeat), state}
     end
   end
 
-  defp coalesce_wheel_events_from_queue(event, state, repeat),
-    do: {Map.put(event, :repeat, repeat), state}
-
   defp wheel_match?(left, right) do
     left.action == right.action and left.x == right.x and left.y == right.y and
       left.modifiers == right.modifiers
+  end
+
+  defp coalesce_root_keys_from_queue(_key, state, acc) do
+    case queue_out(state.queued_input) do
+      {{:value, {:key, next_key}}, queue} ->
+        next_state = %{state | queued_input: queue}
+
+        if root_batchable_key?(next_state, next_key) do
+          coalesce_root_keys_from_queue(next_key, next_state, [next_key | acc])
+        else
+          {Enum.reverse(acc), state}
+        end
+
+      _ ->
+        {Enum.reverse(acc), state}
+    end
   end
 
   defp apply_input_reply(state, reply) do
@@ -653,6 +721,30 @@ defmodule Breeze.Server do
     key in ["\t", "ShiftTab"] or focused_implicit?(state)
   end
 
+  defp root_batchable_key?(state, key) do
+    focused_child_chain(state) == [] and
+      not crashed?(state) and
+      not inspector_toggle_key?(key_name(key), state) and
+      not inspector_move_key?(key_name(key), state) and
+      not stop_global_key?(key, state) and
+      key_name(key) not in ["\t", "ShiftTab"] and
+      root_batchable_text_edit_key?(key)
+  end
+
+  defp root_snapshot_batchable?(state) do
+    map_size(state.children) == 0 and not state.inspector
+  end
+
+  defp root_batchable_text_edit_key?(key)
+       when key in ["\x7f", "\x08", "\x17", "Delete", "ArrowLeft", "ArrowRight", "Home", "End"],
+       do: true
+
+  defp root_batchable_text_edit_key?(key) when is_binary(key) do
+    String.printable?(key) and String.length(key) == 1
+  end
+
+  defp root_batchable_text_edit_key?(_key), do: false
+
   defp stop_global_key?(key, state) do
     Breeze.GlobalKeybindings.stop_action?(%{"key" => key}, state)
   end
@@ -668,18 +760,24 @@ defmodule Breeze.Server do
         end
 
       [] ->
-        case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
-          {:ok, metadata} -> match?(%{focused_implicit_id: id} when not is_nil(id), metadata)
-          {:crash, _crash} -> false
-        end
+        focused_root_implicit?(state)
     end
+  end
+
+  defp focused_root_implicit?(%{focused: nil}), do: false
+
+  defp focused_root_implicit?(state) do
+    focused = state.focused
+
+    Map.has_key?(state.rendered_implicit_state, focused) or
+      is_binary(get_in(state.rendered_focus_meta, [focused, :implicit_owner]))
   end
 
   defp handle_mouse(event, state) do
     state
     |> touch_interaction()
     |> safe_apply_input_reply(fn state ->
-      Breeze.ChildServer.dispatch_input(state.view_pid, %{"mouse" => event})
+      Breeze.ChildServer.dispatch_input(state.view_pid, %{"mouse" => event}, invalidate: false)
     end)
   end
 
@@ -696,10 +794,10 @@ defmodule Breeze.Server do
         Breeze.DebugProfiler.reset(profile_scope)
         root_started_at = System.monotonic_time(:microsecond)
 
-        {acc, box, decorations} =
+        snapshot =
           case safe_render_snapshot(state, tracking_ref, profile_scope) do
-            {:ok, acc, box, decorations} ->
-              {acc, box, decorations}
+            {:ok, snapshot} ->
+              snapshot
 
             :stopped ->
               throw({:stopped, state})
@@ -707,8 +805,13 @@ defmodule Breeze.Server do
 
         root_snapshot_us = System.monotonic_time(:microsecond) - root_started_at
 
-        {metadata_focused, metadata_theme} = safe_focused_metadata(state)
-        focused = metadata_focused || state.focused
+        {focused, metadata_theme} =
+          case snapshot do
+            %{focused: focused, theme: theme} -> {focused || state.focused, theme || state.theme}
+            _ ->
+              {metadata_focused, metadata_theme} = safe_focused_metadata(state)
+              {metadata_focused || state.focused, metadata_theme}
+          end
 
         %{
           missing: missing,
@@ -727,10 +830,10 @@ defmodule Breeze.Server do
               render_base(%{state | focused: focused}, cause, attempts - 1)
 
             true ->
-              decorations = dedupe_decorations(decorations ++ child_decorations)
+              decorations = dedupe_decorations(snapshot.decorations ++ child_decorations)
               state = %{state | focused: focused, theme: metadata_theme}
               prep_started_at = System.monotonic_time(:microsecond)
-              {base_output, decorations} = prepare_decorations(box.content, decorations, state)
+              {base_output, decorations} = prepare_decorations(snapshot.content, decorations, state)
               prepare_decorations_us = System.monotonic_time(:microsecond) - prep_started_at
               render_base_us = System.monotonic_time(:microsecond) - started_at
 
@@ -740,9 +843,25 @@ defmodule Breeze.Server do
               state
               |> increment_debug_stat(:render_base_count)
               |> Map.put(:base_output, base_output)
-              |> Map.put(:rendered_elements, viewports_from_acc(acc))
-              |> Map.put(:rendered_boxes, acc.boxes)
-              |> merge_inspector_render_data(acc)
+              |> maybe_put_root_layout(snapshot)
+              |> Map.put(:rendered_boxes, Map.get(snapshot, :boxes, %{}))
+              |> Map.put(
+                :rendered_mouse_targets,
+                Map.get(snapshot, :mouse_targets) || state.rendered_mouse_targets
+              )
+              |> Map.put(
+                :rendered_focus_meta,
+                Map.get(snapshot, :focus_meta) || state.rendered_focus_meta
+              )
+              |> Map.put(
+                :rendered_implicit_state,
+                Map.get(snapshot, :implicit_state) || state.rendered_implicit_state
+              )
+              |> Map.put(
+                :rendered_implicit_meta,
+                Map.get(snapshot, :implicit_meta) || state.rendered_implicit_meta
+              )
+              |> merge_inspector_render_data(Map.get(snapshot, :acc))
               |> Map.put(:decorations, decorations)
               |> Map.put(:focused, focused)
               |> Map.put(:last_render_at, System.monotonic_time(:millisecond))
@@ -793,21 +912,89 @@ defmodule Breeze.Server do
     end
   end
 
+  defp maybe_put_root_layout(state, %{elements: elements}) when is_map(elements) do
+    Map.put(state, :rendered_elements, elements)
+  end
+
+  defp maybe_put_root_layout(state, _snapshot), do: state
+
+  defp apply_precomputed_snapshot(state, snapshot, cause) do
+    prep_started_at = System.monotonic_time(:microsecond)
+    {base_output, decorations} = prepare_decorations(snapshot.content, snapshot.decorations, state)
+    prepare_decorations_us = System.monotonic_time(:microsecond) - prep_started_at
+
+    state
+    |> increment_debug_stat(:render_base_count)
+    |> Map.put(:base_output, base_output)
+    |> maybe_put_root_layout(snapshot)
+    |> Map.put(:rendered_boxes, Map.get(snapshot, :boxes, %{}))
+    |> Map.put(:rendered_mouse_targets, Map.get(snapshot, :mouse_targets) || state.rendered_mouse_targets)
+    |> Map.put(:rendered_focus_meta, Map.get(snapshot, :focus_meta) || state.rendered_focus_meta)
+    |> Map.put(
+      :rendered_implicit_state,
+      Map.get(snapshot, :implicit_state) || state.rendered_implicit_state
+    )
+    |> Map.put(
+      :rendered_implicit_meta,
+      Map.get(snapshot, :implicit_meta) || state.rendered_implicit_meta
+    )
+    |> Map.put(:decorations, decorations)
+    |> Map.put(:focused, snapshot.focused || state.focused)
+    |> Map.put(:theme, snapshot.theme || state.theme)
+    |> Map.put(:last_render_at, System.monotonic_time(:millisecond))
+    |> put_debug_stat(:last_render_cause, cause)
+    |> put_debug_stat(:last_root_snapshot_us, 0)
+    |> put_debug_stat(:last_root_snapshot_app_us, 0)
+    |> put_debug_stat(:last_live_children_us, 0)
+    |> put_debug_stat(:last_live_children_app_us, 0)
+    |> put_debug_stat(:last_live_children, [])
+    |> put_debug_stat(:last_reconcile_passes, 0)
+    |> put_debug_stat(:last_reconcile_changed_ids, nil)
+    |> put_debug_stat(:last_prepare_decorations_us, prepare_decorations_us)
+    |> render_frame()
+    |> schedule_animation()
+  end
+
   defp safe_render_snapshot(state, tracking_ref, profile_scope) do
-    Breeze.ChildServer.render_snapshot(state.view_pid,
+    render_fun =
+      if state.inspector do
+        &Breeze.ChildServer.render_snapshot/2
+      else
+        &Breeze.ChildServer.render_server_snapshot/2
+      end
+
+    render_fun.(state.view_pid,
       implicit_state: %{},
       terminal: state.terminal,
       theme: state.theme,
+      include_layout: map_size(state.children) > 0,
       render_tracking_ref: tracking_ref,
       profile_scope: profile_scope,
-      profile_label: inspect(root_view_module(state)),
+      profile_label: inspect(state.view),
       live_view: fn attrs, opts ->
         render_live_child(attrs, opts, state, profile_scope, tracking_ref)
       end
     )
     |> then(fn
-      {:ok, acc, box, decorations} -> {:ok, acc, box, decorations}
-      _ -> :stopped
+      {:ok, acc, box, decorations} ->
+        {:ok,
+         %{
+           content: box.content,
+           decorations: decorations,
+           elements: viewports_from_acc(acc),
+           boxes: acc.boxes,
+           acc: acc
+         }}
+
+      {:ok, snapshot} ->
+        {:ok,
+         Map.merge(
+           %{boxes: %{}, acc: nil, elements: nil, mouse_targets: nil},
+           snapshot
+         )}
+
+      _ ->
+        :stopped
     end)
   catch
     :exit, _reason -> :stopped
@@ -824,7 +1011,14 @@ defmodule Breeze.Server do
   end
 
   defp maybe_render_after_input(%{pending_ref: ref} = state) when not is_nil(ref), do: state
-  defp maybe_render_after_input(state), do: maybe_render_base(state, :input_flush)
+
+  defp maybe_render_after_input(%{pending_input_snapshot: snapshot} = state) when is_map(snapshot) do
+    state
+    |> Map.put(:pending_input_snapshot, nil)
+    |> apply_precomputed_snapshot(snapshot, :input_flush)
+  end
+
+  defp maybe_render_after_input(state), do: maybe_render_base_throttled(state, :input_flush)
 
   defp force_full_redraw(state, cause) do
     state
@@ -1219,13 +1413,20 @@ defmodule Breeze.Server do
     |> initialize_decorations()
     |> Enum.reduce({output, []}, fn decoration, {acc, updated} ->
       {_animated_box, current_content, current_overlays} = render_decoration(decoration, state)
+      base_content = Map.get(decoration, :base_content, rendered_fragment(decoration.box, state))
+
+      acc =
+        if current_content == base_content do
+          acc
+        else
+          String.replace(acc, base_content, current_content, global: false)
+        end
 
       {
-        String.replace(acc, rendered_fragment(decoration.box, state), current_content,
-          global: false
-        ),
+        acc,
         [
           decoration
+          |> Map.put(:base_content, base_content)
           |> Map.put(:current_content, current_content)
           |> Map.put(:current_overlays, current_overlays)
           | updated
@@ -1251,9 +1452,17 @@ defmodule Breeze.Server do
     Enum.reduce(decorations, {output, []}, fn decoration, {acc, updated} ->
       if decoration_active?(decoration, state) do
         {_animated_box, current_content, current_overlays} = render_decoration(decoration, state)
+        previous_content = Map.get(decoration, :current_content)
+
+        acc =
+          if current_content == previous_content do
+            acc
+          else
+            String.replace(acc, previous_content, current_content, global: false)
+          end
 
         {
-          String.replace(acc, decoration.current_content, current_content, global: false),
+          acc,
           [
             decoration
             |> Map.put(:current_content, current_content)
@@ -1599,6 +1808,35 @@ defmodule Breeze.Server do
     end
   end
 
+  defp safe_apply_input_snapshot(state, keys) do
+    case safe_call(fn ->
+           Breeze.ChildServer.dispatch_inputs_and_render_server_snapshot(
+             state.view_pid,
+             keys,
+             [invalidate: false],
+             [
+               implicit_state: %{},
+               terminal: state.terminal,
+               theme: state.theme,
+               include_layout: false
+             ]
+           )
+         end) do
+      {:ok, {:ok, snapshot}} ->
+        {:noreply,
+         %{state | focused: snapshot.focused, theme: snapshot.theme, pending_input_snapshot: snapshot}}
+
+      {:ok, {:crash, crash}} ->
+        {:noreply, enter_crash_state(state, crash)}
+
+      {:ok, {:stop, _focused, _consumed}} ->
+        {:stop, state}
+
+      {:crash, crash} ->
+        {:noreply, enter_crash_state(state, crash)}
+    end
+  end
+
   defp safe_call(fun) when is_function(fun, 0) do
     try do
       {:ok, fun.()}
@@ -1636,7 +1874,7 @@ defmodule Breeze.Server do
     |> Map.put(:pending_ref, nil)
     |> Map.put(:pending_started_at, nil)
     |> Map.put(:input_flush_scheduled?, false)
-    |> Map.put(:queued_input, [])
+    |> Map.put(:queued_input, :queue.new())
     |> Map.put(:animation_timer, nil)
     |> Map.put(:next_tick_at, nil)
     |> Map.put(:decorations, [])
@@ -1713,7 +1951,7 @@ defmodule Breeze.Server do
         |> Map.put(:last_overlays, [])
         |> Map.put(:pending_ref, nil)
         |> Map.put(:pending_started_at, nil)
-        |> Map.put(:queued_input, [])
+        |> Map.put(:queued_input, :queue.new())
         |> Map.put(:input_flush_scheduled?, false)
         |> maybe_render_base(cause)
 
@@ -2295,16 +2533,89 @@ defmodule Breeze.Server do
   end
 
   defp enqueue_input(state, decoded) do
-    update_in(state.queued_input, &(&1 ++ [decoded]))
+    update_in(state.queued_input, &:queue.in(decoded, &1))
   end
 
   defp schedule_input_flush(%{input_flush_scheduled?: true} = state), do: state
 
-  defp schedule_input_flush(%{queued_input: []} = state), do: state
-
   defp schedule_input_flush(state) do
-    send(self(), @flush_input_batch)
-    %{state | input_flush_scheduled?: true}
+    if queue_empty?(state.queued_input) do
+      state
+    else
+      Process.send_after(self(), @flush_input_batch, @input_batch_delay_ms)
+      %{state | input_flush_scheduled?: true}
+    end
+  end
+
+  defp queue_empty?(queue), do: :queue.is_empty(queue)
+  defp queue_peek(queue), do: :queue.peek(queue)
+  defp queue_out(queue), do: :queue.out(queue)
+
+  defp maybe_render_base_throttled(state, cause) do
+    now = System.monotonic_time(:millisecond)
+    elapsed = if is_integer(state.last_render_at), do: now - state.last_render_at, else: nil
+
+    cond do
+      is_nil(state.last_render_at) ->
+        state
+        |> Map.put(:pending_render_cause, nil)
+        |> cancel_render_timer()
+        |> maybe_render_base(cause)
+
+      is_reference(state.render_timer) ->
+        Map.put(state, :pending_render_cause, cause)
+
+      is_nil(elapsed) or elapsed >= @input_render_interval_ms ->
+        timer = Process.send_after(self(), @render_tick, 0)
+
+        state
+        |> Map.put(:render_timer, timer)
+        |> Map.put(:pending_render_cause, cause)
+
+      true ->
+        delay = max(@input_render_interval_ms - elapsed, 0)
+        timer = Process.send_after(self(), @render_tick, delay)
+
+        state
+        |> Map.put(:render_timer, timer)
+        |> Map.put(:pending_render_cause, cause)
+    end
+  end
+
+  defp cancel_render_timer(%{render_timer: nil} = state), do: state
+
+  defp cancel_render_timer(%{render_timer: timer} = state) do
+    Process.cancel_timer(timer)
+    %{state | render_timer: nil}
+  end
+
+  defp schedule_idle_cleanup(state) do
+    state
+    |> cancel_cleanup_timer()
+    |> then(fn state ->
+      if queue_empty?(state.queued_input) and is_nil(state.pending_ref) do
+        timer = Process.send_after(self(), @cleanup_tick, @idle_cleanup_delay_ms)
+        %{state | cleanup_timer: timer}
+      else
+        state
+      end
+    end)
+  end
+
+  defp cancel_cleanup_timer(%{cleanup_timer: nil} = state), do: state
+
+  defp cancel_cleanup_timer(%{cleanup_timer: timer} = state) do
+    Process.cancel_timer(timer)
+    %{state | cleanup_timer: nil}
+  end
+
+  defp maybe_collect_garbage_after_input(state) do
+    if queue_empty?(state.queued_input) and is_nil(state.pending_ref) do
+      BackBreeze.RenderCache.clear()
+      :erlang.garbage_collect(self())
+    end
+
+    state
   end
 
   defp sum_timing_us(child_timings) do
@@ -2365,21 +2676,12 @@ defmodule Breeze.Server do
     end
   end
 
-  defp root_view_module(%{children: _} = state) do
-    case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
-      {:ok, %{view: view}} -> view
-      _ -> nil
-    end
-  catch
-    :exit, _reason -> nil
-  end
-
   defp dispatch_input_hierarchy(state, key) do
     child_reply =
       state
       |> focused_child_chain()
       |> Enum.reduce_while(nil, fn {child_id, %{pid: pid}}, _acc ->
-        case safe_call(fn -> Breeze.ChildServer.dispatch_input(pid, key) end) do
+        case safe_call(fn -> Breeze.ChildServer.dispatch_input(pid, key, invalidate: false) end) do
           {:ok, reply} ->
             reply = namespace_child_reply(reply, child_id)
 
@@ -2399,7 +2701,9 @@ defmodule Breeze.Server do
         crash
 
       nil ->
-        case safe_call(fn -> Breeze.ChildServer.dispatch_input(state.view_pid, key) end) do
+        case safe_call(fn ->
+               Breeze.ChildServer.dispatch_input(state.view_pid, key, invalidate: false)
+             end) do
           {:ok, reply} -> reply
           {:crash, crash} -> {:crash, crash}
         end

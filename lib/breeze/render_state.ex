@@ -277,7 +277,7 @@ defmodule Breeze.RenderState do
       end
 
     {
-      Map.put(acc, id, {mod, implicit_state}),
+      Map.put(acc, id, {mod, sanitize_implicit_state(implicit_state)}),
       Map.put(meta_acc, id, implicit_meta)
     }
   end
@@ -293,4 +293,10 @@ defmodule Breeze.RenderState do
   defp normalize_init_result(implicit_state) do
     {implicit_state, %{}}
   end
+
+  defp sanitize_implicit_state(%{} = implicit_state) do
+    Map.delete(implicit_state, :__element__)
+  end
+
+  defp sanitize_implicit_state(implicit_state), do: implicit_state
 end
