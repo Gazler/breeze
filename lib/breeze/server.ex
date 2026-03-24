@@ -835,15 +835,26 @@ defmodule Breeze.Server do
     id = fetch_live_attr!(attrs, :id)
     full_id = live_id(Keyword.get(opts, :live_prefix), id)
     preload_only = fetch_live_attr(attrs, :preload_only, false)
+    expected_view = fetch_live_attr!(attrs, :view)
+
+    expected_start_opts =
+      child_start_opts(fetch_live_attr(attrs, :start_opts, []), expected_view, state)
+
+    child_terminal = Keyword.get(opts, :live_terminal, state.terminal)
+    viewport = Keyword.get(opts, :live_viewport)
 
     case Map.get(state.children, full_id) do
       nil ->
         track_missing_live_child(tracking_ref, {full_id, attrs})
         if preload_only, do: :preloaded, else: :missing
 
-      %{pid: pid} ->
+      %{pid: pid, view: view, start_opts: start_opts} ->
         cond do
           not Process.alive?(pid) ->
+            track_missing_live_child(tracking_ref, {full_id, attrs})
+            if preload_only, do: :preloaded, else: :missing
+
+          view != expected_view or start_opts != expected_start_opts ->
             track_missing_live_child(tracking_ref, {full_id, attrs})
             if preload_only, do: :preloaded, else: :missing
 
@@ -858,7 +869,7 @@ defmodule Breeze.Server do
                    Breeze.ChildServer.render_snapshot(pid,
                      focused: local_focused,
                      implicit_state: %{},
-                     terminal: state.terminal,
+                     terminal: child_terminal,
                      theme: state.theme,
                      live_prefix: full_id,
                      render_tracking_ref: tracking_ref,
@@ -883,10 +894,22 @@ defmodule Breeze.Server do
                 })
 
                 Enum.each(child_decorations, fn decoration ->
-                  track_render_decoration(tracking_ref, namespace_decoration(decoration, full_id))
+                  track_render_decoration(
+                    tracking_ref,
+                    namespace_decoration(decoration, full_id, viewport)
+                  )
                 end)
 
-                {:rendered, id, child_acc, child_box}
+                child_dimensions =
+                  case safe_call(fn -> Breeze.ChildServer.layout_snapshot(pid) end) do
+                    {:ok, snapshot} ->
+                      translate_live_dimensions(snapshot.elements, viewport, full_id)
+
+                    _ ->
+                      %{}
+                  end
+
+                {:rendered, id, child_acc, child_box, child_dimensions}
 
               {:crash, %{reason: {:noproc, _}}} ->
                 track_missing_live_child(tracking_ref, {full_id, attrs})
@@ -1309,9 +1332,45 @@ defmodule Breeze.Server do
     |> Enum.min(fn -> nil end)
   end
 
-  defp namespace_decoration(decoration, full_id) do
-    Map.update(decoration, :owner_id, full_id, &namespace_live_id(&1, full_id))
+  defp namespace_decoration(decoration, full_id, viewport) do
+    decoration
+    |> Map.update(:id, nil, &namespace_live_id(&1, full_id))
+    |> Map.update(:owner_id, full_id, &namespace_live_id(&1, full_id))
+    |> Map.update(:layout, nil, &translate_decoration_layout(&1, viewport))
   end
+
+  defp translate_decoration_layout(%Breeze.Viewport{} = layout, %{left: left, top: top}) do
+    %{layout | left: layout.left + left, top: layout.top + top}
+  end
+
+  defp translate_decoration_layout(layout, _viewport), do: layout
+
+  defp translate_live_dimensions(elements, %{left: left, top: top}, prefix)
+       when is_map(elements) do
+    Map.new(elements, fn {id, viewport} ->
+      translated_id =
+        case id do
+          value when is_binary(value) ->
+            if String.starts_with?(value, prefix <> "::"),
+              do: value,
+              else: prefix <> "::" <> value
+        end
+
+      {translated_id,
+       %{
+         left: left + Map.get(viewport, :left, 0),
+         top: top + Map.get(viewport, :top, 0),
+         width: Map.get(viewport, :width, 0),
+         height: Map.get(viewport, :height, 0),
+         viewport_width: Map.get(viewport, :viewport_width, 0),
+         viewport_height: Map.get(viewport, :viewport_height, 0),
+         content_width: Map.get(viewport, :content_width, 0),
+         content_height: Map.get(viewport, :content_height, 0)
+       }}
+    end)
+  end
+
+  defp translate_live_dimensions(_elements, _viewport, _prefix), do: %{}
 
   defp namespace_live_id(nil, _full_id), do: nil
   defp namespace_live_id(id, full_id), do: full_id <> "::" <> id
@@ -1410,11 +1469,23 @@ defmodule Breeze.Server do
     |> :binary.split("\n", [:global])
     |> Enum.with_index()
     |> Enum.map(fn {line, row_offset} ->
+      row = Integer.to_string(viewport.top + row_offset + 1)
+      col = Integer.to_string(viewport.left + 1)
+      width = Integer.to_string(viewport.width)
+
       [
         "\e[",
-        Integer.to_string(viewport.top + row_offset + 1),
+        row,
         ";",
-        Integer.to_string(viewport.left + 1),
+        col,
+        "H",
+        "\e[",
+        width,
+        "X",
+        "\e[",
+        row,
+        ";",
+        col,
         "H",
         line
       ]
@@ -1769,8 +1840,11 @@ defmodule Breeze.Server do
 
   defp ensure_children(state, missing) do
     Enum.reduce(missing, {state, false}, fn {id, attrs}, {state, started?} ->
+      view = fetch_live_attr!(attrs, :view)
+      start_opts = child_start_opts(fetch_live_attr(attrs, :start_opts, []), view, state)
+
       case Map.get(state.children, id) do
-        %{pid: pid} = child when is_pid(pid) ->
+        %{pid: pid, view: ^view, start_opts: ^start_opts} = child when is_pid(pid) ->
           if Process.alive?(pid) do
             {state, started?}
           else
@@ -1780,6 +1854,13 @@ defmodule Breeze.Server do
             child = start_child!(attrs, state.terminal, state.theme, state)
             {%{state | children: Map.put(state.children, id, child)}, true}
           end
+
+        %{pid: pid, ref: ref} ->
+          if is_pid(pid) and Process.alive?(pid), do: Process.exit(pid, :normal)
+          if is_reference(ref), do: Process.demonitor(ref, [:flush])
+
+          child = start_child!(attrs, state.terminal, state.theme, state)
+          {%{state | children: Map.put(state.children, id, child)}, true}
 
         nil ->
           child = start_child!(attrs, state.terminal, state.theme, state)
@@ -1933,7 +2014,7 @@ defmodule Breeze.Server do
       )
 
     ref = Process.monitor(pid)
-    %{pid: pid, ref: ref, view: view, persistent: persistent}
+    %{pid: pid, ref: ref, view: view, start_opts: start_opts, persistent: persistent}
   end
 
   defp child_start_opts(start_opts, Breeze.Debug, state) do

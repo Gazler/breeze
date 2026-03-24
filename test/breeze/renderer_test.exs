@@ -80,6 +80,17 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule FlexiblePanelStyleExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <.panel class="width-7 height-3 text-3" style={%{background_color: 0}}>Hello</.panel>
+      """
+    end
+  end
+
   defmodule ScrollPanelExample do
     use Breeze.View
     import Breeze.Blocks
@@ -209,6 +220,31 @@ defmodule Breeze.RendererTest do
       ~H"""
       <box>
         <live id="child" view={LiveCounterChild} start_opts={@start_opts}>
+        </live>
+      </box>
+      """
+    end
+  end
+
+  defmodule LiveSurfaceChild do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen">
+        <box class="fixed right-0 bottom-0">X</box>
+      </box>
+      """
+    end
+  end
+
+  defmodule SizedLiveSurfaceExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-12 height-5 border">
+        <live id="child" view={LiveSurfaceChild} class="width-full height-full">
         </live>
       </box>
       """
@@ -353,6 +389,11 @@ defmodule Breeze.RendererTest do
                "\e[48;5;0;38;5;7m╭─────╮\e[0m\n\e[48;5;0;38;5;7m│\e[0m\e[48;5;0;38;5;3mHello\e[0m\e[48;5;0;38;5;7m│\e[0m\n\e[48;5;0;38;5;7m╰─────╯\e[0m"
     end
 
+    test "panel sizing can come from classes" do
+      assert Renderer.render_to_string(FlexiblePanelStyleExample, %{}) ==
+               "\e[48;5;0;38;5;7m╭─────╮\e[0m\n\e[48;5;0;38;5;7m│\e[0m\e[48;5;0;38;5;3mHello\e[0m\e[48;5;0;38;5;7m│\e[0m\n\e[48;5;0;38;5;7m╰─────╯\e[0m"
+    end
+
     test "resolves semantic tokens against custom themes" do
       theme = Breeze.Theme.new(primary: "#268bd2", background: "#002b36", border: "#586e75")
 
@@ -463,6 +504,34 @@ defmodule Breeze.RendererTest do
         )
 
       assert Enum.any?(acc.elements, fn {_idx, flags} -> Keyword.get(flags, :id) == "child" end)
+    end
+
+    test "renders live children against their constrained slot dimensions" do
+      {:ok, pid} = Breeze.ChildServer.start(view: LiveSurfaceChild, start_opts: [])
+
+      {_, box} =
+        Renderer.render(SizedLiveSurfaceExample, %{},
+          terminal: %Termite.Terminal{size: %{width: 30, height: 10}},
+          live_view: fn %{id: "child"}, opts ->
+            {:ok, _child_acc, child_box} =
+              Breeze.ChildServer.render(pid,
+                terminal: Keyword.fetch!(opts, :live_terminal)
+              )
+
+            {:rendered, "child", %{elements: %{}, ids: [], focusables: [], boxes: %{}}, child_box}
+          end
+        )
+
+      plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+
+      assert plain_content =~
+               """
+               ┌──────────┐
+               │          │
+               │          │
+               │         X│
+               └──────────┘\
+               """
     end
 
     test "supports fixed positioning with right and bottom offsets" do

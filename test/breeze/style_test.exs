@@ -50,6 +50,66 @@ defmodule Breeze.StyleTest do
     assert element.style.foreground_color == 2
   end
 
+  test "resolve_dimensions reads width and height from classes" do
+    assert Style.resolve_dimensions("width-12 height-4", nil) == %{width: 12, height: 4}
+  end
+
+  test "resolve_dimensions treats binary style as class tokens" do
+    assert Style.resolve_dimensions(nil, "width-10 height-3") == %{width: 10, height: 3}
+  end
+
+  test "resolve_dimensions lets inline style override class dimensions" do
+    assert Style.resolve_dimensions("width-12 height-4", %{width: 8, height: :full}) == %{
+             width: 8,
+             height: :full
+           }
+  end
+
+  test "scrollbars default to the resolved foreground color" do
+    theme =
+      Breeze.Theme.new(
+        defaults: %{
+          foreground_color: "#eeeeee",
+          background_color: "#111111",
+          border_color: "#666666"
+        },
+        palette: %{primary: "#268bd2"}
+      )
+
+    element =
+      Style.empty()
+      |> Style.put_class("text overflow-scroll scrollbar-arrows")
+      |> Style.to_element(theme: theme)
+
+    assert element.style.scrollbar.vertical.thumb.foreground_color == {238, 238, 238}
+    assert element.style.scrollbar.vertical.track.foreground_color == {238, 238, 238}
+  end
+
+  test "semantic scrollbar colors apply only when their modifier matches" do
+    theme =
+      Breeze.Theme.new(
+        defaults: %{
+          foreground_color: "#eeeeee",
+          background_color: "#111111",
+          border_color: "#666666"
+        },
+        palette: %{primary: "#268bd2"}
+      )
+
+    unfocused =
+      Style.empty()
+      |> Style.put_class("text overflow-scroll scrollbar-arrows focus:scrollbar-primary")
+      |> Style.to_element(theme: theme)
+
+    focused =
+      Style.empty()
+      |> Style.put_class("text overflow-scroll scrollbar-arrows focus:scrollbar-primary")
+      |> Style.to_element(theme: theme, focus: true)
+
+    assert unfocused.style.scrollbar.vertical.thumb.foreground_color == {238, 238, 238}
+    assert focused.style.scrollbar.vertical.thumb.foreground_color == {38, 139, 210}
+  end
+
   test "supports semantic aliases for default text, background, and border colors" do
     theme =
       Breeze.Theme.new(

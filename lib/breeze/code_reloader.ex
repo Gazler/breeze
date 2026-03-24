@@ -3,7 +3,7 @@ defmodule Breeze.CodeReloader do
 
   use GenServer
 
-  @default_paths ["lib", "examples"]
+  @default_paths ["lib", "examples", "storybook"]
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)

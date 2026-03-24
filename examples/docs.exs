@@ -38,7 +38,7 @@ defmodule Docs do
         <.list
           id="docs"
           br-change="change"
-          style="width-full height-full focus:scrollbar-3"
+          style="width-full height-full"
           item_style="selected:bg-24 selected:text-0 focus:selected:text-7 focus:selected:bg-4 width-full"
         >
           <:item :for={doc <- @docs} value={inspect(doc)}>{inspect(doc)}</:item>
@@ -46,7 +46,7 @@ defmodule Docs do
         <.list
           id="functions"
           br-change="function"
-          style="width-full height-full focus:scrollbar-3"
+          style="width-full height-full"
           item_style="selected:bg-24 selected:text-0 focus:selected:text-7 focus:selected:bg-4 width-full"
         >
           <:item :for={function <- @functions || []} value={function}>{function}</:item>

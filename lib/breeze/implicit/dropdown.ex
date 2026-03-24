@@ -24,24 +24,17 @@ defmodule Breeze.Implicit.Dropdown do
       highlighted_index:
         normalize_index(Map.get(last_state, :highlighted_index, selected_index), values),
       open?: open?,
-      trigger_width: int_option(root_attrs, :"dropdown-trigger-width", 10),
-      menu_width: int_option(root_attrs, :"dropdown-menu-width", 12),
-      menu_height: int_option(root_attrs, :"dropdown-menu-height", length(values) + 2),
-      menu_left: int_option(root_attrs, :"dropdown-menu-left", 0),
-      menu_top: int_option(root_attrs, :"dropdown-menu-top", 1)
+      menu_width: width_option(root_attrs, :"dropdown-menu-width", 12),
+      menu_height: int_option(root_attrs, :"dropdown-menu-height", length(values) + 2)
     }
   end
 
   def handle_event(_, %{"key" => key}, %{open?: false} = state)
-      when key in ["Enter", " ", "\x14", "ArrowDown", "ArrowUp", "j", "k"] do
+      when key in ["Enter", " ", "ArrowDown", "ArrowUp", "j", "k"] do
     {:noreply, open(state)}
   end
 
   def handle_event(_, %{"key" => "Escape"}, %{open?: true} = state) do
-    {:noreply, close(state)}
-  end
-
-  def handle_event(_, %{"key" => "\x14"}, %{open?: true} = state) do
     {:noreply, close(state)}
   end
 
@@ -66,7 +59,7 @@ defmodule Breeze.Implicit.Dropdown do
         highlighted_index: selected_index
     }
 
-    {{:change, %{value: selected, index: selected_index}}, next_state, focus: nil}
+    {{:change, %{value: selected, index: selected_index}}, next_state}
   end
 
   def handle_event(_, _, state), do: {:noreply, state}
@@ -110,12 +103,12 @@ defmodule Breeze.Implicit.Dropdown do
 
   defp frame_style(state),
     do:
-      "absolute left-#{state.menu_left} top-#{state.menu_top} width-#{state.menu_width} height-#{state.menu_height} overflow-hidden layer-20"
+      "absolute left-0 top-1 #{size_class("width", state.menu_width)} height-#{state.menu_height} overflow-hidden layer-20"
 
   defp item_style(state, flags) do
     index = int_flag(flags, :"dropdown-item-index", 0)
 
-    "absolute left-#{state.menu_left} top-#{state.menu_top + index} width-#{state.menu_width} layer-21"
+    "absolute left-0 top-#{1 + index} #{size_class("width", state.menu_width)} layer-21"
   end
 
   defp indicator_style(_state, opts \\ []) do
@@ -175,4 +168,20 @@ defmodule Breeze.Implicit.Dropdown do
   rescue
     _ -> default
   end
+
+  defp width_option(attrs, key, default) do
+    case Map.get(attrs, key) do
+      :full -> :full
+      "full" -> :full
+      nil -> default
+      value when is_integer(value) -> value
+      value when is_binary(value) -> String.to_integer(value)
+      _ -> default
+    end
+  rescue
+    _ -> default
+  end
+
+  defp size_class(axis, :full), do: "#{axis}-full"
+  defp size_class(axis, size) when is_integer(size), do: "#{axis}-#{size}"
 end

@@ -76,7 +76,6 @@ defmodule Posting do
             class="width-10"
             item_style="bg-panel text"
             menu_style="bg-panel text"
-            menu_top={1}
           >
             <:item :for={method <- @methods} value={method}>{method}</:item>
           </.dropdown>

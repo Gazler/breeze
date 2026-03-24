@@ -26,6 +26,7 @@ defmodule Breeze.Renderer do
       rendered
       |> Breeze.Template.render_to_tree(assigns)
 
+    opts = maybe_attach_live_viewports(root_children, opts)
     build_from_tree_nodes(root_children, opts)
   end
 
@@ -52,6 +53,8 @@ defmodule Breeze.Renderer do
         Breeze.Template.render_to_tree(rendered, assigns)
       end)
 
+    opts = maybe_attach_live_viewports(root_children, opts)
+
     {acc, box} =
       profile(profile_scope, profile_label, :build_tree_us, fn ->
         build_from_tree_nodes(root_children, opts)
@@ -77,7 +80,15 @@ defmodule Breeze.Renderer do
         [],
         RenderStyle.empty(),
         [],
-        %{focusables: [], id: 0, elements: %{}, boxes: %{}, ids: [], flags: []},
+        %{
+          focusables: [],
+          id: 0,
+          elements: %{},
+          boxes: %{},
+          ids: [],
+          flags: [],
+          live_dimensions: %{}
+        },
         opts
       )
 
@@ -184,21 +195,46 @@ defmodule Breeze.Renderer do
 
   defp build_tree([{:live, attrs} | rest], box, children, style_state, flags, acc, opts) do
     {acc, child} =
-      case Keyword.get(opts, :live_view) do
-        fun when is_function(fun, 2) ->
-          case fun.(attrs, opts) do
-            {:rendered, prefix, child_acc, child_box} ->
-              {merge_live_acc(acc, namespace_live_acc(child_acc, prefix)), child_box}
+      if Keyword.get(opts, :live_placeholder, false) do
+        build_live_placeholder(attrs, flags, acc, opts)
+      else
+        case Keyword.get(opts, :live_view) do
+          fun when is_function(fun, 2) ->
+            id = fetch_live_attr!(attrs, :id)
+            full_id = live_full_id(id, opts)
+            viewport = get_in(opts, [:live_viewports, full_id])
 
-            :preloaded ->
-              {acc, nil}
+            child_opts =
+              opts
+              |> Keyword.put(:live_viewport, viewport)
+              |> maybe_put_live_terminal(viewport)
 
-            _ ->
-              {acc, nil}
-          end
+            case fun.(attrs, child_opts) do
+              {:rendered, prefix, child_acc, child_box} ->
+                {merge_live_acc(acc, namespace_live_acc(child_acc, prefix)), child_box}
 
-        _ ->
-          {acc, nil}
+              {:rendered, prefix, child_acc, child_box, child_dimensions} ->
+                {merge_live_acc(acc, namespace_live_acc(child_acc, prefix)), child_box}
+                |> then(fn {merged_acc, rendered_box} ->
+                  {
+                    %{
+                      merged_acc
+                      | live_dimensions: Map.merge(merged_acc.live_dimensions, child_dimensions)
+                    },
+                    rendered_box
+                  }
+                end)
+
+              :preloaded ->
+                {acc, nil}
+
+              _ ->
+                {acc, nil}
+            end
+
+          _ ->
+            {acc, nil}
+        end
       end
 
     children = if child, do: [child | children], else: children
@@ -396,8 +432,155 @@ defmodule Breeze.Renderer do
         elements: elements,
         boxes: Map.merge(Map.get(acc, :boxes, %{}), Map.get(child_acc, :boxes, %{})),
         ids: Enum.reverse(child_acc.ids) ++ acc.ids,
-        focusables: Enum.reverse(child_acc.focusables) ++ acc.focusables
+        focusables: Enum.reverse(child_acc.focusables) ++ acc.focusables,
+        live_dimensions: Map.get(acc, :live_dimensions, %{})
     }
+  end
+
+  defp maybe_attach_live_viewports(root_children, opts) do
+    case Keyword.get(opts, :live_view) do
+      fun when is_function(fun, 2) ->
+        placeholder_opts = Keyword.put(opts, :live_placeholder, true)
+
+        {placeholder_acc, placeholder_box} =
+          build_from_tree_nodes(root_children, placeholder_opts)
+
+        %{dimensions: dimensions} =
+          BackBreeze.Box.render_with_dimensions(placeholder_box, placeholder_opts)
+
+        live_viewports =
+          placeholder_acc.elements
+          |> Enum.sort()
+          |> Enum.zip(dimensions)
+          |> Enum.reduce(%{}, fn {{_idx, flags}, dims}, acc ->
+            if Keyword.get(flags, :__live_placeholder__) do
+              Map.put(acc, Keyword.fetch!(flags, :id), dims)
+            else
+              acc
+            end
+          end)
+
+        Keyword.put(opts, :live_viewports, live_viewports)
+
+      _ ->
+        opts
+    end
+  end
+
+  defp build_live_placeholder(attrs, flags, acc, opts) do
+    live_flags =
+      [__live_placeholder__: true]
+      |> inherit_implicit_owner(flags)
+      |> inherit_focus_scope_path(flags)
+
+    acc = %{
+      acc
+      | flags: live_flags,
+        id: acc.id + 1,
+        elements: Map.put(acc.elements, acc.id, acc.flags)
+    }
+
+    nodes = live_placeholder_nodes(attrs, opts)
+
+    build_tree(nodes, %BackBreeze.Box{}, [], RenderStyle.empty(), live_flags, acc, opts)
+  end
+
+  defp live_placeholder_nodes(attrs, opts) do
+    id = fetch_live_attr!(attrs, :id)
+    full_id = live_full_id(id, opts)
+
+    base = [{:attribute, ["id", full_id]}]
+
+    attrs
+    |> Enum.reduce(base, fn
+      {key, value}, acc when key in [:class, "class"] and not is_nil(value) ->
+        acc ++ [{:attribute, ["class", value]}]
+
+      {key, value}, acc when key in [:style, "style"] and not is_nil(value) ->
+        acc ++ [{:attribute, ["style", value]}]
+
+      {key, true}, acc when key in [:focusable, "focusable"] ->
+        acc ++ [{:attribute_bool, ["focusable"]}]
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp live_full_id(id, opts) do
+    case Keyword.get(opts, :live_prefix) do
+      nil -> id
+      prefix -> prefix <> "::" <> id
+    end
+  end
+
+  defp maybe_put_live_terminal(opts, %{width: width, height: height} = viewport) do
+    terminal = Keyword.get(opts, :terminal)
+
+    width =
+      resolve_live_terminal_dimension(width, Map.get(viewport, :viewport_width), terminal, :width)
+
+    height =
+      resolve_live_terminal_dimension(
+        height,
+        Map.get(viewport, :viewport_height),
+        terminal,
+        :height
+      )
+
+    if is_integer(width) and width > 0 and is_integer(height) and height > 0 do
+      Keyword.put(opts, :live_terminal, resize_terminal(terminal, width, height))
+    else
+      opts
+    end
+  end
+
+  defp maybe_put_live_terminal(opts, _viewport), do: opts
+
+  defp resolve_live_terminal_dimension(primary, _secondary, _terminal, _axis)
+       when is_integer(primary) and primary > 0,
+       do: primary
+
+  defp resolve_live_terminal_dimension(_primary, secondary, _terminal, _axis)
+       when is_integer(secondary) and secondary > 0,
+       do: secondary
+
+  defp resolve_live_terminal_dimension(primary, _secondary, %Termite.Terminal{size: size}, :width)
+       when primary in [:full, :screen],
+       do: size.width
+
+  defp resolve_live_terminal_dimension(
+         primary,
+         _secondary,
+         %Termite.Terminal{size: size},
+         :height
+       )
+       when primary in [:full, :screen],
+       do: size.height
+
+  defp resolve_live_terminal_dimension(_primary, _secondary, _terminal, _axis), do: nil
+
+  defp resize_terminal(%Termite.Terminal{} = terminal, width, height) do
+    %{terminal | size: %{width: width, height: height}}
+  end
+
+  defp resize_terminal(nil, width, height) do
+    %Termite.Terminal{size: %{width: width, height: height}}
+  end
+
+  defp fetch_live_attr!(attrs, key) do
+    case fetch_live_attr(attrs, key, nil) do
+      nil -> raise KeyError, key: key, term: attrs
+      value -> value
+    end
+  end
+
+  defp fetch_live_attr(attrs, key, default) do
+    cond do
+      Keyword.keyword?(attrs) -> Keyword.get(attrs, key, default)
+      is_map(attrs) -> Map.get(attrs, key, Map.get(attrs, Atom.to_string(key), default))
+      true -> default
+    end
   end
 
   defp normalize_animation_result({:ok, %Box{} = box, _opts}), do: {box, %{}}
@@ -444,19 +627,36 @@ defmodule Breeze.Renderer do
   end
 
   defp screen_dim_regions(acc, dimensions) do
-    acc.elements
-    |> Enum.sort()
-    |> Enum.zip(dimensions)
-    |> Enum.flat_map(fn {{_idx, flags}, dims} ->
-      if Keyword.get(flags, :"screen-dim") do
-        [
-          %{
-            left: Map.get(dims, :left, 0),
-            top: Map.get(dims, :top, 0),
-            right: Map.get(dims, :left, 0) + max(Map.get(dims, :width, 0) - 1, 0),
-            bottom: Map.get(dims, :top, 0) + max(Map.get(dims, :height, 0) - 1, 0)
-          }
-        ]
+    resolved_dimensions =
+      acc.elements
+      |> Enum.sort()
+      |> Enum.zip(dimensions)
+      |> Enum.reduce(%{}, fn {{_idx, flags}, dims}, resolved ->
+        case Keyword.get(flags, :id) do
+          nil -> resolved
+          id -> Map.put(resolved, id, dims)
+        end
+      end)
+      |> Map.merge(Map.get(acc, :live_dimensions, %{}))
+
+    Enum.flat_map(acc.elements, fn {_idx, flags} ->
+      id = Keyword.get(flags, :id)
+
+      if id && Keyword.get(flags, :"screen-dim") do
+        case Map.get(resolved_dimensions, id) do
+          nil ->
+            []
+
+          dims ->
+            [
+              %{
+                left: Map.get(dims, :left, 0),
+                top: Map.get(dims, :top, 0),
+                right: Map.get(dims, :left, 0) + max(Map.get(dims, :width, 0) - 1, 0),
+                bottom: Map.get(dims, :top, 0) + max(Map.get(dims, :height, 0) - 1, 0)
+              }
+            ]
+        end
       else
         []
       end

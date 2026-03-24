@@ -124,7 +124,7 @@ defmodule Breeze.BlocksTest do
 
     assert box.content =~ "Overview"
     assert box.content =~ "Details"
-    assert box.content =~ "\e[38;5;4m"
+    assert box.content =~ ~r/\e\[[0-9;]*38;5;4m/
     assert box.content =~ "48;5;4;"
     assert box.content =~ "Overview body"
   end
@@ -135,7 +135,7 @@ defmodule Breeze.BlocksTest do
     {:ok, _acc, box} = ChildServer.render(pid, focused: "tabs", implicit_state: %{})
 
     assert box.content =~ "Overview"
-    assert box.content =~ "\e[38;5;1m"
+    assert box.content =~ ~r/\e\[[0-9;]*38;5;1m/
     assert box.content =~ "48;5;1;"
     assert box.content =~ "Overview body"
   end
@@ -147,8 +147,21 @@ defmodule Breeze.BlocksTest do
 
     assert box.content =~ "Overview"
     assert box.content =~ "Details"
-    assert box.content =~ "\e[38;5;5m"
+    assert box.content =~ ~r/\e\[[0-9;]*38;5;5m/
     assert box.content =~ "48;5;1;"
     assert box.content =~ "Details body"
+  end
+
+  test "tabs render on the panel background by default" do
+    {:ok, pid} =
+      ChildServer.start(
+        view: UnderlineTabsExample,
+        start_opts: [],
+        theme: Breeze.Theme.builtin(:gruvbox)
+      )
+
+    {:ok, _acc, box} = ChildServer.render(pid, implicit_state: %{})
+
+    assert box.content =~ "48;2;50;48;47;"
   end
 end

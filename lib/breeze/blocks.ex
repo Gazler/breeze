@@ -40,7 +40,7 @@ defmodule Breeze.Blocks do
       |> assign(
         class:
           merge_class(
-            "border width-24 height-8 overflow-scroll scrollbar-arrows focus:border-primary",
+            "border width-24 height-8 overflow-scroll scrollbar-arrows focus:border-primary focus:scrollbar-primary",
             class_override(assigns)
           )
       )
@@ -83,10 +83,6 @@ defmodule Breeze.Blocks do
   attr :menu_style, :any, default: nil
   attr :item_class, :string, default: nil
   attr :item_style, :any, default: nil
-  attr :width, :integer, default: nil
-  attr :menu_width, :integer, default: nil
-  attr :menu_top, :integer, default: 1
-  attr :menu_left, :integer, default: 0
   attr :rest, :global
 
   slot :item do
@@ -94,6 +90,9 @@ defmodule Breeze.Blocks do
   end
 
   def dropdown(assigns) do
+    trigger_chrome_width = 4
+    minimum_width = 10
+
     items_with_labels =
       Enum.map(assigns.item, fn item ->
         {item, render_slot(item, %{})}
@@ -108,16 +107,26 @@ defmodule Breeze.Blocks do
       end
 
     width =
-      assigns[:width] ||
-        items_with_labels
-        |> Enum.map(fn {_item, label} -> String.length(label) + 4 end)
-        |> Kernel.++([String.length(selected_label) + 4, 8])
-        |> Enum.max()
+      case Breeze.Style.resolve_dimensions(assigns[:class], assigns[:style]).width do
+        resolved when is_integer(resolved) ->
+          resolved
 
-    menu_width = assigns[:menu_width] || width
+        :full ->
+          :full
+
+        _ ->
+          candidate_widths =
+            Enum.map(items_with_labels, fn {_item, label} ->
+              String.length(label) + trigger_chrome_width
+            end)
+
+          [String.length(selected_label) + trigger_chrome_width, minimum_width | candidate_widths]
+          |> Enum.max()
+      end
+
+    menu_width = width
     menu_height = max(length(items_with_labels), 1)
-    trigger_content_width = max(width - 1, 0)
-    trigger_content = build_dropdown_trigger(selected_label, trigger_content_width)
+    trigger_content = build_dropdown_trigger(selected_label, width)
 
     trigger_visual_class =
       merge_class(
@@ -130,14 +139,13 @@ defmodule Breeze.Blocks do
       |> assign(trigger_visual_class: trigger_visual_class)
       |> assign(selected_label: selected_label)
       |> assign(width: width)
-      |> assign(trigger_width: width)
       |> assign(menu_width: menu_width)
       |> assign(menu_height: menu_height)
       |> assign(trigger_content: trigger_content)
       |> assign(
         trigger_class:
           merge_class(
-            "width-#{width} height-1 padding-right-1 #{trigger_visual_class}",
+            "#{size_class("width", width)} height-1 padding-right-1 #{trigger_visual_class}",
             nil
           )
       )
@@ -151,7 +159,7 @@ defmodule Breeze.Blocks do
       |> assign(
         item_class:
           merge_class(
-            "width-#{menu_width} bg-primary text-background selected:inverse",
+            "#{size_class("width", menu_width)} bg-primary text-background selected:inverse",
             class_override(assigns, :item_class, :item_style)
           )
       )
@@ -172,39 +180,24 @@ defmodule Breeze.Blocks do
       implicit={Breeze.Implicit.Dropdown}
       focusable
       dropdown-selected={@selected}
-      dropdown-trigger-width={@trigger_width}
       dropdown-menu-width={@menu_width}
       dropdown-menu-height={@menu_height}
-      dropdown-menu-top={@menu_top}
-      dropdown-menu-left={@menu_left}
       class={@trigger_class}
       style={Breeze.Blocks.inline_style(assigns)}
       {@rest}
     >
       {@trigger_content}
+      <box dropdown-indicator-closed class={@trigger_visual_class}>▼</box>
+      <box dropdown-indicator-open class={@trigger_visual_class}>▲</box>
       <box
-        dropdown-indicator-closed="true"
-        class={@trigger_visual_class}
-        style={Breeze.Blocks.inline_style(assigns)}
-      >
-        ▼
-      </box>
-      <box
-        dropdown-indicator-open="true"
-        class={@trigger_visual_class}
-        style={Breeze.Blocks.inline_style(assigns)}
-      >
-        ▲
-      </box>
-      <box
-        dropdown-frame="true"
+        dropdown-frame
         class={@menu_class}
         style={Breeze.Blocks.inline_style(assigns, :menu_class, :menu_style)}
       >
       </box>
       <box
         :for={{item, index, item_style} <- @item_styles}
-        dropdown-item="true"
+        dropdown-item
         dropdown-item-index={index}
         value={item.value}
         class={item_style}
@@ -216,11 +209,16 @@ defmodule Breeze.Blocks do
     """
   end
 
-  defp build_dropdown_trigger(label, width) do
+  defp build_dropdown_trigger(label, width) when is_integer(width) do
     inner_width = max(width - 2, 0)
     padded = String.pad_trailing(to_string(label), inner_width) |> String.slice(0, inner_width)
     " " <> padded
   end
+
+  defp build_dropdown_trigger(label, _width), do: " " <> to_string(label)
+
+  defp size_class(axis, :full), do: "#{axis}-full"
+  defp size_class(axis, size) when is_integer(size), do: "#{axis}-#{size}"
 
   attr :id, :string, required: true
   attr :selected, :string, default: nil
@@ -255,7 +253,7 @@ defmodule Breeze.Blocks do
       |> assign(
         class:
           merge_class(
-            "overflow-hidden",
+            "bg-panel overflow-hidden",
             class_override(assigns)
           )
       )
@@ -471,8 +469,8 @@ defmodule Breeze.Blocks do
   end
 
   attr :id, :string, default: nil
-  attr :width, :integer, required: true
-  attr :height, :integer, required: true
+  attr :width, :integer, default: nil
+  attr :height, :integer, default: nil
   attr :scroll, :boolean, default: false
   attr :class, :string, default: nil
   attr :style, :any, default: nil
@@ -500,17 +498,20 @@ defmodule Breeze.Blocks do
           )
       )
 
+    assigns =
+      assign(
+        assigns,
+        frame_class:
+          panel_frame_class(assigns.class, Map.get(assigns, :width), Map.get(assigns, :height))
+      )
+
     if assigns[:scroll] do
       if is_nil(assigns[:id]) do
         raise ArgumentError, "panel requires an id when scroll: true"
       end
 
       ~H"""
-      <box
-        class={"#{@class} width-#{@width} height-#{@height}"}
-        style={Breeze.Blocks.inline_style(assigns)}
-        {@rest}
-      >
+      <box class={@frame_class} style={Breeze.Blocks.inline_style(assigns)} {@rest}>
         <box
           :if={assigns[:title]}
           class={"absolute left-2 top-0 #{@title_class}"}
@@ -529,11 +530,7 @@ defmodule Breeze.Blocks do
       """
     else
       ~H"""
-      <box
-        class={"#{@class} width-#{@width} height-#{@height}"}
-        style={Breeze.Blocks.inline_style(assigns)}
-        {@rest}
-      >
+      <box class={@frame_class} style={Breeze.Blocks.inline_style(assigns)} {@rest}>
         {render_slot(@inner_block)}
         <box
           :if={assigns[:title]}
@@ -546,6 +543,16 @@ defmodule Breeze.Blocks do
       """
     end
   end
+
+  defp panel_frame_class(class, width, height) do
+    class
+    |> maybe_append_dimension(:width, width)
+    |> maybe_append_dimension(:height, height)
+  end
+
+  defp maybe_append_dimension(class, _dimension, nil), do: class
+  defp maybe_append_dimension(class, :width, width), do: "#{class} width-#{width}"
+  defp maybe_append_dimension(class, :height, height), do: "#{class} height-#{height}"
 
   attr :id, :string, required: true
   attr :width, :integer, default: nil

@@ -43,8 +43,10 @@ defmodule PostingTest do
 
     assert {:ok, _acc, open_box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert visible(open_box.content) =~ "GET"
-    assert visible(open_box.content) =~ "DELETE"
-    assert %{focused: "method"} = Breeze.ChildServer.metadata(pid)
+    assert visible(open_box.content) =~ "▲"
+
+    assert {Breeze.Implicit.Dropdown, %{open?: true}} =
+             Breeze.ChildServer.metadata(pid).implicit_state["method"]
   end
 
   test "headers form adds a request header" do

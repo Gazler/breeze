@@ -11,6 +11,10 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, :metadata)
   end
 
+  def layout_snapshot(pid) do
+    GenServer.call(pid, :layout_snapshot)
+  end
+
   def render(pid, opts) do
     GenServer.call(pid, {:render, opts})
   end
@@ -68,7 +72,14 @@ defmodule Breeze.ChildServer do
       assigns: %{__invalidate__: invalidate}
     }
 
-    {:ok, term} = view.mount(start_opts, term)
+    term =
+      if Code.ensure_loaded?(view) and function_exported?(view, :mount, 2) do
+        {:ok, mounted_term} = view.mount(start_opts, term)
+        mounted_term
+      else
+        term
+      end
+
     maybe_probe_system_theme(term.theme_source, term.terminal, term.server)
     term = sync_theme_assigns(term)
     {:ok, term}
@@ -87,6 +98,10 @@ defmodule Breeze.ChildServer do
        implicit_state: term.implicit_state,
        implicit_meta: term.implicit_meta
      }, term}
+  end
+
+  def handle_call(:layout_snapshot, _from, term) do
+    {:reply, %{elements: term.elements, mouse_targets: term.mouse_targets}, term}
   end
 
   def handle_call({:render, opts}, _from, term) do
@@ -134,6 +149,11 @@ defmodule Breeze.ChildServer do
     next_term = %{term | theme: theme} |> sync_theme_assigns()
     notify_invalidate(next_term)
     {:noreply, next_term}
+  end
+
+  def handle_info({:child_invalidated, _child_id}, term) do
+    notify_invalidate(term)
+    {:noreply, term}
   end
 
   def handle_info(message, term) do
@@ -228,6 +248,7 @@ defmodule Breeze.ChildServer do
   defp render_term(term, opts) do
     explicit_focus? = Keyword.has_key?(opts, :focused)
     term = maybe_put_terminal(term, Keyword.get(opts, :terminal))
+    term = prune_dead_children(term)
 
     theme =
       Breeze.Theme.new(term.theme_source || term.theme || Keyword.get(opts, :theme),
@@ -257,6 +278,13 @@ defmodule Breeze.ChildServer do
       |> Keyword.put(:last_render_at, term.last_render_at)
       |> Keyword.put(:last_interaction_at, term.last_interaction_at)
       |> Keyword.put(:animation_now, System.monotonic_time(:millisecond))
+
+    {term, final_opts} =
+      if Keyword.has_key?(opts, :live_view) do
+        {term, final_opts}
+      else
+        preload_and_attach_live_view(term, final_opts)
+      end
 
     initial_implicit_meta = term.implicit_meta
 
@@ -397,15 +425,21 @@ defmodule Breeze.ChildServer do
   defp process_input(key, term) do
     event = %{"key" => key}
 
-    case Breeze.GlobalKeybindings.dispatch(event, term) do
-      {:stop, term} ->
-        {:stop, term}
+    case dispatch_input_hierarchy(term, key) do
+      nil ->
+        case Breeze.GlobalKeybindings.dispatch(event, term) do
+          {:stop, term} ->
+            {:stop, term}
 
-      {:noreply, term} ->
-        {:noreply, term}
+          {:noreply, term} ->
+            {:noreply, term}
 
-      :continue ->
-        handle_event(:ignore_me, event, term)
+          :continue ->
+            handle_event(:ignore_me, event, term)
+        end
+
+      reply ->
+        reply
     end
   end
 
@@ -434,6 +468,214 @@ defmodule Breeze.ChildServer do
 
   defp handle_implicit_change(term, _id, change, event) do
     normalize_result(term.view.handle_event(change, event, term), term)
+  end
+
+  defp dispatch_input_hierarchy(term, key) do
+    term
+    |> focused_child_chain()
+    |> Enum.reduce_while(nil, fn {child_id, %{pid: pid}}, _acc ->
+      local_focused = strip_live_prefix(term.focused, child_id)
+      if local_focused, do: Breeze.ChildServer.set_focus(pid, local_focused)
+
+      reply = Breeze.ChildServer.dispatch_input(pid, key) |> namespace_child_reply(child_id)
+
+      case reply do
+        {:noreply, _focused, true} -> {:halt, reply}
+        {:stop, _focused, _consumed} -> {:halt, reply}
+        _ -> {:cont, nil}
+      end
+    end)
+  end
+
+  defp preload_and_attach_live_view(term, opts) do
+    collector_key = {__MODULE__, :live_children, make_ref()}
+    Process.put(collector_key, [])
+
+    preload_opts =
+      Keyword.put(opts, :live_view, fn attrs, _child_opts ->
+        id = fetch_live_attr!(attrs, :id)
+        Process.put(collector_key, [{id, attrs} | Process.get(collector_key, [])])
+        :preloaded
+      end)
+
+    _ = Breeze.Renderer.render(term.view, term.assigns, preload_opts)
+
+    discovered =
+      collector_key
+      |> Process.get([])
+      |> Enum.reverse()
+      |> Enum.uniq_by(&elem(&1, 0))
+
+    Process.delete(collector_key)
+
+    term = ensure_children(term, discovered)
+
+    live_view = fn attrs, child_opts ->
+      render_live_child(attrs, child_opts, term)
+    end
+
+    {term, Keyword.put(opts, :live_view, live_view)}
+  end
+
+  defp ensure_children(term, live_children) do
+    Enum.reduce(live_children, term, fn {id, attrs}, acc ->
+      view = fetch_live_attr!(attrs, :view)
+      start_opts = fetch_live_attr(attrs, :start_opts, [])
+
+      case Map.get(acc.children, id) do
+        %{pid: pid, view: ^view, start_opts: ^start_opts} when is_pid(pid) ->
+          if Process.alive?(pid),
+            do: acc,
+            else: put_in(acc.children[id], start_child!(id, attrs, acc))
+
+        %{pid: pid, ref: ref} ->
+          if is_pid(pid) and Process.alive?(pid), do: Process.exit(pid, :normal)
+          if is_reference(ref), do: Process.demonitor(ref, [:flush])
+          put_in(acc.children[id], start_child!(id, attrs, acc))
+
+        nil ->
+          put_in(acc.children[id], start_child!(id, attrs, acc))
+      end
+    end)
+  end
+
+  defp start_child!(id, attrs, term) do
+    view = fetch_live_attr!(attrs, :view)
+    start_opts = fetch_live_attr(attrs, :start_opts, [])
+    parent = self()
+    invalidate = fn -> send(parent, {:child_invalidated, id}) end
+
+    {:ok, pid} =
+      Breeze.ChildServer.start(
+        view: view,
+        start_opts: start_opts,
+        server: term.server,
+        terminal: term.terminal,
+        theme: term.theme,
+        theme_source: term.theme_source,
+        global_keybindings: term.global_keybindings,
+        apply_theme_defaults?: term.apply_theme_defaults?,
+        invalidate: invalidate
+      )
+
+    %{pid: pid, ref: Process.monitor(pid), view: view, start_opts: start_opts}
+  end
+
+  defp render_live_child(attrs, child_opts, term) do
+    id = fetch_live_attr!(attrs, :id)
+    terminal = Keyword.get(child_opts, :live_terminal, term.terminal)
+    full_prefix = live_id(Keyword.get(child_opts, :live_prefix), id)
+    viewport = Keyword.get(child_opts, :live_viewport)
+
+    case Map.get(term.children, id) do
+      %{pid: pid} when is_pid(pid) ->
+        if Process.alive?(pid) do
+          case Breeze.ChildServer.render_snapshot(pid,
+                 focused: strip_live_prefix(term.focused, id),
+                 implicit_state: %{},
+                 terminal: terminal,
+                 theme: term.theme,
+                 theme_source: term.theme_source || term.theme,
+                 live_prefix: full_prefix
+               ) do
+            {:ok, child_acc, child_box, _decorations} ->
+              layout_snapshot = Breeze.ChildServer.layout_snapshot(pid)
+
+              {:rendered, id, child_acc, child_box,
+               translate_live_dimensions(layout_snapshot.elements, viewport, full_prefix)}
+
+            _ ->
+              :preloaded
+          end
+        else
+          :preloaded
+        end
+
+      _ ->
+        :preloaded
+    end
+  end
+
+  defp prune_dead_children(term) do
+    alive_children =
+      term.children
+      |> Enum.filter(fn {_id, child} -> is_pid(child.pid) and Process.alive?(child.pid) end)
+      |> Map.new()
+
+    %{term | children: alive_children}
+  end
+
+  defp focused_child_chain(%{focused: nil}), do: []
+
+  defp focused_child_chain(%{focused: focused, children: children}) do
+    children
+    |> Enum.filter(fn {id, _child} ->
+      focused == id or String.starts_with?(focused, id <> "::")
+    end)
+    |> Enum.sort_by(fn {id, _child} -> String.length(id) end, :desc)
+  end
+
+  defp namespace_child_reply({:stop, focused}, child_id),
+    do: {:stop, namespace_child_focus(focused, child_id)}
+
+  defp namespace_child_reply({:stop, focused, consumed}, child_id),
+    do: {:stop, namespace_child_focus(focused, child_id), consumed}
+
+  defp namespace_child_reply({:noreply, focused}, child_id),
+    do: {:noreply, namespace_child_focus(focused, child_id)}
+
+  defp namespace_child_reply({:noreply, focused, consumed}, child_id),
+    do: {:noreply, namespace_child_focus(focused, child_id), consumed}
+
+  defp namespace_child_focus(nil, _child_id), do: nil
+  defp namespace_child_focus(focused, child_id), do: child_id <> "::" <> focused
+
+  defp strip_live_prefix(nil, _live_id), do: nil
+
+  defp strip_live_prefix(id, live_id) do
+    prefix = live_id <> "::"
+
+    if String.starts_with?(id, prefix) do
+      String.replace_prefix(id, prefix, "")
+    end
+  end
+
+  defp live_id(nil, id), do: id
+  defp live_id(prefix, id), do: prefix <> "::" <> id
+
+  defp translate_live_dimensions(elements, %{left: left, top: top}, prefix)
+       when is_map(elements) do
+    Map.new(elements, fn {id, viewport} ->
+      translated_id =
+        case id do
+          value when is_binary(value) ->
+            if String.starts_with?(value, prefix <> "::"),
+              do: value,
+              else: prefix <> "::" <> value
+        end
+
+      {translated_id,
+       %{
+         left: left + Map.get(viewport, :left, 0),
+         top: top + Map.get(viewport, :top, 0),
+         width: Map.get(viewport, :width, 0),
+         height: Map.get(viewport, :height, 0),
+         viewport_width: Map.get(viewport, :viewport_width, 0),
+         viewport_height: Map.get(viewport, :viewport_height, 0),
+         content_width: Map.get(viewport, :content_width, 0),
+         content_height: Map.get(viewport, :content_height, 0)
+       }}
+    end)
+  end
+
+  defp translate_live_dimensions(_elements, _viewport, _prefix), do: %{}
+
+  defp fetch_live_attr!(attrs, key) do
+    Map.get(attrs, key) || Map.fetch!(attrs, Atom.to_string(key))
+  end
+
+  defp fetch_live_attr(attrs, key, default) do
+    Map.get(attrs, key) || Map.get(attrs, Atom.to_string(key), default)
   end
 
   defp extract_async_decorations(term) do
@@ -486,10 +728,22 @@ defmodule Breeze.ChildServer do
     {:reply, {:noreply, next_term.focused, next_term != term}, next_term}
   end
 
+  defp reply_from_input_result({:noreply, focused, consumed}, term) do
+    next_term = %{term | focused: focused, allow_unfocused?: is_nil(focused)}
+    notify_invalidate(next_term)
+    {:reply, {:noreply, next_term.focused, consumed}, next_term}
+  end
+
   defp reply_from_input_result({:stop, next_term}, term) do
     next_term = apply_focus_transitions(term, next_term)
     notify_invalidate(next_term)
     {:stop, :normal, {:stop, next_term.focused, true}, next_term}
+  end
+
+  defp reply_from_input_result({:stop, focused, consumed}, term) do
+    next_term = %{term | focused: focused, allow_unfocused?: is_nil(focused)}
+    notify_invalidate(next_term)
+    {:stop, :normal, {:stop, next_term.focused, consumed}, next_term}
   end
 
   defp apply_focus_transitions(prev_term, next_term) do
