@@ -377,6 +377,42 @@ defmodule Breeze.Blocks do
     """
   end
 
+  attr :id, :string, default: nil
+  attr :focusable, :boolean, default: true
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :rest, :global
+
+  slot :inner_block, required: true
+
+  def button(assigns) do
+    assigns =
+      assigns
+      |> assign(focusable: normalize_button_focusable(Map.get(assigns, :focusable, true)))
+      |> assign(
+        class:
+          merge_class(
+            "bg-primary text-bg bold height-1 overflow-hidden focus:inverse",
+            class_override(assigns)
+          )
+      )
+
+    ~H"""
+    <box
+      id={@id}
+      focusable={@focusable}
+      class={@class}
+      style={Breeze.Blocks.inline_style(assigns)}
+      {@rest}
+    >
+      {render_slot(@inner_block)}
+    </box>
+    """
+  end
+
+  defp normalize_button_focusable(value) when value in [false, "false"], do: false
+  defp normalize_button_focusable(_value), do: true
+
   attr :id, :string, required: true
   attr :class, :string, default: nil
   attr :style, :any, default: nil

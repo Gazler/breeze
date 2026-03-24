@@ -86,7 +86,7 @@ defmodule Posting do
             br-change="url_changed"
             style="width-full"
           />
-          <box class="width-8 bg-primary text-bg bold">{"  Send "}</box>
+          <.button class="width-8" focusable="false">{"  Send "}</.button>
           <box style="bg-primary text-bg width-1">▐</box>
         </box>
         <box style="grid grid-cols-1 grid-rows-2 height-full">
@@ -147,13 +147,12 @@ defmodule Posting do
                           br-change="request_header_value_changed"
                           style="width-full"
                         />
-                        <box
+                        <.button
                           id="request-header-add"
-                          class="width-7 bg-primary text-bg bold focus:inverse"
-                          focusable
+                          class="width-7"
                         >
                           {" Add "}
-                        </box>
+                        </.button>
                       </box>
                     </box>
                   </:tab>

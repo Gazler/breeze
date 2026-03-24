@@ -5,6 +5,9 @@ defmodule Breeze.Storybook.ViewTest do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
 
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
     plain_content = Regex.replace(~r/\e\[[0-9;]*m/, box.content, "")
@@ -16,6 +19,9 @@ defmodule Breeze.Storybook.ViewTest do
   test "dropdown story does not duplicate the trigger row in the preview" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
@@ -31,6 +37,7 @@ defmodule Breeze.Storybook.ViewTest do
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
 
     assert {:noreply, "storybook-preview::storybook-dropdown", true} =
              Breeze.ChildServer.set_focus(
@@ -64,6 +71,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
     child = :sys.get_state(pid).children["storybook-preview"].pid
@@ -91,6 +99,7 @@ defmodule Breeze.Storybook.ViewTest do
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
     assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
@@ -120,6 +129,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
     assert {:noreply, "storybook-preview::storybook-input-active", true} =
@@ -144,6 +154,7 @@ defmodule Breeze.Storybook.ViewTest do
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
     assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
     assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
     assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
