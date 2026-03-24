@@ -179,4 +179,67 @@ defmodule Breeze.Storybook.ViewTest do
     assert plain_content =~ "Confirm Action"
     assert plain_content =~ "Escape closes it normally."
   end
+
+  test "preview panel highlights when a focused element lives inside the preview child" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert {:noreply, "storybook-preview::storybook-button-primary", true} =
+             Breeze.ChildServer.set_focus(
+               pid,
+               "storybook-preview::storybook-button-primary"
+             )
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert box.content =~ ~r/\e\[[0-9;]*38;5;4m╭─/
+    assert box.content =~ "Preview: Button"
+  end
+
+  test "preview panel highlights for the dropdown story when the dropdown is focused" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert {:noreply, "storybook-preview::storybook-dropdown", true} =
+             Breeze.ChildServer.set_focus(
+               pid,
+               "storybook-preview::storybook-dropdown"
+             )
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert box.content =~ ~r/\e\[[0-9;]*38;5;4m╭─/
+    assert box.content =~ "Preview: Dropdown"
+  end
+
+  test "preview panel highlights for the scroll story when the scroll region is focused" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert {:noreply, "storybook-preview::storybook-scroll", true} =
+             Breeze.ChildServer.set_focus(
+               pid,
+               "storybook-preview::storybook-scroll"
+             )
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert box.content =~ ~r/\e\[[0-9;]*38;5;4m╭─/
+    assert box.content =~ "Preview: Scroll"
+  end
 end

@@ -207,14 +207,17 @@ defmodule Breeze.Renderer do
             child_opts =
               opts
               |> Keyword.put(:live_viewport, viewport)
+              |> Keyword.put(:live_focus_within_path, focus_within_path(flags))
               |> maybe_put_live_terminal(viewport)
 
             case fun.(attrs, child_opts) do
               {:rendered, prefix, child_acc, child_box} ->
-                {merge_live_acc(acc, namespace_live_acc(child_acc, prefix)), child_box}
+                {merge_live_acc(acc, namespace_live_acc(child_acc, prefix, child_opts)),
+                 child_box}
 
               {:rendered, prefix, child_acc, child_box, child_dimensions} ->
-                {merge_live_acc(acc, namespace_live_acc(child_acc, prefix)), child_box}
+                {merge_live_acc(acc, namespace_live_acc(child_acc, prefix, child_opts)),
+                 child_box}
                 |> then(fn {merged_acc, rendered_box} ->
                   {
                     %{
@@ -246,6 +249,7 @@ defmodule Breeze.Renderer do
       []
       |> inherit_implicit_owner(flags)
       |> inherit_focus_scope_path(flags)
+      |> inherit_focus_within_path(flags)
 
     acc = %{
       acc
@@ -266,13 +270,15 @@ defmodule Breeze.Renderer do
     focused_target = Keyword.get(opts, :focused)
     owned_focus_target = Keyword.get(flags, :implicit_owner)
     node_focus_target = Keyword.get(flags, :id) || owned_focus_target
+    root_id = Keyword.get(flags, :id)
 
     focused =
       Keyword.get(flags, :focused, false) or
         (not is_nil(focused_target) &&
            Keyword.has_key?(flags, :"focus-with-owner") &&
            owned_focus_target == focused_target) or
-        (not is_nil(focused_target) && node_focus_target == focused_target)
+        (not is_nil(focused_target) && node_focus_target == focused_target) or
+        focused_within?(flags, root_id, focused_target, acc)
 
     flags = if focused, do: Keyword.put(flags, :focused, focused), else: flags
 
@@ -285,7 +291,6 @@ defmodule Breeze.Renderer do
 
     implicit_state = Keyword.get(opts, :implicit_state, %{})
     implicit_owner = Keyword.get(flags, :implicit_owner)
-    root_id = Keyword.get(flags, :id)
 
     id =
       cond do
@@ -772,15 +777,14 @@ defmodule Breeze.Renderer do
 
   defp rgb_color?(_), do: false
 
-  defp namespace_live_acc(acc, prefix) do
+  defp namespace_live_acc(acc, prefix, opts) do
+    live_focus_within_path = Keyword.get(opts, :live_focus_within_path, [])
+
     acc
     |> Map.put(:ids, namespace_ids(acc.ids, prefix))
     |> Map.put(:focusables, namespace_ids(acc.focusables, prefix))
     |> Map.put(:boxes, namespace_box_map(Map.get(acc, :boxes, %{}), prefix))
-    |> Map.put(:elements, namespace_elements(acc.elements, prefix))
-    |> Map.update(:elements, %{0 => [id: prefix]}, fn elements ->
-      Map.update(elements, 0, [id: prefix], &Keyword.put(&1, :id, prefix))
-    end)
+    |> Map.put(:elements, namespace_elements(acc.elements, prefix, live_focus_within_path))
   end
 
   defp inherit_implicit_owner(child_flags, flags) do
@@ -811,6 +815,20 @@ defmodule Breeze.Renderer do
       else: Keyword.put(child_flags, :"focus-scope-path", scope_path)
   end
 
+  defp inherit_focus_within_path(child_flags, flags) do
+    focus_within_path = Keyword.get(flags, :"focus-within-path", [])
+
+    focus_within_path =
+      case Keyword.get(flags, :id) do
+        id when is_binary(id) -> focus_within_path ++ [id]
+        _ -> focus_within_path
+      end
+
+    if focus_within_path == [],
+      do: child_flags,
+      else: Keyword.put(child_flags, :"focus-within-path", focus_within_path)
+  end
+
   defp namespace_id(nil, _prefix), do: nil
   defp namespace_id(id, prefix), do: prefix <> "::" <> id
 
@@ -828,17 +846,70 @@ defmodule Breeze.Renderer do
     end)
   end
 
-  defp namespace_elements(elements, prefix) do
+  defp namespace_elements(elements, prefix, live_focus_within_path) do
     Map.new(elements, fn {idx, flags} ->
-      {idx, namespace_element_flags(flags, prefix)}
+      {idx, namespace_element_flags(flags, prefix, live_focus_within_path)}
     end)
   end
 
-  defp namespace_element_flags(flags, prefix) do
+  defp namespace_element_flags(flags, prefix, live_focus_within_path) do
     flags
     |> Keyword.update(:id, nil, &namespace_id(&1, prefix))
     |> Keyword.update(:implicit_owner, nil, &namespace_id(&1, prefix))
     |> Keyword.update(:"focus-scope-path", [], &namespace_ids(&1, prefix))
+    |> Keyword.update(:"focus-within-path", live_focus_within_path ++ [prefix], fn path ->
+      live_focus_within_path ++ [prefix | namespace_ids(path, prefix)]
+    end)
+  end
+
+  defp focus_within_path(flags) do
+    inherited = Keyword.get(flags, :"focus-within-path", [])
+
+    case Keyword.get(flags, :id) do
+      id when is_binary(id) -> inherited ++ [id]
+      _ -> inherited
+    end
+  end
+
+  defp focused_within?(flags, root_id, focused_target, acc) do
+    focus_within_target = focus_within_target(flags, root_id)
+
+    Keyword.get(flags, :"focus-within") in [true, "true"] and is_binary(focus_within_target) and
+      focused_descends_from?(focused_target, focus_within_target, acc)
+  end
+
+  defp focus_within_target(_flags, root_id) when is_binary(root_id), do: root_id
+
+  defp focus_within_target(flags, _root_id) do
+    flags
+    |> Keyword.get(:"focus-within-path", [])
+    |> List.last()
+  end
+
+  defp focused_descends_from?(nil, _root_id, _acc), do: false
+
+  defp focused_descends_from?(focused_target, root_id, acc) do
+    case focused_element_flags(focused_target, acc) do
+      nil ->
+        false
+
+      focused_flags ->
+        root_id in Keyword.get(focused_flags, :"focus-within-path", [])
+    end
+  end
+
+  defp focused_element_flags(focused_target, acc) do
+    [Map.get(acc, :flags) | Enum.map(Map.get(acc, :elements, %{}), fn {_idx, flags} -> flags end)]
+    |> Enum.find_value(fn
+      nil ->
+        nil
+
+      {_idx, flags} ->
+        if Keyword.get(flags, :id) == focused_target, do: flags
+
+      flags ->
+        if Keyword.get(flags, :id) == focused_target, do: flags
+    end)
   end
 
   defp animation_ctx(opts, id, focused, previous_layout) do

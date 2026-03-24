@@ -643,32 +643,103 @@ defmodule Breeze.ChildServer do
   defp live_id(nil, id), do: id
   defp live_id(prefix, id), do: prefix <> "::" <> id
 
-  defp translate_live_dimensions(elements, %{left: left, top: top}, prefix)
+  defp translate_live_dimensions(elements, %{left: left, top: top} = viewport, prefix)
        when is_map(elements) do
-    Map.new(elements, fn {id, viewport} ->
-      translated_id =
-        case id do
-          value when is_binary(value) ->
-            if String.starts_with?(value, prefix <> "::"),
-              do: value,
-              else: prefix <> "::" <> value
-        end
+    translated_elements =
+      Map.new(elements, fn {id, viewport} ->
+        translated_id =
+          case id do
+            value when is_binary(value) ->
+              if String.starts_with?(value, prefix <> "::"),
+                do: value,
+                else: prefix <> "::" <> value
+          end
 
-      {translated_id,
-       %{
-         left: left + Map.get(viewport, :left, 0),
-         top: top + Map.get(viewport, :top, 0),
-         width: Map.get(viewport, :width, 0),
-         height: Map.get(viewport, :height, 0),
-         viewport_width: Map.get(viewport, :viewport_width, 0),
-         viewport_height: Map.get(viewport, :viewport_height, 0),
-         content_width: Map.get(viewport, :content_width, 0),
-         content_height: Map.get(viewport, :content_height, 0)
-       }}
-    end)
+        {translated_id,
+         %{
+           left: left + Map.get(viewport, :left, 0),
+           top: top + Map.get(viewport, :top, 0),
+           width: Map.get(viewport, :width, 0),
+           height: Map.get(viewport, :height, 0),
+           viewport_width: Map.get(viewport, :viewport_width, 0),
+           viewport_height: Map.get(viewport, :viewport_height, 0),
+           content_width: Map.get(viewport, :content_width, 0),
+           content_height: Map.get(viewport, :content_height, 0)
+         }}
+      end)
+
+    Map.put(translated_elements, prefix, live_root_dimensions(translated_elements, viewport))
   end
 
   defp translate_live_dimensions(_elements, _viewport, _prefix), do: %{}
+
+  defp live_root_dimensions(translated_elements, viewport) do
+    width = Map.get(viewport, :width, 0)
+    height = Map.get(viewport, :height, 0)
+
+    if width > 0 and height > 0 do
+      %{
+        left: Map.get(viewport, :left, 0),
+        top: Map.get(viewport, :top, 0),
+        width: width,
+        height: height,
+        viewport_width: Map.get(viewport, :viewport_width, width),
+        viewport_height: Map.get(viewport, :viewport_height, height),
+        content_width: Map.get(viewport, :content_width, width),
+        content_height: Map.get(viewport, :content_height, height)
+      }
+    else
+      translated_elements
+      |> Map.values()
+      |> Enum.reduce(nil, fn dims, acc ->
+        left = Map.get(dims, :left, 0)
+        top = Map.get(dims, :top, 0)
+        right = left + max(Map.get(dims, :width, 0) - 1, 0)
+        bottom = top + max(Map.get(dims, :height, 0) - 1, 0)
+
+        case acc do
+          nil ->
+            %{left: left, top: top, right: right, bottom: bottom}
+
+          acc ->
+            %{
+              left: min(acc.left, left),
+              top: min(acc.top, top),
+              right: max(acc.right, right),
+              bottom: max(acc.bottom, bottom)
+            }
+        end
+      end)
+      |> case do
+        nil ->
+          %{
+            left: Map.get(viewport, :left, 0),
+            top: Map.get(viewport, :top, 0),
+            width: 0,
+            height: 0,
+            viewport_width: 0,
+            viewport_height: 0,
+            content_width: 0,
+            content_height: 0
+          }
+
+        bounds ->
+          width = max(bounds.right - bounds.left + 1, 0)
+          height = max(bounds.bottom - bounds.top + 1, 0)
+
+          %{
+            left: bounds.left,
+            top: bounds.top,
+            width: width,
+            height: height,
+            viewport_width: width,
+            viewport_height: height,
+            content_width: width,
+            content_height: height
+          }
+      end
+    end
+  end
 
   defp fetch_live_attr!(attrs, key) do
     Map.get(attrs, key) || Map.fetch!(attrs, Atom.to_string(key))

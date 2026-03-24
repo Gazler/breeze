@@ -89,6 +89,25 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule PanelFocusWithinExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.panel id="panel" class="width-16 height-4">
+        <:title>Details</:title>
+        <.button id="confirm" class="width-10">{" Confirm "}</.button>
+      </.panel>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   describe "merge_class/2" do
     test "matches merge_style semantics" do
       assert Blocks.merge_class("border width-24 height-8", "width-32 bg-4") ==
@@ -189,5 +208,16 @@ defmodule Breeze.BlocksTest do
     assert acc.focusables == ["confirm"]
     assert box.content =~ "Confirm"
     assert box.content =~ ~r/\e\[[0-9;]*7;[0-9;]*m/
+  end
+
+  test "panel highlights when a descendant is focused" do
+    {:ok, pid} = ChildServer.start(view: PanelFocusWithinExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "confirm", implicit_state: %{})
+
+    assert box.content =~ "Confirm"
+    assert box.content =~ "Details"
+    assert box.content =~ ~r/\e\[[0-9;]*38;5;4m[╭│╰]/
+    assert box.content =~ ~r/\e\[[0-9;]*38;5;4mDetails/
   end
 end

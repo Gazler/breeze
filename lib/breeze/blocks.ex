@@ -392,7 +392,7 @@ defmodule Breeze.Blocks do
       |> assign(
         class:
           merge_class(
-            "bg-primary text-bg bold height-1 overflow-hidden focus:inverse",
+            "bg-primary text-bg bold height-1 overflow-hidden focus:inverse padding-left-1 padding-right-1",
             class_override(assigns)
           )
       )
@@ -514,6 +514,7 @@ defmodule Breeze.Blocks do
   attr :title_style, :any, default: nil
   attr :scroll_class, :string, default: nil
   attr :scroll_style, :any, default: nil
+  attr :focus_within, :boolean, default: true
   attr :rest, :global
 
   slot :title
@@ -523,8 +524,17 @@ defmodule Breeze.Blocks do
     assigns =
       assigns
       |> assign(
-        class: merge_class("border-rounded border-stroke bg-panel", class_override(assigns)),
-        title_class: merge_class("bold text", class_override(assigns, :title_class, :title_style))
+        focus_within: Map.get(assigns, :focus_within, true),
+        class:
+          merge_class(
+            "border-rounded border-stroke bg-panel focus:border-primary",
+            class_override(assigns)
+          ),
+        title_class:
+          merge_class(
+            "bold text focus:text-primary",
+            class_override(assigns, :title_class, :title_style)
+          )
       )
       |> assign(
         scroll_class:
@@ -547,9 +557,15 @@ defmodule Breeze.Blocks do
       end
 
       ~H"""
-      <box class={@frame_class} style={Breeze.Blocks.inline_style(assigns)} {@rest}>
+      <box
+        class={@frame_class}
+        style={Breeze.Blocks.inline_style(assigns)}
+        focus-within={@focus_within}
+        {@rest}
+      >
         <box
           :if={assigns[:title]}
+          focus-within="true"
           class={"absolute left-2 top-0 #{@title_class}"}
           style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
         >
@@ -566,10 +582,17 @@ defmodule Breeze.Blocks do
       """
     else
       ~H"""
-      <box class={@frame_class} style={Breeze.Blocks.inline_style(assigns)} {@rest}>
+      <box
+        id={@id}
+        class={@frame_class}
+        style={Breeze.Blocks.inline_style(assigns)}
+        focus-within={@focus_within}
+        {@rest}
+      >
         {render_slot(@inner_block)}
         <box
           :if={assigns[:title]}
+          focus-within="true"
           class={"absolute left-2 top-0 #{@title_class}"}
           style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
         >

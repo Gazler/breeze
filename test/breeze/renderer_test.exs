@@ -490,7 +490,7 @@ defmodule Breeze.RendererTest do
                """
     end
 
-    test "tracks the namespaced live child root element id" do
+    test "tracks the namespaced live child root viewport" do
       {:ok, pid} = Breeze.ChildServer.start(view: LiveCounterChild, start_opts: [])
 
       {acc, _box} =
@@ -499,11 +499,24 @@ defmodule Breeze.RendererTest do
             {:ok, child_acc, child_box} =
               Breeze.ChildServer.render(pid, focused: "button", implicit_state: %{})
 
-            {:rendered, "child", child_acc, child_box}
+            child_dimensions = %{
+              "child" => %{
+                left: 0,
+                top: 0,
+                width: 10,
+                height: 3,
+                viewport_width: 10,
+                viewport_height: 3,
+                content_width: 10,
+                content_height: 3
+              }
+            }
+
+            {:rendered, "child", child_acc, child_box, child_dimensions}
           end
         )
 
-      assert Enum.any?(acc.elements, fn {_idx, flags} -> Keyword.get(flags, :id) == "child" end)
+      assert Map.has_key?(acc.live_dimensions, "child")
     end
 
     test "renders live children against their constrained slot dimensions" do

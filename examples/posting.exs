@@ -86,21 +86,26 @@ defmodule Posting do
             br-change="url_changed"
             style="width-full"
           />
-          <.button class="width-8" focusable="false">{"  Send "}</.button>
+          <.button class="width-8 padding-left-2" focusable="false">Send</.button>
           <box style="bg-primary text-bg width-1">▐</box>
         </box>
         <box style="grid grid-cols-1 grid-rows-2 height-full">
           <box style="grid grid-cols-2 height-full">
-            <.list
-              id="collection"
-              list-scroll-padding={1}
-              class="bg border-rounded height-full overflow-scroll focus:border-accent width-full"
-              item_style="selected:bg-primary selected:text focus:selected:text focus:selected:bg-accent width-full"
+            <.panel
+              id="collection-panel"
+              class="height-full width-full overflow-hidden bg focus:border-accent"
             >
-              <:item :for={{val, label} <- @collection} value={val}>{label}</:item>
-            </.list>
+              <.list
+                id="collection"
+                list-scroll-padding={1}
+                class="bg height-full width-full overflow-scroll border-0 focus:border-0"
+                item_style="selected:bg-primary selected:text focus:selected:text focus:selected:bg-accent width-full"
+              >
+                <:item :for={{val, label} <- @collection} value={val}>{label}</:item>
+              </.list>
+            </.panel>
             <box style="grid grid-cols-1 grid-rows-2 height-full">
-              <box style="border-rounded overflow-hidden" class="bg">
+              <.panel id="request-panel" class="height-full overflow-hidden bg focus:border-accent">
                 <.tabs
                   id="request-tabs"
                   selected={@request_tab}
@@ -147,12 +152,7 @@ defmodule Posting do
                           br-change="request_header_value_changed"
                           style="width-full"
                         />
-                        <.button
-                          id="request-header-add"
-                          class="width-7"
-                        >
-                          {" Add "}
-                        </.button>
+                        <.button id="request-header-add" class="width-7">Add</.button>
                       </box>
                     </box>
                   </:tab>
@@ -172,8 +172,8 @@ defmodule Posting do
                     <box class="text-muted">No request options</box>
                   </:tab>
                 </.tabs>
-              </box>
-              <box style="border-rounded overflow-hidden" class="bg">
+              </.panel>
+              <.panel id="response-panel" class="height-full overflow-hidden bg focus:border-accent">
                 <.tabs
                   id="response-tabs"
                   selected={@response_tab}
@@ -199,7 +199,7 @@ defmodule Posting do
                     <box class="text-muted">No trace data</box>
                   </:tab>
                 </.tabs>
-              </box>
+              </.panel>
             </box>
           </box>
           <box style="inline height-1 width-full bg-panel overflow-hidden">
