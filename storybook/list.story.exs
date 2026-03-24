@@ -45,7 +45,7 @@ defmodule Breeze.Storybook.Stories.Blocks.ListStory do
     <.list
       id={"storybook-list-#{@variant}"}
       variant={@variant}
-      list-selected="elixir"
+      list-initial-index={1}
       class="width-full height-8 bg-panel focus:border-primary"
     >
       <:item :for={language <- @languages} value={String.downcase(language)}>{language}</:item>

@@ -573,11 +573,13 @@ defmodule Breeze.Server do
   defp sync_input_message?({:key, _key}, %{crash: crash}) when not is_nil(crash), do: true
 
   defp sync_input_message?({:key, key}, state) do
-    inspector_toggle_key?(key, state) or
-      inspector_move_key?(key, state) or
+    input_key = key_name(key)
+
+    inspector_toggle_key?(input_key, state) or
+      inspector_move_key?(input_key, state) or
       stop_global_key?(key, state) or
       (is_nil(state.pending_ref) and
-         (key in ["\t", "ShiftTab"] or sync_input?(state, key)))
+         (input_key in ["\t", "ShiftTab"] or sync_input?(state, input_key)))
   end
 
   defp sync_input_message?(_, _state), do: false
@@ -725,7 +727,7 @@ defmodule Breeze.Server do
               render_base(%{state | focused: focused}, cause, attempts - 1)
 
             true ->
-              decorations = decorations ++ child_decorations
+              decorations = dedupe_decorations(decorations ++ child_decorations)
               state = %{state | focused: focused, theme: metadata_theme}
               prep_started_at = System.monotonic_time(:microsecond)
               {base_output, decorations} = prepare_decorations(box.content, decorations, state)
@@ -1969,6 +1971,10 @@ defmodule Breeze.Server do
     |> schedule_animation()
   end
 
+  defp key_name(%{"key" => key}) when is_binary(key), do: key
+  defp key_name(key) when is_binary(key), do: key
+  defp key_name(_), do: nil
+
   defp put_debug_stat(state, key, value) do
     state
     |> Map.update(:debug_stats, %{key => value}, &Map.put(&1, key, value))
@@ -2233,10 +2239,25 @@ defmodule Breeze.Server do
     |> then(fn tracking ->
       %{
         missing: Enum.reverse(tracking.missing),
-        decorations: Enum.reverse(tracking.decorations),
+        decorations: dedupe_decorations(tracking.decorations),
         child_timings: Enum.reverse(tracking.child_timings)
       }
     end)
+  end
+
+  defp dedupe_decorations(decorations) do
+    decorations
+    |> Enum.reverse()
+    |> Enum.uniq_by(&tracked_decoration_identity/1)
+    |> Enum.reverse()
+  end
+
+  defp tracked_decoration_identity(decoration) do
+    {
+      Map.get(decoration, :id),
+      Map.get(decoration, :owner_id),
+      Map.get(decoration, :mod)
+    }
   end
 
   defp track_missing_live_child(ref, item) do

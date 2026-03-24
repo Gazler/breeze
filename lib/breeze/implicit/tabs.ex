@@ -14,11 +14,11 @@ defmodule Breeze.Implicit.Tabs do
       end)
 
     selected_index =
-      case Map.get(last_state, :selected) do
+      case Map.get(root_attrs, :"tab-selected") do
         nil ->
-          case Map.get(root_attrs, :"tab-selected") do
+          case Map.get(last_state, :selected) do
             nil -> 0
-            initial -> Enum.find_index(values, &(&1 == initial)) || 0
+            selected -> Enum.find_index(values, &(&1 == selected)) || 0
           end
 
         selected ->

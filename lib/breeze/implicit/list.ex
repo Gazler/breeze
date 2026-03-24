@@ -218,16 +218,17 @@ defmodule Breeze.Implicit.List do
 
   defp pick_selected_index(values, last_state, root_attrs) do
     selected = Map.get(last_state, :selected)
+    controlled_selected = Map.get(root_attrs, :"list-selected")
 
     cond do
+      controlled_selected && Enum.member?(values, controlled_selected) ->
+        Enum.find_index(values, &(&1 == controlled_selected))
+
       selected && Enum.member?(values, selected) ->
         Enum.find_index(values, &(&1 == selected))
 
       match?(i when is_integer(i), Map.get(last_state, :selected_index)) ->
         Map.get(last_state, :selected_index)
-
-      selected = Map.get(root_attrs, :"list-selected") ->
-        Enum.find_index(values, &(&1 == selected))
 
       true ->
         case Map.fetch(root_attrs, :"list-initial-index") do

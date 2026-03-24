@@ -52,6 +52,19 @@ defmodule Breeze.Implicit.TabsTest do
       assert state.selected == "details"
       assert state.selected_index == 1
     end
+
+    test "prefers the current root selected tab over stale last state" do
+      children = [
+        %{:"tab-label" => "Overview", value: "overview"},
+        %{:"tab-label" => "Details", value: "details"}
+      ]
+
+      state =
+        Tabs.init(children, %{:"tab-selected" => "details"}, %{selected: "overview", selected_index: 0})
+
+      assert state.selected == "details"
+      assert state.selected_index == 1
+    end
   end
 
   describe "handle_event/3" do

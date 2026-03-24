@@ -24,6 +24,20 @@ defmodule Breeze.Implicit.ListTest do
       assert state.loop == false
       assert state.scroll_padding == 2
     end
+
+    test "prefers list-selected from the root attrs over the prior internal selection" do
+      children = [%{value: "one"}, %{value: "two"}, %{value: "three"}]
+
+      state =
+        Implicit.List.init(
+          children,
+          %{:"list-selected" => "three"},
+          %{selected: "one", selected_index: 0, offset: 0}
+        )
+
+      assert state.selected == "three"
+      assert state.selected_index == 2
+    end
   end
 
   describe "handle_event/3" do

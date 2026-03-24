@@ -117,7 +117,7 @@ defmodule Breeze.InputRouter do
   end
 
   defp stop_global_key?(key, state),
-    do: Breeze.GlobalKeybindings.stop_action?(%{"key" => key}, state)
+    do: Breeze.GlobalKeybindings.stop_action?(normalize_key_event(key), state)
 
   defp maybe_start_theme_probe(%{theme_probe: probe} = state, _theme) when is_map(probe),
     do: state
@@ -276,4 +276,7 @@ defmodule Breeze.InputRouter do
   defp decode_input(raw_key) do
     Breeze.Input.decode(raw_key)
   end
+
+  defp normalize_key_event(%{"key" => _} = event), do: event
+  defp normalize_key_event(key), do: %{"key" => key}
 end

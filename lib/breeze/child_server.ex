@@ -455,23 +455,23 @@ defmodule Breeze.ChildServer do
   end
 
   defp process_input(key, term) do
-    event = %{"key" => key}
+    event = normalize_key_event(key)
 
-    case dispatch_input_hierarchy(term, key) do
-      nil ->
-        case Breeze.GlobalKeybindings.dispatch(event, term) do
-          {:stop, term} ->
-            {:stop, term}
+    case Breeze.GlobalKeybindings.dispatch(event, term) do
+      {:stop, term} ->
+        {:stop, term}
 
-          {:noreply, term} ->
-            {:noreply, term}
+      {:noreply, term} ->
+        {:noreply, term}
 
-          :continue ->
+      :continue ->
+        case dispatch_input_hierarchy(term, key) do
+          nil ->
             handle_event(:ignore_me, event, term)
-        end
 
-      reply ->
-        reply
+          reply ->
+            reply
+        end
     end
   end
 
@@ -518,6 +518,9 @@ defmodule Breeze.ChildServer do
       end
     end)
   end
+
+  defp normalize_key_event(%{"key" => _} = event), do: event
+  defp normalize_key_event(key), do: %{"key" => key}
 
   defp preload_and_attach_live_view(term, opts) do
     collector_key = {__MODULE__, :live_children, make_ref()}
