@@ -840,6 +840,7 @@ defmodule Breeze.Server do
     preload_only = fetch_live_attr(attrs, :preload_only, false)
     expected_view = fetch_live_attr!(attrs, :view)
     expected_assigns = fetch_live_attr(attrs, :assigns, %{}) |> Map.new()
+
     expected_start_opts =
       child_start_opts(fetch_live_attr(attrs, :start_opts, []), expected_view, state)
 
@@ -2106,6 +2107,7 @@ defmodule Breeze.Server do
       )
 
     ref = Process.monitor(pid)
+
     %{
       pid: pid,
       ref: ref,

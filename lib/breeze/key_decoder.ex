@@ -54,6 +54,7 @@ defmodule Breeze.KeyDecoder do
   defp convert_csi("6~"), do: "PageDown"
   defp convert_csi("8;5u"), do: "\x17"
   defp convert_csi("127;5u"), do: "\x17"
+
   defp convert_csi(sequence) do
     case decode_modified_csi(sequence) do
       nil -> sequence
@@ -118,7 +119,8 @@ defmodule Breeze.KeyDecoder do
   defp maybe_put_modifier(event, _key, false), do: event
   defp maybe_put_modifier(event, key, true), do: Map.put(event, key, true)
 
-  defp decode_ctrl_char(<<codepoint::utf8>>) when codepoint in 1..26 and codepoint not in [8, 9, 13] do
+  defp decode_ctrl_char(<<codepoint::utf8>>)
+       when codepoint in 1..26 and codepoint not in [8, 9, 13] do
     key =
       codepoint
       |> Kernel.+(96)

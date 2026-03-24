@@ -12,11 +12,13 @@ defmodule Breeze.Storybook.View do
 
     {:ok,
      term
+     |> Map.put(:global_keybindings, storybook_global_keybindings())
      |> assign(
        story_directory: story_directory,
        stories: stories,
        current_story_id: current && current.id,
        current_variant_id: first_variant_id(current),
+       show_debug: false,
        discovered_components: Discovery.components(),
        undocumented_components: Discovery.undocumented_components(stories)
      )
@@ -48,8 +50,8 @@ defmodule Breeze.Storybook.View do
       )
 
     ~H"""
-    <box class="width-screen height-screen bg padding-left-1 padding-right-1">
-      <box class="inline width-full height-full">
+    <box class="width-screen height-screen bg">
+      <box class="inline width-full height-full padding-left-1 padding-right-1">
         <.panel id="storybook-nav-panel" class="width-24 height-full">
           <:title>{@nav_title}</:title>
           <box class="width-full height-full overflow-hidden">
@@ -69,9 +71,7 @@ defmodule Breeze.Storybook.View do
             <:title>{@preview_title}</:title>
             <box class="width-full height-full bg-panel overflow-hidden">
               <box
-                class={
-                  "absolute left-0 top-0 width-full height-#{@preview_panel_height - 2} bg-panel overflow-hidden"
-                }
+                class={"absolute left-0 top-0 width-full height-#{@preview_panel_height - 2} bg-panel overflow-hidden"}
               >
                 <box :if={@variant_tabs?} class="width-full">
                   <.tabs
@@ -83,15 +83,14 @@ defmodule Breeze.Storybook.View do
                     class="width-full height-2 bg-panel"
                   >
                     <:tab :for={variant <- @variants} value={variant.id} label={variant.label}>
-                      <box></box>
+                      <box>
+                      </box>
                     </:tab>
                   </.tabs>
                 </box>
                 <box class="text-muted">{@story_description}</box>
                 <box
-                  class={
-                    "absolute left-0 top-#{@preview_story_top} width-#{@preview_story_width} height-#{@preview_story_height} overflow-hidden"
-                  }
+                  class={"absolute left-0 top-#{@preview_story_top} width-#{@preview_story_width} height-#{@preview_story_height} overflow-hidden"}
                 >
                   <live
                     id="storybook-preview"
@@ -135,6 +134,15 @@ defmodule Breeze.Storybook.View do
           </.panel>
         </box>
       </box>
+      <box :if={@show_debug} class="fixed right-0 bottom-0 width-42 height-24 layer-50">
+        <live
+          id="debug"
+          view={Breeze.Debug}
+          start_opts={[width: 42, height: 24]}
+          class="width-full height-full"
+        >
+        </live>
+      </box>
     </box>
     """
   end
@@ -150,6 +158,46 @@ defmodule Breeze.Storybook.View do
 
   def handle_event("select_variant", %{value: variant_id}, term) do
     {:noreply, term |> assign(current_variant_id: variant_id) |> sync_storybook_layout()}
+  end
+
+  def handle_event(_, %{"key" => "F2"}, term) do
+    {:noreply, assign(term, show_debug: !term.assigns.show_debug)}
+  end
+
+  def handle_event(_, %{"ctrlKey" => true, "key" => "ArrowLeft"}, term) do
+    {:noreply,
+     term |> step_variant(-1) |> focus("storybook-variant-tabs") |> sync_storybook_layout()}
+  end
+
+  def handle_event(_, %{"ctrlKey" => true, "key" => "h"}, term) do
+    {:noreply,
+     term |> step_variant(-1) |> focus("storybook-variant-tabs") |> sync_storybook_layout()}
+  end
+
+  def handle_event(_, %{"ctrlKey" => true, "key" => "ArrowRight"}, term) do
+    {:noreply,
+     term |> step_variant(1) |> focus("storybook-variant-tabs") |> sync_storybook_layout()}
+  end
+
+  def handle_event(_, %{"ctrlKey" => true, "key" => "l"}, term) do
+    {:noreply,
+     term |> step_variant(1) |> focus("storybook-variant-tabs") |> sync_storybook_layout()}
+  end
+
+  def handle_event(_, %{"ctrlKey" => true, "key" => "ArrowUp"}, term) do
+    {:noreply, term |> step_story(-1) |> focus("storybook-nav") |> sync_storybook_layout()}
+  end
+
+  def handle_event(_, %{"ctrlKey" => true, "key" => "k"}, term) do
+    {:noreply, term |> step_story(-1) |> focus("storybook-nav") |> sync_storybook_layout()}
+  end
+
+  def handle_event(_, %{"ctrlKey" => true, "key" => "ArrowDown"}, term) do
+    {:noreply, term |> step_story(1) |> focus("storybook-nav") |> sync_storybook_layout()}
+  end
+
+  def handle_event(_, %{"ctrlKey" => true, "key" => "j"}, term) do
+    {:noreply, term |> step_story(1) |> focus("storybook-nav") |> sync_storybook_layout()}
   end
 
   def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
@@ -194,7 +242,8 @@ defmodule Breeze.Storybook.View do
       %{id: id} when not is_nil(id) ->
         Map.get(variant, field, Map.get(story, field))
 
-      _ -> Map.get(story, field)
+      _ ->
+        Map.get(story, field)
     end
   end
 
@@ -208,6 +257,82 @@ defmodule Breeze.Storybook.View do
 
   defp inventory_summary(components) do
     Enum.map_join(components, ", ", & &1.id)
+  end
+
+  defp storybook_global_keybindings do
+    [
+      {"ArrowLeft", &handle_storybook_global_key/2},
+      {"h", &handle_storybook_global_key/2},
+      {"ArrowRight", &handle_storybook_global_key/2},
+      {"l", &handle_storybook_global_key/2},
+      {"ArrowUp", &handle_storybook_global_key/2},
+      {"k", &handle_storybook_global_key/2},
+      {"ArrowDown", &handle_storybook_global_key/2},
+      {"j", &handle_storybook_global_key/2}
+    ]
+  end
+
+  defp handle_storybook_global_key(%{"ctrlKey" => true, "key" => key}, term)
+       when key in ["ArrowLeft", "h"] do
+    {:noreply,
+     term |> step_variant(-1) |> focus("storybook-variant-tabs") |> sync_storybook_layout()}
+  end
+
+  defp handle_storybook_global_key(%{"ctrlKey" => true, "key" => key}, term)
+       when key in ["ArrowRight", "l"] do
+    {:noreply,
+     term |> step_variant(1) |> focus("storybook-variant-tabs") |> sync_storybook_layout()}
+  end
+
+  defp handle_storybook_global_key(%{"ctrlKey" => true, "key" => key}, term)
+       when key in ["ArrowUp", "k"] do
+    {:noreply, term |> step_story(-1) |> focus("storybook-nav") |> sync_storybook_layout()}
+  end
+
+  defp handle_storybook_global_key(%{"ctrlKey" => true, "key" => key}, term)
+       when key in ["ArrowDown", "j"] do
+    {:noreply, term |> step_story(1) |> focus("storybook-nav") |> sync_storybook_layout()}
+  end
+
+  defp handle_storybook_global_key(_event, _term), do: :continue
+
+  defp step_story(term, delta) do
+    stories = term.assigns.stories
+    current_story_id = term.assigns.current_story_id
+    count = length(stories)
+
+    if count == 0 do
+      term
+    else
+      current_index = Enum.find_index(stories, &(&1.id == current_story_id)) || 0
+      next_index = rem(current_index + delta + count, count)
+      story = Enum.at(stories, next_index)
+
+      assign(
+        term,
+        current_story_id: story.id,
+        current_variant_id: first_variant_id(story)
+      )
+    end
+  end
+
+  defp step_variant(term, delta) do
+    story =
+      Enum.find(term.assigns.stories, &(&1.id == term.assigns.current_story_id)) ||
+        Registry.first_story(term.assigns.story_directory)
+
+    variants = Map.get(story, :variants, [])
+    count = length(variants)
+
+    if count == 0 do
+      term
+    else
+      current_variant_id = term.assigns.current_variant_id
+      current_index = Enum.find_index(variants, &(&1.id == current_variant_id)) || 0
+      next_index = rem(current_index + delta + count, count)
+      variant = Enum.at(variants, next_index)
+      assign(term, current_variant_id: variant.id)
+    end
   end
 
   defp sync_storybook_layout(term) do

@@ -792,8 +792,8 @@ defmodule Breeze.Style do
     defaults = Theme.default_style(theme)
 
     source =
-      scrollbar.vertical[:thumb] && scrollbar.vertical[:thumb].foreground_color ||
-        scrollbar.vertical[:track] && scrollbar.vertical[:track].foreground_color ||
+      (scrollbar.vertical[:thumb] && scrollbar.vertical[:thumb].foreground_color) ||
+        (scrollbar.vertical[:track] && scrollbar.vertical[:track].foreground_color) ||
         style.foreground_color
 
     target =

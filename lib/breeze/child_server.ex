@@ -265,7 +265,10 @@ defmodule Breeze.ChildServer do
 
   defp sync_theme_assigns(term), do: term
 
-  defp apply_external_assigns(%{assigns: assigns, external_assigns: external_assigns} = term, next_external)
+  defp apply_external_assigns(
+         %{assigns: assigns, external_assigns: external_assigns} = term,
+         next_external
+       )
        when is_map(assigns) and is_map(external_assigns) do
     preserved = Map.drop(assigns, Map.keys(external_assigns))
     %{term | assigns: Map.merge(preserved, next_external), external_assigns: next_external}

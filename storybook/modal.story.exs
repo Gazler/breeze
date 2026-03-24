@@ -6,11 +6,34 @@ defmodule Breeze.Storybook.Stories.Blocks.ModalStory do
       id: "modal",
       title: "Modal",
       description: "Centered modal container with optional dimmed backdrop.",
+      variants: [
+        %{
+          id: "dim",
+          label: "Dim",
+          source: "<.modal id=\"confirm\" width={32} height={10} dim>...</.modal>",
+          notes: [
+            "The preview starts from the trigger state so the shell focus stays intact.",
+            "Press Enter on the trigger to open the real modal in place.",
+            "This variant dims the backdrop behind the modal."
+          ]
+        },
+        %{
+          id: "regular",
+          label: "Regular",
+          description: "Centered modal container without a dimmed backdrop.",
+          source: "<.modal id=\"confirm\" width={32} height={10}>...</.modal>",
+          notes: [
+            "The preview starts from the trigger state so the shell focus stays intact.",
+            "Press Enter on the trigger to open the real modal in place.",
+            "This variant keeps the backdrop at the normal panel tone."
+          ]
+        }
+      ],
       notes: [
         "The preview starts from the trigger state so the shell focus stays intact.",
         "Press Enter on the trigger to open the real modal in place."
       ],
-      source: "<.modal id=\"confirm\" width={32} height={8} dim>...</.modal>"
+      source: "<.modal id=\"confirm\" width={32} height={10} dim>...</.modal>"
     }
   end
 
@@ -19,6 +42,8 @@ defmodule Breeze.Storybook.Stories.Blocks.ModalStory do
   end
 
   def render(assigns) do
+    assigns = assign(assigns, dim?: Map.get(assigns, :__breeze_story_variant__, "dim") == "dim")
+
     ~H"""
     <box class="width-full height-full bg">
       <box
@@ -33,7 +58,7 @@ defmodule Breeze.Storybook.Stories.Blocks.ModalStory do
         id="storybook-modal"
         width={32}
         height={10}
-        dim
+        dim={@dim?}
         br-change="storybook_close_modal"
       >
         <:title>Confirm Action</:title>

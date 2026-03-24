@@ -1,5 +1,6 @@
 defmodule PostingTest do
   use ExUnit.Case, async: false
+  import Breeze.TestSupport.WaitUntil
 
   setup_all do
     Application.put_env(:breeze, :example_mode, :load_only)
@@ -491,17 +492,4 @@ defmodule PostingTest do
   defp visible(content) do
     String.replace(content, ~r/\e\[[0-9;]*m/u, "")
   end
-
-  defp wait_until(fun, attempts \\ 20)
-
-  defp wait_until(fun, attempts) when attempts > 0 do
-    if fun.() do
-      :ok
-    else
-      Process.sleep(10)
-      wait_until(fun, attempts - 1)
-    end
-  end
-
-  defp wait_until(_fun, 0), do: flunk("condition not met")
 end

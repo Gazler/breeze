@@ -50,6 +50,7 @@ defmodule Breeze.Implicit.List do
       |> normalize_selected_index(values)
 
     selected = if selected_index, do: Enum.at(values, selected_index), else: nil
+
     %{
       values: values,
       selected: selected,
