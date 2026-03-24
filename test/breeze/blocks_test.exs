@@ -108,6 +108,72 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule MutedListExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.list id="items" variant="muted" style="width-12 height-4" list-selected="two">
+        <:item value="one">One</:item>
+        <:item value="two">Two</:item>
+        <:item value="three">Three</:item>
+      </.list>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule UnicodeMarkerListExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.list
+        id="items"
+        variant="muted"
+        selected-indicator="🏡"
+        style="width-12 height-4"
+        list-selected="two"
+      >
+        <:item value="one">One</:item>
+        <:item value="two">Two</:item>
+        <:item value="three">Three</:item>
+      </.list>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule UnselectedListExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.list id="items" variant="muted" style="width-12 height-4">
+        <:item value="one">One</:item>
+        <:item value="two">Two</:item>
+        <:item value="three">Three</:item>
+      </.list>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   describe "merge_class/2" do
     test "matches merge_style semantics" do
       assert Blocks.merge_class("border width-24 height-8", "width-32 bg-4") ==
@@ -219,5 +285,58 @@ defmodule Breeze.BlocksTest do
     assert box.content =~ "Details"
     assert box.content =~ ~r/\e\[[0-9;]*38;5;4m[╭│╰]/
     assert box.content =~ ~r/\e\[[0-9;]*38;5;4mDetails/
+  end
+
+  test "list can render muted while unfocused and restore active colors on focus" do
+    {:ok, pid} =
+      ChildServer.start(
+        view: MutedListExample,
+        start_opts: [],
+        theme: Breeze.Theme.builtin(:gruvbox)
+      )
+
+    {:ok, _acc, unfocused_box} =
+      ChildServer.render(pid, focused: nil, implicit_state: %{}, allow_unfocused: true)
+
+    {:ok, _acc, focused_box} = ChildServer.render(pid, focused: "items", implicit_state: %{})
+
+    assert unfocused_box.content =~ "Two"
+    assert focused_box.content =~ "Two"
+    assert unfocused_box.content =~ "48;2;40;40;40;"
+    assert unfocused_box.content =~ "38;2;188;175;142"
+    assert unfocused_box.content =~ "48;2;105;132;122;"
+    assert focused_box.content =~ "38;2;131;165;152m┌"
+    assert focused_box.content =~ "38;2;40;40;40m>Two"
+  end
+
+  test "list items render their labels" do
+    {:ok, pid} = ChildServer.start(view: MutedListExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "items", implicit_state: %{})
+
+    assert box.content =~ "One"
+    assert box.content =~ "Two"
+  end
+
+  test "list supports wide unicode selected markers" do
+    {:ok, pid} = ChildServer.start(view: UnicodeMarkerListExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "items", implicit_state: %{})
+
+    assert box.content =~ "🏡Two"
+    assert box.content =~ "  One"
+  end
+
+  test "list does not mark every item selected when nothing is selected" do
+    {:ok, pid} = ChildServer.start(view: UnselectedListExample, start_opts: [])
+
+    {:ok, _acc, box} =
+      ChildServer.render(pid, focused: nil, implicit_state: %{}, allow_unfocused: true)
+
+    refute box.content =~ ">One"
+    refute box.content =~ ">Two"
+    refute box.content =~ ">Three"
+    assert box.content =~ " One"
+    assert box.content =~ " Two"
   end
 end

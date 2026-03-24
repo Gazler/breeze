@@ -35,20 +35,10 @@ defmodule Docs do
     ~H"""
     <box style="grid grid-cols-2 height-screen width-screen">
       <box style="grid grid-cols-1 grid-rows-2 width-full height-full">
-        <.list
-          id="docs"
-          br-change="change"
-          style="width-full height-full"
-          item_style="selected:bg-24 selected:text-0 focus:selected:text-7 focus:selected:bg-4 width-full"
-        >
+        <.list id="docs" br-change="change" style="width-full height-full">
           <:item :for={doc <- @docs} value={inspect(doc)}>{inspect(doc)}</:item>
         </.list>
-        <.list
-          id="functions"
-          br-change="function"
-          style="width-full height-full"
-          item_style="selected:bg-24 selected:text-0 focus:selected:text-7 focus:selected:bg-4 width-full"
-        >
+        <.list id="functions" br-change="function" style="width-full height-full">
           <:item :for={function <- @functions || []} value={function}>{function}</:item>
         </.list>
       </box>
@@ -164,6 +154,7 @@ Breeze.Example.run(
   [
     view: Docs,
     hide_cursor: true,
+    reload: true,
     mouse: true,
     global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
   ],

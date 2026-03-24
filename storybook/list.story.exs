@@ -5,12 +5,13 @@ defmodule Breeze.Storybook.Stories.Blocks.ListStory do
     %{
       id: "list",
       title: "List",
-      description: "Keyboard-selectable list with highlighted rows.",
+      description: "Keyboard-selectable list with a muted unfocused state.",
       notes: [
         "Uses the built-in list implicit.",
-        "A future version could wire live selection details in the docs pane."
+        "The preview starts with the list unfocused so the muted rows are visible.",
+        "Focus the list to restore the active selected-row highlight."
       ],
-      source: "<.list id=\"languages\">...</.list>"
+      source: "<.list id=\"languages\" variant=\"muted\" class=\"width-full\">...</.list>"
     }
   end
 
@@ -18,7 +19,12 @@ defmodule Breeze.Storybook.Stories.Blocks.ListStory do
     assigns = %{languages: ~w(Elixir Erlang Gleam Rust Go Zig Lua Haskell)}
 
     ~H"""
-    <.list id="storybook-list" class="width-24 height-8 bg-panel focus:border-primary">
+    <.list
+      id="storybook-list"
+      variant="muted"
+      list-selected="elixir"
+      class="width-full height-8 bg-panel focus:border-primary"
+    >
       <:item :for={language <- @languages} value={String.downcase(language)}>{language}</:item>
     </.list>
     """

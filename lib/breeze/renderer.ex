@@ -248,8 +248,10 @@ defmodule Breeze.Renderer do
     child_flags =
       []
       |> inherit_implicit_owner(flags)
+      |> inherit_selected_owner_value(flags)
       |> inherit_focus_scope_path(flags)
       |> inherit_focus_within_path(flags)
+      |> inherit_selected_with_owner(opts)
 
     acc = %{
       acc
@@ -266,31 +268,13 @@ defmodule Breeze.Renderer do
 
   defp build_tree([], box, children, style_state, flags, acc, opts) do
     %{focusables: focusables} = acc
-
-    focused_target = Keyword.get(opts, :focused)
-    owned_focus_target = Keyword.get(flags, :implicit_owner)
-    node_focus_target = Keyword.get(flags, :id) || owned_focus_target
-    root_id = Keyword.get(flags, :id)
-
-    focused =
-      Keyword.get(flags, :focused, false) or
-        (not is_nil(focused_target) &&
-           Keyword.has_key?(flags, :"focus-with-owner") &&
-           owned_focus_target == focused_target) or
-        (not is_nil(focused_target) && node_focus_target == focused_target) or
-        focused_within?(flags, root_id, focused_target, acc)
-
-    flags = if focused, do: Keyword.put(flags, :focused, focused), else: flags
-
-    style_flags =
-      if focused do
-        [focus: true]
-      else
-        []
-      end
-
     implicit_state = Keyword.get(opts, :implicit_state, %{})
     implicit_owner = Keyword.get(flags, :implicit_owner)
+
+    focused_target = Keyword.get(opts, :focused)
+    owned_focus_target = implicit_owner
+    node_focus_target = Keyword.get(flags, :id) || owned_focus_target
+    root_id = Keyword.get(flags, :id)
 
     id =
       cond do
@@ -304,6 +288,38 @@ defmodule Breeze.Renderer do
         nil -> {nil, nil}
         {mod, state} -> {mod, state}
       end
+
+    focused =
+      Keyword.get(flags, :focused, false) or
+        (not is_nil(focused_target) &&
+           Keyword.has_key?(flags, :"focus-with-owner") &&
+           owned_focus_target == focused_target) or
+        (not is_nil(focused_target) && node_focus_target == focused_target) or
+        focused_within?(flags, root_id, focused_target, acc)
+
+    selected_with_owner =
+      implicit &&
+        Keyword.has_key?(flags, :"selected-with-owner") &&
+        not is_nil(Keyword.get(flags, :selected_owner_value)) &&
+        Map.get(implicit, :selected) == Keyword.get(flags, :selected_owner_value)
+
+    flags =
+      flags
+      |> then(fn flags -> if focused, do: Keyword.put(flags, :focused, true), else: flags end)
+      |> then(fn flags ->
+        if selected_with_owner, do: Keyword.put(flags, :selected, true), else: flags
+      end)
+
+    style_flags =
+      []
+      |> then(fn style_flags ->
+        if focused, do: Keyword.put(style_flags, :focus, true), else: style_flags
+      end)
+      |> then(fn style_flags ->
+        if Keyword.get(flags, :selected, false),
+          do: Keyword.put(style_flags, :selected, true),
+          else: style_flags
+      end)
 
     type = if id == root_id, do: :root, else: :child
 
@@ -797,6 +813,42 @@ defmodule Breeze.Renderer do
 
       true ->
         child_flags
+    end
+  end
+
+  defp inherit_selected_owner_value(child_flags, flags) do
+    cond do
+      value = Keyword.get(flags, :value) ->
+        Keyword.put(child_flags, :selected_owner_value, value)
+
+      value = Keyword.get(flags, :selected_owner_value) ->
+        Keyword.put(child_flags, :selected_owner_value, value)
+
+      true ->
+        child_flags
+    end
+  end
+
+  defp inherit_selected_with_owner(child_flags, opts) do
+    if owner_selected?(child_flags, opts) do
+      Keyword.put(child_flags, :selected, true)
+    else
+      child_flags
+    end
+  end
+
+  defp owner_selected?(flags, opts) do
+    implicit_state = Keyword.get(opts, :implicit_state, %{})
+    implicit_owner = Keyword.get(flags, :implicit_owner)
+
+    with true <- Keyword.has_key?(flags, :"selected-with-owner"),
+         owner when not is_nil(owner) <- implicit_owner,
+         owner_value when not is_nil(owner_value) <- Keyword.get(flags, :selected_owner_value),
+         {_mod, implicit} <- Map.get(implicit_state, owner),
+         true <- Map.get(implicit, :selected) == owner_value do
+      true
+    else
+      _ -> false
     end
   end
 

@@ -50,7 +50,6 @@ defmodule Breeze.Implicit.List do
       |> normalize_selected_index(values)
 
     selected = if selected_index, do: Enum.at(values, selected_index), else: nil
-
     %{
       values: values,
       selected: selected,
@@ -148,7 +147,10 @@ defmodule Breeze.Implicit.List do
   def handle_modifiers(:root, _flags, state), do: [scroll_y: state.offset]
 
   def handle_modifiers(:child, flags, state) do
-    if state.selected == Keyword.get(flags, :value), do: [selected: true], else: []
+    case Keyword.get(flags, :value) do
+      value when not is_nil(value) and state.selected == value -> [selected: true]
+      _ -> []
+    end
   end
 
   defp move_selection(%{values: []} = state, _delta, _element), do: state

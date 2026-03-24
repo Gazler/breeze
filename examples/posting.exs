@@ -91,18 +91,18 @@ defmodule Posting do
         </box>
         <box style="grid grid-cols-1 grid-rows-2 height-full">
           <box style="grid grid-cols-2 height-full">
-            <.panel
-              id="collection-panel"
-              class="height-full width-full overflow-hidden bg focus:border-accent"
-            >
-              <.list
-                id="collection"
-                list-scroll-padding={1}
-                class="bg height-full width-full overflow-scroll border-0 focus:border-0"
-                item_style="selected:bg-primary selected:text focus:selected:text focus:selected:bg-accent width-full"
-              >
-                <:item :for={{val, label} <- @collection} value={val}>{label}</:item>
-              </.list>
+            <.panel id="collection-panel" class="height-full width-full overflow-hidden bg">
+              <box class="width-full height-full padding-right-1 padding-bottom-1 overflow-hidden">
+                <.list
+                  id="collection"
+                  variant="muted"
+                  list-scroll-padding={1}
+                  class="bg height-full width-full overflow-scroll border-0 focus:border-0"
+                  item_style="width-full"
+                >
+                  <:item :for={{val, label} <- @collection} value={val}>{label}</:item>
+                </.list>
+              </box>
             </.panel>
             <box style="grid grid-cols-1 grid-rows-2 height-full">
               <.panel id="request-panel" class="height-full overflow-hidden bg focus:border-accent">

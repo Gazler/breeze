@@ -169,6 +169,45 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule SelectedOwnerImplicit do
+    def init(_children, last_state), do: %{selected: last_state[:selected] || "two"}
+    def handle_event(_, _, state), do: {:noreply, state}
+    def handle_modifiers(:root, _flags, _state), do: []
+
+    def handle_modifiers(:child, flags, state) do
+      if state.selected == Keyword.get(flags, :value), do: [selected: true], else: []
+    end
+  end
+
+  defmodule SelectedWithOwnerExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box id="list" implicit={SelectedOwnerImplicit}>
+        <box value="one" class="inline">
+          <box class="inline width-1 height-1 overflow-hidden">
+            <box selected-with-owner class="hidden selected:width-1 selected:height-1">></box>
+            <box selected-with-owner class="width-1 height-1 overflow-hidden selected:hidden">
+              {" "}
+            </box>
+          </box>
+          <box class="inline">One</box>
+        </box>
+        <box value="two" class="inline">
+          <box class="inline width-1 height-1 overflow-hidden">
+            <box selected-with-owner class="hidden selected:width-1 selected:height-1">></box>
+            <box selected-with-owner class="width-1 height-1 overflow-hidden selected:hidden">
+              {" "}
+            </box>
+          </box>
+          <box class="inline">Two</box>
+        </box>
+      </box>
+      """
+    end
+  end
+
   defmodule TabsWidthExample do
     use Breeze.View
     import Breeze.Blocks
@@ -488,6 +527,25 @@ defmodule Breeze.RendererTest do
                │CCCC  │
                └──────┘\
                """
+    end
+
+    test "selected-with-owner lets descendants react to implicit child selection" do
+      {_state, box} =
+        Renderer.render(SelectedWithOwnerExample, %{},
+          implicit_state: %{"list" => {SelectedOwnerImplicit, %{selected: "two"}}}
+        )
+
+      assert box.content =~ " One"
+      assert box.content =~ ">Two"
+    end
+
+    test "selected-with-owner also works through child server rerenders" do
+      {:ok, pid} = Breeze.ChildServer.start(view: SelectedWithOwnerExample, start_opts: [])
+
+      {:ok, _acc, box} = Breeze.ChildServer.render(pid, focused: "list", implicit_state: %{})
+
+      assert box.content =~ " One"
+      assert box.content =~ ">Two"
     end
 
     test "tracks the namespaced live child root viewport" do

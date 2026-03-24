@@ -109,6 +109,16 @@ defmodule Breeze.Style do
   defp apply_style("inline", {style, attrs}, _theme),
     do: {style, Map.put(attrs, :display, :inline)}
 
+  defp apply_style("hidden", {style, attrs}, _theme) do
+    style =
+      style
+      |> BackBreeze.Style.width(0)
+      |> BackBreeze.Style.height(0)
+      |> BackBreeze.Style.overflow(:hidden)
+
+    {style, attrs}
+  end
+
   defp apply_style("input", {style, attrs}, _theme),
     do: {style, Map.put(attrs, :input, true)}
 

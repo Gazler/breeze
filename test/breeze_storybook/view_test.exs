@@ -198,6 +198,17 @@ defmodule Breeze.Storybook.ViewTest do
     assert box.content =~ "Preview: Button"
   end
 
+  test "storybook nav renders the selected marker and label without overlap" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+
+    assert plain_content =~ ">Button"
+  end
+
   test "preview panel highlights for the dropdown story when the dropdown is focused" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)

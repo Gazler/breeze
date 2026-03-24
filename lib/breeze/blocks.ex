@@ -21,9 +21,11 @@ defmodule Breeze.Blocks do
   """
 
   use Breeze.View
-
+  alias BackBreeze.Ucwidth
   attr :id, :string, required: true
   attr :loop, :boolean, default: true
+  attr :variant, :string, default: nil
+  attr :"selected-indicator", :string, default: ">"
   attr :class, :string, default: nil
   attr :style, :any, default: nil
   attr :item_class, :string, default: nil
@@ -35,20 +37,36 @@ defmodule Breeze.Blocks do
   end
 
   def list(assigns) do
+    selected_indicator = Map.get(assigns, :"selected-indicator", ">") || ">"
+    selected_indicator_width = max(Ucwidth.width(selected_indicator), 1)
+
+    root_defaults =
+      "border width-full height-8 overflow-scroll scrollbar-arrows focus:border-primary focus:scrollbar-primary"
+
+    item_visual_defaults =
+      merge_class(
+        "selected:bg-primary selected:text",
+        list_variant_item_class(Map.get(assigns, :variant))
+      )
+
     assigns =
       assigns
-      |> assign(
-        class:
-          merge_class(
-            "border width-24 height-8 overflow-scroll scrollbar-arrows focus:border-primary focus:scrollbar-primary",
-            class_override(assigns)
-          )
-      )
+      |> assign(selected_indicator: selected_indicator)
+      |> assign(selected_indicator_width: selected_indicator_width)
+      |> assign(item_visual_defaults: item_visual_defaults)
+      |> assign(class: merge_class(root_defaults, class_override(assigns)))
       |> assign(
         item_class:
           merge_class(
-            "selected:bg-primary selected:text width-24",
-            class_override(assigns, :item_class, :item_style)
+            "inline overflow-hidden padding-left-#{selected_indicator_width} selected:padding-left-0 width-full",
+            merge_class(item_visual_defaults, class_override(assigns, :item_class, :item_style))
+          )
+      )
+      |> assign(
+        marker_class:
+          merge_class(
+            item_visual_defaults,
+            "hidden selected:width-#{selected_indicator_width} overflow-hidden"
           )
       )
 
@@ -66,10 +84,12 @@ defmodule Breeze.Blocks do
       <box
         :for={item <- @item}
         value={item.value}
-        class={@item_class}
+        focus-with-owner
+        class="inline"
         style={Breeze.Blocks.inline_style(assigns, :item_class, :item_style)}
       >
-        {render_slot(item, %{})}
+        <box selected-with-owner class={@marker_class}>{@selected_indicator}</box>
+        <box selected-with-owner class={@item_class}>{render_slot(item, %{})}</box>
       </box>
     </box>
     """
@@ -216,6 +236,16 @@ defmodule Breeze.Blocks do
   end
 
   defp build_dropdown_trigger(label, _width), do: " " <> to_string(label)
+
+  defp list_variant_item_class("muted") do
+    "mute-text-20 selected:mute-bg-20 focus:selected:mute-bg-0 focus:mute-text-0 selected:text-bg focus:selected:bg-primary focus:selected:mute-text-0"
+  end
+
+  defp list_variant_item_class("accent") do
+    "selected:bg-primary selected:text-bg focus:selected:bg-accent"
+  end
+
+  defp list_variant_item_class(_), do: nil
 
   defp size_class(axis, :full), do: "#{axis}-full"
   defp size_class(axis, size) when is_integer(size), do: "#{axis}-#{size}"
@@ -521,18 +551,20 @@ defmodule Breeze.Blocks do
   slot :inner_block
 
   def panel(assigns) do
+    panel_class =
+      merge_class(
+        "border-rounded border-stroke bg-panel focus:border-primary",
+        class_override(assigns)
+      )
+
     assigns =
       assigns
       |> assign(
         focus_within: Map.get(assigns, :focus_within, true),
-        class:
-          merge_class(
-            "border-rounded border-stroke bg-panel focus:border-primary",
-            class_override(assigns)
-          ),
+        class: panel_class,
         title_class:
           merge_class(
-            "bold text focus:text-primary",
+            "bold #{panel_title_class(panel_class)}",
             class_override(assigns, :title_class, :title_style)
           )
       )
@@ -607,6 +639,21 @@ defmodule Breeze.Blocks do
     class
     |> maybe_append_dimension(:width, width)
     |> maybe_append_dimension(:height, height)
+  end
+
+  defp panel_title_class(class) do
+    class
+    |> to_string()
+    |> String.split()
+    |> Enum.reduce([], fn token, acc ->
+      case token do
+        "border-" <> rest when rest not in ["rounded"] -> ["text-" <> rest | acc]
+        "focus:border-" <> rest -> ["focus:text-" <> rest | acc]
+        _ -> acc
+      end
+    end)
+    |> Enum.reverse()
+    |> Enum.join(" ")
   end
 
   defp maybe_append_dimension(class, _dimension, nil), do: class

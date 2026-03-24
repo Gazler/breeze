@@ -50,6 +50,17 @@ defmodule Breeze.StyleTest do
     assert element.style.foreground_color == 2
   end
 
+  test "supports hidden class" do
+    element =
+      Style.empty()
+      |> Style.put_class("hidden")
+      |> Style.to_element([])
+
+    assert element.style.width == 0
+    assert element.style.height == 0
+    assert element.style.overflow == :hidden
+  end
+
   test "resolve_dimensions reads width and height from classes" do
     assert Style.resolve_dimensions("width-12 height-4", nil) == %{width: 12, height: 4}
   end

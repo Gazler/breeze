@@ -9,7 +9,7 @@ defmodule ListViewDemo do
   def render(assigns) do
     ~H"""
     <box>
-      <.list id="languages" br-change="change" style="focus:border-1">
+      <.list id="languages" br-change="change" style="focus:border-1 width-32">
         <:item value="elixir">Elixir</:item>
         <:item value="erlang">Erlang</:item>
         <:item value="rust">Rust</:item>

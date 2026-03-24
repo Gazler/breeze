@@ -40,22 +40,16 @@ defmodule Breeze.Storybook.View do
       <box class="inline width-full height-full">
         <.panel id="storybook-nav-panel" class="width-24 height-full">
           <:title>{@nav_title}</:title>
-          <box
-            id="storybook-nav"
-            implicit={Breeze.Implicit.List}
-            focusable
-            br-change="select_story"
-            list-selected={@current_story_id}
-            list-scroll-padding={1}
-            class="height-full overflow-scroll scrollbar-arrows focus:scrollbar-primary"
-          >
-            <box
-              :for={story <- @stories}
-              value={story.id}
-              class="selected:bg-primary selected:text-bg focus:selected:bg-accent width-full"
+          <box class="width-full height-full overflow-hidden">
+            <.list
+              id="storybook-nav"
+              variant="muted"
+              br-change="select_story"
+              list-selected={@current_story_id}
+              class="height-full border-0 focus:border-0"
             >
-              {story.title}
-            </box>
+              <:item :for={story <- @stories} value={story.id}>{story.title}</:item>
+            </.list>
           </box>
         </.panel>
         <box class="bg-panel width-full height-full">
