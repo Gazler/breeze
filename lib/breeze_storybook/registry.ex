@@ -107,6 +107,7 @@ defmodule Breeze.Storybook.Registry do
         group: "Blocks",
         description: "",
         notes: [],
+        variants: [],
         source: nil,
         file: file,
         directory: Path.dirname(file)

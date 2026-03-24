@@ -92,6 +92,8 @@ defmodule Breeze.Style do
       end)
       |> apply_tone(attributes, theme)
       |> maybe_put_default_scrollbar_foreground(attributes)
+      |> maybe_adjust_scrollbar_tone(theme, :mute, Map.get(attributes, :scrollbar_mute))
+      |> maybe_adjust_scrollbar_tone(theme, :emphasize, Map.get(attributes, :scrollbar_emphasize))
 
     struct(Breeze.Element, %{style: Map.from_struct(bb_style), attributes: attributes})
   end
@@ -341,6 +343,18 @@ defmodule Breeze.Style do
 
   defp apply_style("bg-" <> color, {style, attrs}, theme),
     do: {BackBreeze.Style.background_color(style, Theme.resolve_color(theme, color)), attrs}
+
+  defp apply_style("scrollbar-mute-" <> value, {style, attrs}, _theme),
+    do: {style, Map.put(attrs, :scrollbar_mute, normalize_percent(value))}
+
+  defp apply_style("mute-scrollbar-" <> value, {style, attrs}, _theme),
+    do: {style, Map.put(attrs, :scrollbar_mute, normalize_percent(value))}
+
+  defp apply_style("scrollbar-emphasize-" <> value, {style, attrs}, _theme),
+    do: {style, Map.put(attrs, :scrollbar_emphasize, normalize_percent(value))}
+
+  defp apply_style("emphasize-scrollbar-" <> value, {style, attrs}, _theme),
+    do: {style, Map.put(attrs, :scrollbar_emphasize, normalize_percent(value))}
 
   defp apply_style("lighten-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :lighten, normalize_percent(value))}
@@ -764,6 +778,40 @@ defmodule Breeze.Style do
       [:background_color],
       Map.get(attrs, :bg_emphasize)
     )
+  end
+
+  defp maybe_adjust_scrollbar_tone(style, _theme, _direction, amount)
+       when not is_number(amount) or amount <= 0,
+       do: style
+
+  defp maybe_adjust_scrollbar_tone(%{scrollbar: false} = style, _theme, _direction, _amount),
+    do: style
+
+  defp maybe_adjust_scrollbar_tone(%{scrollbar: scrollbar} = style, theme, direction, amount) do
+    {scrollbar, style} = BackBreeze.Scrollbar.normalize(scrollbar, style)
+    defaults = Theme.default_style(theme)
+
+    source =
+      scrollbar.vertical[:thumb] && scrollbar.vertical[:thumb].foreground_color ||
+        scrollbar.vertical[:track] && scrollbar.vertical[:track].foreground_color ||
+        style.foreground_color
+
+    target =
+      case direction do
+        :mute -> Map.get(defaults, :background_color)
+        :emphasize -> Map.get(defaults, :foreground_color)
+      end
+
+    scrollbar =
+      case {source, target} do
+        {{_, _, _} = color, {_, _, _} = target_color} ->
+          BackBreeze.Scrollbar.put_color(scrollbar, Theme.blend(color, target_color, amount))
+
+        _ ->
+          scrollbar
+      end
+
+    %{style | scrollbar: scrollbar}
   end
 
   defp maybe_put_tone_background(%{background_color: nil} = style, theme) do

@@ -209,6 +209,57 @@ defmodule Breeze.Storybook.ViewTest do
     assert plain_content =~ ">Button"
   end
 
+  test "list story renders variant tabs below the description and switches variants" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    assert plain_content =~ "Muted"
+    assert plain_content =~ "Accent"
+    assert plain_content =~ "variant=\"muted\""
+
+    assert {:noreply, "storybook-variant-tabs", true} =
+             Breeze.ChildServer.set_focus(pid, "storybook-variant-tabs")
+
+    assert {:noreply, "storybook-variant-tabs", true} =
+             Breeze.ChildServer.dispatch_input(pid, "ArrowRight")
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    assert plain_content =~ "Preview: List / Accent"
+    assert plain_content =~ "variant=\"accent\""
+  end
+
+  test "list story variant tabs wrap left cleanly without collapsing to the trailing tab" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert {:noreply, "storybook-variant-tabs", true} =
+             Breeze.ChildServer.set_focus(pid, "storybook-variant-tabs")
+
+    assert {:noreply, "storybook-variant-tabs", true} =
+             Breeze.ChildServer.dispatch_input(pid, "ArrowLeft")
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    assert plain_content =~ "Preview: List / Accent"
+    assert plain_content =~ " Muted  Accent "
+  end
+
   test "preview panel highlights for the dropdown story when the dropdown is focused" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)

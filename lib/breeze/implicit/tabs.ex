@@ -4,7 +4,7 @@ defmodule Breeze.Implicit.Tabs do
   def init(children, last_state), do: init(children, %{}, last_state)
 
   def init(children, root_attrs, last_state) do
-    tab_items = Enum.filter(children, &Map.has_key?(&1, :value))
+    tab_items = Enum.filter(children, &Map.has_key?(&1, :"tab-label"))
     values = Enum.map(tab_items, & &1.value)
 
     widths =

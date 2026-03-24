@@ -107,6 +107,45 @@ defmodule Breeze.LiveViewTest do
     end
   end
 
+  defmodule AssignEchoChild do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <box id="variant">{Map.get(assigns, :variant, "none")}</box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule LiveAssignsRoot do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, assign(term, variant: "muted")}
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box id="toggle" focusable>toggle</box>
+        <live id="preview" view={AssignEchoChild} assigns={%{variant: @variant}}>
+        </live>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "v"}, term) do
+      next_variant = if term.assigns.variant == "muted", do: "accent", else: "muted"
+      {:noreply, assign(term, variant: next_variant)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule AnimatedChild do
     use Breeze.View
 
@@ -646,6 +685,39 @@ defmodule Breeze.LiveViewTest do
     state = :sys.get_state(pid)
     assert Map.has_key?(state.children, "debug")
     assert state.base_output =~ "Count: 1"
+
+    Process.exit(pid, :normal)
+  end
+
+  test "server updates live child assigns in place when dynamic assigns change" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: LiveAssignsRoot,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      state.base_output =~ "muted"
+    end)
+
+    child_before = :sys.get_state(pid).children["preview"]
+    assert child_before.assigns == %{variant: "muted"}
+
+    send(pid, {reader, {:data, "v"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      state.base_output =~ "accent"
+    end)
+
+    child_after = :sys.get_state(pid).children["preview"]
+    assert child_after.assigns == %{variant: "accent"}
+    assert child_after.pid == child_before.pid
 
     Process.exit(pid, :normal)
   end

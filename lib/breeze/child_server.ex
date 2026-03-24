@@ -35,6 +35,10 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, {:event, change, event})
   end
 
+  def update_assigns(pid, assigns) do
+    GenServer.call(pid, {:update_assigns, assigns})
+  end
+
   def dispatch_info(pid, message, terminal \\ nil) do
     GenServer.call(pid, {:info, message, terminal})
   end
@@ -61,6 +65,15 @@ defmodule Breeze.ChildServer do
     invalidate = Keyword.get(opts, :invalidate)
     global_keybindings = Keyword.get(opts, :global_keybindings, [])
 
+    external_assigns =
+      opts
+      |> Keyword.get(:assigns, %{})
+      |> Map.new()
+
+    initial_assigns =
+      external_assigns
+      |> Map.put(:__invalidate__, invalidate)
+
     term = %Breeze.Term{
       view: view,
       server: Keyword.get(opts, :server),
@@ -69,7 +82,8 @@ defmodule Breeze.ChildServer do
       theme_source: theme_input,
       apply_theme_defaults?: apply_theme_defaults?,
       global_keybindings: global_keybindings,
-      assigns: %{__invalidate__: invalidate}
+      assigns: initial_assigns,
+      external_assigns: external_assigns
     }
 
     term =
@@ -141,6 +155,16 @@ defmodule Breeze.ChildServer do
 
   def handle_call({:put_global_keybindings, keybindings}, _from, term) do
     {:reply, :ok, %{term | global_keybindings: keybindings}}
+  end
+
+  def handle_call({:update_assigns, assigns}, _from, term) do
+    next_term =
+      term
+      |> apply_external_assigns(Map.new(assigns))
+      |> sync_theme_assigns()
+
+    notify_invalidate(next_term)
+    {:reply, :ok, next_term}
   end
 
   @impl true
@@ -240,6 +264,14 @@ defmodule Breeze.ChildServer do
   end
 
   defp sync_theme_assigns(term), do: term
+
+  defp apply_external_assigns(%{assigns: assigns, external_assigns: external_assigns} = term, next_external)
+       when is_map(assigns) and is_map(external_assigns) do
+    preserved = Map.drop(assigns, Map.keys(external_assigns))
+    %{term | assigns: Map.merge(preserved, next_external), external_assigns: next_external}
+  end
+
+  defp apply_external_assigns(term, next_external), do: %{term | external_assigns: next_external}
 
   defp maybe_put_theme_assign(assigns, key, value) do
     if Map.has_key?(assigns, key), do: Map.put(assigns, key, value), else: assigns
@@ -521,12 +553,22 @@ defmodule Breeze.ChildServer do
     Enum.reduce(live_children, term, fn {id, attrs}, acc ->
       view = fetch_live_attr!(attrs, :view)
       start_opts = fetch_live_attr(attrs, :start_opts, [])
+      assigns = fetch_live_attr(attrs, :assigns, %{}) |> Map.new()
 
       case Map.get(acc.children, id) do
         %{pid: pid, view: ^view, start_opts: ^start_opts} when is_pid(pid) ->
-          if Process.alive?(pid),
-            do: acc,
-            else: put_in(acc.children[id], start_child!(id, attrs, acc))
+          cond do
+            not Process.alive?(pid) ->
+              put_in(acc.children[id], start_child!(id, attrs, acc))
+
+            true ->
+              if Map.get(acc.children[id], :assigns, %{}) == assigns do
+                acc
+              else
+                :ok = update_assigns(pid, assigns)
+                put_in(acc.children[id].assigns, assigns)
+              end
+          end
 
         %{pid: pid, ref: ref} ->
           if is_pid(pid) and Process.alive?(pid), do: Process.exit(pid, :normal)
@@ -542,6 +584,7 @@ defmodule Breeze.ChildServer do
   defp start_child!(id, attrs, term) do
     view = fetch_live_attr!(attrs, :view)
     start_opts = fetch_live_attr(attrs, :start_opts, [])
+    assigns = fetch_live_attr(attrs, :assigns, %{}) |> Map.new()
     parent = self()
     invalidate = fn -> send(parent, {:child_invalidated, id}) end
 
@@ -549,6 +592,7 @@ defmodule Breeze.ChildServer do
       Breeze.ChildServer.start(
         view: view,
         start_opts: start_opts,
+        assigns: assigns,
         server: term.server,
         terminal: term.terminal,
         theme: term.theme,
@@ -558,7 +602,7 @@ defmodule Breeze.ChildServer do
         invalidate: invalidate
       )
 
-    %{pid: pid, ref: Process.monitor(pid), view: view, start_opts: start_opts}
+    %{pid: pid, ref: Process.monitor(pid), view: view, start_opts: start_opts, assigns: assigns}
   end
 
   defp render_live_child(attrs, child_opts, term) do

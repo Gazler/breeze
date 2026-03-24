@@ -9,7 +9,6 @@ Breeze.Example.run(
     theme: Breeze.Theme.builtin(:gruvbox),
     hide_cursor: true,
     reload: true,
-    mouse: [mode: :motion],
     inspector: true,
     global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
   ],

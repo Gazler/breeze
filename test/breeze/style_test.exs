@@ -121,6 +121,32 @@ defmodule Breeze.StyleTest do
     assert focused.style.scrollbar.vertical.thumb.foreground_color == {38, 139, 210}
   end
 
+  test "mute-scrollbar tones the scrollbar foreground toward the theme background" do
+    theme =
+      Breeze.Theme.new(
+        defaults: %{
+          foreground_color: "#eeeeee",
+          background_color: "#111111",
+          border_color: "#666666"
+        }
+      )
+
+    element =
+      Style.empty()
+      |> Style.put_class("text overflow-scroll scrollbar-arrows mute-scrollbar-20")
+      |> Style.to_element(theme: theme)
+
+    expected =
+      Breeze.Theme.blend(
+        {238, 238, 238},
+        {17, 17, 17},
+        0.20
+      )
+
+    assert element.style.scrollbar.vertical.thumb.foreground_color == expected
+    assert element.style.scrollbar.vertical.track.foreground_color == expected
+  end
+
   test "supports semantic aliases for default text, background, and border colors" do
     theme =
       Breeze.Theme.new(

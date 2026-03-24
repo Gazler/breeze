@@ -12,27 +12,39 @@ defmodule Breeze.Storybook.View do
 
     {:ok,
      term
-     |> focus("storybook-nav")
-     |> sync_storybook_layout()
      |> assign(
        story_directory: story_directory,
        stories: stories,
        current_story_id: current && current.id,
+       current_variant_id: first_variant_id(current),
        discovered_components: Discovery.components(),
        undocumented_components: Discovery.undocumented_components(stories)
-     )}
+     )
+     |> focus("storybook-nav")
+     |> sync_storybook_layout()}
   end
 
   def render(assigns) do
     current_story = current_story(assigns)
+    current_variant = current_variant(current_story, assigns[:current_variant_id])
+    variants = Map.get(current_story, :variants, [])
+    variant_tabs? = variants != []
 
     assigns =
       assign(assigns,
         current_story: current_story,
+        current_variant: current_variant,
         nav_title: "Storybook",
-        preview_title: "Preview: #{current_story.title}",
+        preview_title: preview_title(current_story, current_variant),
         details_title: "Story Details",
-        inventory_summary: inventory_summary(assigns.undocumented_components)
+        inventory_summary: inventory_summary(assigns.undocumented_components),
+        variants: variants,
+        variant_tabs?: variant_tabs?,
+        story_description: variant_field(current_variant, current_story, :description),
+        story_notes: variant_field(current_variant, current_story, :notes),
+        story_source: variant_field(current_variant, current_story, :source),
+        preview_story_assigns: preview_story_assigns(assigns[:current_variant_id]),
+        preview_story_top: if(variant_tabs?, do: 3, else: 2)
       )
 
     ~H"""
@@ -55,16 +67,41 @@ defmodule Breeze.Storybook.View do
         <box class="bg-panel width-full height-full">
           <.panel id="storybook-preview-panel" class={"width-full height-#{@preview_panel_height}"}>
             <:title>{@preview_title}</:title>
-            <box class="absolute left-1 right-1 top-1 bottom-1 bg-panel">
-              <box class="text-muted">{@current_story.description}</box>
-              <box class="absolute left-0 right-0 top-2 bottom-0">
-                <live
-                  id="storybook-preview"
-                  view={@current_story.module}
-                  start_opts={[directory: @current_story.directory, file: @current_story.file]}
-                  class={"width-#{@preview_story_width} height-#{@preview_story_height}"}
+            <box class="width-full height-full bg-panel overflow-hidden">
+              <box
+                class={
+                  "absolute left-0 top-0 width-full height-#{@preview_panel_height - 2} bg-panel overflow-hidden"
+                }
+              >
+                <box :if={@variant_tabs?} class="width-full">
+                  <.tabs
+                    id="storybook-variant-tabs"
+                    selected={@current_variant.id}
+                    variant="underline"
+                    panel={false}
+                    br-change="select_variant"
+                    class="width-full height-2 bg-panel"
+                  >
+                    <:tab :for={variant <- @variants} value={variant.id} label={variant.label}>
+                      <box></box>
+                    </:tab>
+                  </.tabs>
+                </box>
+                <box class="text-muted">{@story_description}</box>
+                <box
+                  class={
+                    "absolute left-0 top-#{@preview_story_top} width-#{@preview_story_width} height-#{@preview_story_height} overflow-hidden"
+                  }
                 >
-                </live>
+                  <live
+                    id="storybook-preview"
+                    view={@current_story.module}
+                    start_opts={[directory: @current_story.directory, file: @current_story.file]}
+                    assigns={@preview_story_assigns}
+                    class={"width-#{@preview_story_width} height-#{@preview_story_height}"}
+                  >
+                  </live>
+                </box>
               </box>
             </box>
           </.panel>
@@ -76,17 +113,17 @@ defmodule Breeze.Storybook.View do
           >
             <:title>{@details_title}</:title>
             <box class="bold">Description</box>
-            <box class="text-muted">{@current_story.description}</box>
+            <box class="text-muted">{@story_description}</box>
             <box>
             </box>
             <box class="text-muted">Group: {@current_story.group}</box>
             <box class="text-muted">Module: {inspect(@current_story.module)}</box>
-            <box :if={@current_story.source} class="text-muted">Source: {@current_story.source}</box>
+            <box :if={@story_source} class="text-muted">Source: {@story_source}</box>
             <box>
             </box>
             <box class="bold">Notes</box>
-            <box :for={note <- @current_story.notes} class="text-muted">• {note}</box>
-            <box :if={@current_story.notes == []} class="text-muted">No notes yet.</box>
+            <box :for={note <- @story_notes} class="text-muted">• {note}</box>
+            <box :if={@story_notes == []} class="text-muted">No notes yet.</box>
             <box>
             </box>
             <box class="bold">Discovered Blocks</box>
@@ -103,10 +140,16 @@ defmodule Breeze.Storybook.View do
   end
 
   def handle_event("select_story", %{value: story_id}, term) do
+    story = Registry.story(story_id, term.assigns.story_directory)
+
     {:noreply,
      term
-     |> sync_storybook_layout()
-     |> assign(current_story_id: story_id)}
+     |> assign(current_story_id: story_id, current_variant_id: first_variant_id(story))
+     |> sync_storybook_layout()}
+  end
+
+  def handle_event("select_variant", %{value: variant_id}, term) do
+    {:noreply, term |> assign(current_variant_id: variant_id) |> sync_storybook_layout()}
   end
 
   def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
@@ -119,6 +162,47 @@ defmodule Breeze.Storybook.View do
     Enum.find(assigns.stories, &(&1.id == assigns.current_story_id)) ||
       Registry.first_story(assigns.story_directory)
   end
+
+  defp current_variant(story, current_variant_id) do
+    variants = Map.get(story, :variants, [])
+
+    Enum.find(variants, &(&1.id == current_variant_id)) ||
+      List.first(variants) ||
+      %{id: nil, label: nil}
+  end
+
+  defp first_variant_id(nil), do: nil
+
+  defp first_variant_id(story) do
+    story
+    |> Map.get(:variants, [])
+    |> List.first()
+    |> case do
+      %{id: id} -> id
+      _ -> nil
+    end
+  end
+
+  defp variant_field(variant, story, field) do
+    case variant do
+      %{id: id} when not is_nil(id) and field in [:notes] ->
+        Map.get(variant, field, [])
+
+      %{id: id} when not is_nil(id) and field in [:source] ->
+        Map.get(variant, field)
+
+      %{id: id} when not is_nil(id) ->
+        Map.get(variant, field, Map.get(story, field))
+
+      _ -> Map.get(story, field)
+    end
+  end
+
+  defp preview_story_assigns(nil), do: %{}
+  defp preview_story_assigns(variant_id), do: %{__breeze_story_variant__: variant_id}
+
+  defp preview_title(story, %{label: nil}), do: "Preview: #{story.title}"
+  defp preview_title(story, variant), do: "Preview: #{story.title} / #{variant.label}"
 
   defp inventory_summary([]), do: "All discovered Breeze.Blocks exports have stories."
 
@@ -133,10 +217,16 @@ defmodule Breeze.Storybook.View do
         _ -> {80, 24}
       end
 
+    current_story =
+      term.assigns
+      |> Map.take([:stories, :current_story_id, :story_directory])
+      |> current_story()
+
     preview_panel_width = max(screen_width - 27, 20)
+    variant_rows = if Map.get(current_story, :variants, []) == [], do: 0, else: 1
     preview_panel_height = max(div(screen_height, 2), 10)
     preview_story_width = max(preview_panel_width - 2, 1)
-    preview_story_height = max(preview_panel_height - 4, 1)
+    preview_story_height = max(preview_panel_height - 4 - variant_rows, 1)
 
     assign(term,
       preview_panel_height: preview_panel_height,

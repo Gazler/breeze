@@ -43,6 +43,13 @@ defmodule Breeze.Blocks do
     root_defaults =
       "border width-full height-8 overflow-scroll scrollbar-arrows focus:border-primary focus:scrollbar-primary"
 
+    root_defaults =
+      if assigns[:variant] == "muted" do
+        root_defaults <> " mute-scrollbar-40 focus:mute-scrollbar-0"
+      else
+        root_defaults
+      end
+
     item_visual_defaults =
       merge_class(
         "selected:bg-primary selected:text",
@@ -254,6 +261,7 @@ defmodule Breeze.Blocks do
   attr :selected, :string, default: nil
   attr :variant, :string, default: "default"
   attr :highlight, :string, default: "primary"
+  attr :panel, :boolean, default: true
   attr :class, :string, default: nil
   attr :style, :any, default: nil
   attr :item_class, :string, default: nil
@@ -276,6 +284,7 @@ defmodule Breeze.Blocks do
 
     assigns =
       assigns
+      |> assign(panel: Map.get(assigns, :panel, true))
       |> assign(active: active)
       |> assign(highlight: highlight)
       |> assign(highlight_text_class: highlight_text_class)
@@ -309,6 +318,7 @@ defmodule Breeze.Blocks do
 
     assigns =
       assigns
+      |> assign(panel: Map.get(assigns, :panel, true))
       |> assign(active: active)
       |> assign(highlight: highlight)
       |> assign(highlight_text_class: highlight_text_class)
@@ -338,7 +348,7 @@ defmodule Breeze.Blocks do
       id={@id}
       implicit={Breeze.Implicit.Tabs}
       focusable
-      tab-delegate={if @active do
+      tab-delegate={if @panel && @active do
       "#{@id}-panel-#{@active.value}"
     end}
       tab-selected={@active.value}
@@ -346,7 +356,14 @@ defmodule Breeze.Blocks do
       style={Breeze.Blocks.inline_style(assigns)}
       {@rest}
     >
-      <box class="inline width-full height-1 overflow-hidden" tab-bar="true">
+      <box
+        class={if @panel do
+      "inline width-full height-1 overflow-hidden"
+    else
+      "inline height-1 overflow-hidden"
+    end}
+        tab-bar="true"
+      >
         <box
           :for={t <- @tab}
           id={"#{@id}-tab-#{t.value}"}
@@ -359,7 +376,7 @@ defmodule Breeze.Blocks do
           {" #{t.label} "}
         </box>
       </box>
-      <box class="height-full overflow-hidden">{render_slot(@active)}</box>
+      <box :if={@panel} class="height-full overflow-hidden">{render_slot(@active)}</box>
     </box>
     """
   end
@@ -370,7 +387,7 @@ defmodule Breeze.Blocks do
       id={@id}
       implicit={Breeze.Implicit.Tabs}
       focusable
-      tab-delegate={if @active do
+      tab-delegate={if @panel && @active do
       "#{@id}-panel-#{@active.value}"
     end}
       tab-selected={@active.value}
@@ -378,7 +395,14 @@ defmodule Breeze.Blocks do
       style={Breeze.Blocks.inline_style(assigns)}
       {@rest}
     >
-      <box class="inline width-full height-1 overflow-hidden" tab-bar="true">
+      <box
+        class={if @panel do
+      "inline width-full height-1 overflow-hidden"
+    else
+      "inline height-1 overflow-hidden"
+    end}
+        tab-bar="true"
+      >
         <box
           :for={t <- @tab}
           id={"#{@id}-tab-#{t.value}"}
@@ -391,7 +415,14 @@ defmodule Breeze.Blocks do
           {" #{t.label} "}
         </box>
       </box>
-      <box class="inline width-full height-1 overflow-hidden" tab-bar="true">
+      <box
+        class={if @panel do
+      "inline width-full height-1 overflow-hidden"
+    else
+      "inline height-1 overflow-hidden"
+    end}
+        tab-bar="true"
+      >
         <box
           :for={t <- @tab}
           value={t.value}
@@ -400,9 +431,9 @@ defmodule Breeze.Blocks do
         >
           ━
         </box>
-        <box class="width-full text-mute-40 overflow-hidden content-repeat-x">━</box>
+        <box :if={@panel} class="width-full text-mute-40 overflow-hidden content-repeat-x">━</box>
       </box>
-      <box class="height-full overflow-hidden">{render_slot(@active)}</box>
+      <box :if={@panel} class="height-full overflow-hidden">{render_slot(@active)}</box>
     </box>
     """
   end

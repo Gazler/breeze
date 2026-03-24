@@ -11,6 +11,7 @@ defmodule Breeze.Term do
     last_render_at: nil,
     last_interaction_at: nil,
     assigns: %{},
+    external_assigns: %{},
     global_keybindings: [],
     focused: nil,
     allow_unfocused?: false,
@@ -836,7 +837,7 @@ defmodule Breeze.Server do
     full_id = live_id(Keyword.get(opts, :live_prefix), id)
     preload_only = fetch_live_attr(attrs, :preload_only, false)
     expected_view = fetch_live_attr!(attrs, :view)
-
+    expected_assigns = fetch_live_attr(attrs, :assigns, %{}) |> Map.new()
     expected_start_opts =
       child_start_opts(fetch_live_attr(attrs, :start_opts, []), expected_view, state)
 
@@ -848,13 +849,17 @@ defmodule Breeze.Server do
         track_missing_live_child(tracking_ref, {full_id, attrs})
         if preload_only, do: :preloaded, else: :missing
 
-      %{pid: pid, view: view, start_opts: start_opts} ->
+      %{pid: pid, view: view, start_opts: start_opts, assigns: assigns} ->
         cond do
           not Process.alive?(pid) ->
             track_missing_live_child(tracking_ref, {full_id, attrs})
             if preload_only, do: :preloaded, else: :missing
 
           view != expected_view or start_opts != expected_start_opts ->
+            track_missing_live_child(tracking_ref, {full_id, attrs})
+            if preload_only, do: :preloaded, else: :missing
+
+          assigns != expected_assigns ->
             track_missing_live_child(tracking_ref, {full_id, attrs})
             if preload_only, do: :preloaded, else: :missing
 
@@ -1914,11 +1919,18 @@ defmodule Breeze.Server do
     Enum.reduce(missing, {state, false}, fn {id, attrs}, {state, started?} ->
       view = fetch_live_attr!(attrs, :view)
       start_opts = child_start_opts(fetch_live_attr(attrs, :start_opts, []), view, state)
+      assigns = fetch_live_attr(attrs, :assigns, %{}) |> Map.new()
 
       case Map.get(state.children, id) do
         %{pid: pid, view: ^view, start_opts: ^start_opts} = child when is_pid(pid) ->
           if Process.alive?(pid) do
-            {state, started?}
+            if Map.get(child, :assigns, %{}) == assigns do
+              {state, started?}
+            else
+              :ok = Breeze.ChildServer.update_assigns(pid, assigns)
+              child = %{child | assigns: assigns}
+              {%{state | children: Map.put(state.children, id, child)}, true}
+            end
           else
             ref = Map.get(child, :ref)
             if is_reference(ref), do: Process.demonitor(ref, [:flush])
@@ -2070,6 +2082,7 @@ defmodule Breeze.Server do
   defp start_child!(attrs, terminal, theme, state) do
     view = fetch_live_attr!(attrs, :view)
     start_opts = child_start_opts(fetch_live_attr(attrs, :start_opts, []), view, state)
+    assigns = fetch_live_attr(attrs, :assigns, %{}) |> Map.new()
     persistent = fetch_live_attr(attrs, :persistent, false)
     parent = self()
     child_id = fetch_live_attr!(attrs, :id)
@@ -2079,6 +2092,7 @@ defmodule Breeze.Server do
       Breeze.ChildServer.start(
         view: view,
         start_opts: start_opts,
+        assigns: assigns,
         server: self(),
         terminal: terminal,
         theme: theme,
@@ -2086,7 +2100,14 @@ defmodule Breeze.Server do
       )
 
     ref = Process.monitor(pid)
-    %{pid: pid, ref: ref, view: view, start_opts: start_opts, persistent: persistent}
+    %{
+      pid: pid,
+      ref: ref,
+      view: view,
+      start_opts: start_opts,
+      assigns: assigns,
+      persistent: persistent
+    }
   end
 
   defp child_start_opts(start_opts, Breeze.Debug, state) do
