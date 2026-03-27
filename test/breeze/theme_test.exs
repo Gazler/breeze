@@ -32,6 +32,28 @@ defmodule Breeze.ThemeTest do
     end
   end
 
+  defmodule RecordingAdapter do
+    @behaviour Termite.Terminal.Adapter
+
+    def start(opts) do
+      {:ok,
+       %{
+         ref: make_ref(),
+         size: %{width: 80, height: 24},
+         owner: Keyword.fetch!(opts, :owner)
+       }}
+    end
+
+    def reader(term), do: {:ok, term.ref}
+
+    def write(term, str) do
+      send(term.owner, {:terminal_write, str})
+      {:ok, term}
+    end
+
+    def resize(term), do: term.size
+  end
+
   defmodule ToggleView do
     use Breeze.View
 
@@ -288,6 +310,65 @@ defmodule Breeze.ThemeTest do
     assert Breeze.Test.render!(session) =~ "\e[38;2;38;139;210mTheme: custom\e[0m"
   end
 
+  test "server writes an OSC background update when switching to an RGB theme" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: ToggleView,
+        terminal: terminal
+      )
+
+    on_exit(fn -> if Process.alive?(pid), do: Process.exit(pid, :normal) end)
+
+    drain_terminal_writes()
+
+    send(pid, {reader, {:data, "t"}})
+
+    writes =
+      wait_until(fn ->
+        writes = drain_terminal_writes()
+        if writes == [], do: false, else: writes
+      end)
+
+    output = IO.iodata_to_binary(writes)
+
+    assert output =~ "\e]11;#002B36\a"
+  end
+
+  test "server resets the terminal background on close after setting an RGB theme" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: ToggleView,
+        terminal: terminal
+      )
+
+    drain_terminal_writes()
+
+    send(pid, {reader, {:data, "t"}})
+
+    assert wait_until(fn ->
+             writes = drain_terminal_writes()
+             if IO.iodata_to_binary(writes) =~ "\e]11;#002B36\a", do: writes, else: false
+           end)
+
+    GenServer.stop(pid, :normal)
+
+    writes =
+      wait_until(fn ->
+        writes = drain_terminal_writes()
+        if writes == [], do: false, else: writes
+      end)
+
+    output = IO.iodata_to_binary(writes)
+
+    assert output =~ "\e]111\a"
+  end
+
   test "child metadata reflects theme changes" do
     {:ok, pid} = Breeze.ChildServer.start(view: ToggleView, start_opts: [])
     on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
@@ -296,4 +377,27 @@ defmodule Breeze.ThemeTest do
     assert {:noreply, _focused, true} = Breeze.ChildServer.dispatch_input(pid, "t")
     assert Breeze.ChildServer.metadata(pid).theme.mode == :custom
   end
+
+  defp drain_terminal_writes(writes \\ []) do
+    receive do
+      {:terminal_write, str} -> drain_terminal_writes([str | writes])
+    after
+      10 -> Enum.reverse(writes)
+    end
+  end
+
+  defp wait_until(fun, attempts \\ 20)
+
+  defp wait_until(fun, attempts) when attempts > 0 do
+    case fun.() do
+      false ->
+        Process.sleep(10)
+        wait_until(fun, attempts - 1)
+
+      value ->
+        value
+    end
+  end
+
+  defp wait_until(_fun, 0), do: false
 end
