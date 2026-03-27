@@ -84,7 +84,7 @@ defmodule Breeze.Blocks do
 
     item_visual_defaults =
       merge_class(
-        "selected:bg-primary selected:text",
+        "selected:bg-primary selected:text-bg",
         list_variant_item_class(Map.get(assigns, :variant))
       )
 

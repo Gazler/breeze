@@ -1,7 +1,7 @@
 defmodule Breeze.MixProject do
   use Mix.Project
 
-  @version "0.2.1"
+  @version "0.3.0-dev"
 
   def project do
     [
@@ -12,11 +12,10 @@ defmodule Breeze.MixProject do
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      aliases: aliases(),
       name: "Breeze",
       source_url: "https://github.com/Gazler/breeze",
-      docs: [
-        source_ref: "v#{@version}"
-      ]
+      docs: docs()
     ]
   end
 
@@ -44,5 +43,52 @@ defmodule Breeze.MixProject do
       {:telemetry, "~> 1.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
+  end
+
+  defp aliases do
+    [
+      docs: [&generate_docs/1]
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      assets: %{"doc_src/assets" => "assets"},
+      extras: ["README.md", "doc_src/generated/blocks.md"],
+      source_ref: "v#{@version}",
+      before_closing_head_tag: &before_closing_head_tag/1,
+      before_closing_body_tag: &before_closing_body_tag/1,
+      groups_for_extras: [
+        Guides: ["README.md"],
+        Components: ["doc_src/generated/blocks.md"]
+      ]
+    ]
+  end
+
+  defp before_closing_head_tag(:html) do
+    Breeze.DocsAssets.head_html()
+  end
+
+  defp before_closing_head_tag(_), do: ""
+
+  defp before_closing_body_tag(:html) do
+    Breeze.DocsAssets.body_html()
+  end
+
+  defp before_closing_body_tag(_), do: ""
+
+  defp generate_docs(args) do
+    Mix.Task.run("compile")
+
+    generator_path = Path.expand("doc_support/block_previews.ex", File.cwd!())
+    Code.require_file(generator_path)
+
+    generator = Module.concat([Breeze, Docs, BlockPreviews])
+    apply(generator, :write_markdown!, [])
+
+    Mix.shell().info("Generated #{Path.relative_to_cwd(apply(generator, :output_path, []))}")
+
+    Mix.Tasks.Docs.run(args, Mix.Project.config(), &ExDoc.generate/4)
   end
 end

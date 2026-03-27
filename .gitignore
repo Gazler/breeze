@@ -26,3 +26,5 @@ breeze-*.tar
 /tmp/
 
 priv
+
+doc_src/generated
