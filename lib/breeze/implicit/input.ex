@@ -36,7 +36,7 @@ defmodule Breeze.Implicit.Input do
     state = Map.merge(last_state, attrs_state)
     state = normalize_state(state)
 
-    {:ok, state, rerender_every: 500, active_when_focused: true}
+    {:ok, state, rerender_every: 500, active_when_focused: true, captures_printable_keys: true}
   end
 
   @spec handle_event(term(), map(), state()) :: {:noreply, state()} | {{:change, map()}, state()}

@@ -155,7 +155,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "init returns normalized state and cursor animation metadata" do
     assert {:ok, %{cursor: 0, value: "", placeholder: nil},
-            rerender_every: 500, active_when_focused: true} =
+            rerender_every: 500, active_when_focused: true, captures_printable_keys: true} =
              Input.init([], %{id: "input"}, %{})
   end
 
@@ -169,7 +169,7 @@ defmodule Breeze.Implicit.InputTest do
              Input.handle_event(nil, %{"key" => "\x7f"}, %{value: "", cursor: 0})
 
     assert {:ok, %{value: "", cursor: 0, placeholder: nil},
-            rerender_every: 500, active_when_focused: true} =
+            rerender_every: 500, active_when_focused: true, captures_printable_keys: true} =
              Input.init([], %{:"input-value" => "", :"input-cursor" => 4}, %{})
   end
 
@@ -181,7 +181,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "init prefers input attrs over previous implicit state" do
     assert {:ok, %{value: "", cursor: 0, placeholder: nil},
-            rerender_every: 500, active_when_focused: true} =
+            rerender_every: 500, active_when_focused: true, captures_printable_keys: true} =
              Input.init([], %{:"input-value" => "", :"input-cursor" => 0}, %{
                value: "stale",
                cursor: 5,
@@ -191,7 +191,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "init preserves the previous cursor when rerendering the same value without input-cursor" do
     assert {:ok, %{value: "hello", cursor: 2, placeholder: nil},
-            rerender_every: 500, active_when_focused: true} =
+            rerender_every: 500, active_when_focused: true, captures_printable_keys: true} =
              Input.init([], %{:"input-value" => "hello"}, %{
                value: "hello",
                cursor: 2,
@@ -201,7 +201,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "init moves the cursor to the end when the value changes without input-cursor" do
     assert {:ok, %{value: "hello!", cursor: 6, placeholder: nil},
-            rerender_every: 500, active_when_focused: true} =
+            rerender_every: 500, active_when_focused: true, captures_printable_keys: true} =
              Input.init([], %{:"input-value" => "hello!"}, %{
                value: "hello",
                cursor: 2,
@@ -545,5 +545,18 @@ defmodule Breeze.Implicit.InputTest do
                  last_interaction_at: nil
                }
              )
+  end
+
+  test "focused inputs consume printable keys before global keybindings" do
+    {:ok, pid} =
+      ChildServer.start(
+        view: OverflowInputView,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    assert {:ok, _acc, _box} = ChildServer.render(pid, [])
+    assert {:noreply, "website", true} = ChildServer.dispatch_input(pid, "q")
+    assert {:ok, _acc, box} = ChildServer.render(pid, [])
+    assert box.content =~ "historyq"
   end
 end

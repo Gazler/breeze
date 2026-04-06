@@ -138,6 +138,11 @@ defmodule Breeze.Server do
     GenServer.call(pid, :stats)
   end
 
+  @doc false
+  def focused_implicit_metadata(pid) do
+    GenServer.call(pid, :focused_implicit_meta)
+  end
+
   @spec inspector_snapshot(pid()) :: map()
   def inspector_snapshot(pid) do
     GenServer.call(pid, :inspector_snapshot)
@@ -229,6 +234,10 @@ defmodule Breeze.Server do
 
   def handle_call(:inspector_snapshot, _from, state) do
     {:reply, Breeze.Inspector.snapshot(state), state}
+  end
+
+  def handle_call(:focused_implicit_meta, _from, state) do
+    {:reply, focused_implicit_meta(state), state}
   end
 
   @impl true
@@ -662,17 +671,27 @@ defmodule Breeze.Server do
   defp focused_implicit?(%{focused: nil}), do: false
 
   defp focused_implicit?(state) do
+    match?(%{focused_implicit_id: id} when not is_nil(id), focused_child_or_root_metadata(state))
+  end
+
+  defp focused_implicit_meta(%{focused: nil}), do: %{}
+
+  defp focused_implicit_meta(state) do
+    Map.get(focused_child_or_root_metadata(state), :focused_implicit_meta, %{})
+  end
+
+  defp focused_child_or_root_metadata(state) do
     case focused_child_chain(state) do
       [{_child_id, %{pid: pid}} | _] ->
         case safe_call(fn -> Breeze.ChildServer.metadata(pid) end) do
-          {:ok, metadata} -> match?(%{focused_implicit_id: id} when not is_nil(id), metadata)
-          {:crash, _crash} -> false
+          {:ok, metadata} -> metadata
+          {:crash, _crash} -> %{}
         end
 
       [] ->
         case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
-          {:ok, metadata} -> match?(%{focused_implicit_id: id} when not is_nil(id), metadata)
-          {:crash, _crash} -> false
+          {:ok, metadata} -> metadata
+          {:crash, _crash} -> %{}
         end
     end
   end

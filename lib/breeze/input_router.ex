@@ -117,7 +117,35 @@ defmodule Breeze.InputRouter do
   end
 
   defp stop_global_key?(key, state),
-    do: Breeze.GlobalKeybindings.stop_action?(normalize_key_event(key), state)
+    do:
+      Breeze.GlobalKeybindings.stop_action?(normalize_key_event(key), state) and
+        not focused_implicit_captures_printable_key?(key, state)
+
+  defp focused_implicit_captures_printable_key?(key, state) do
+    printable_key?(key) and
+      match?(
+        %{captures_printable_keys: true},
+        Breeze.Server.focused_implicit_metadata(state.server_pid)
+      )
+  catch
+    :exit, _reason -> false
+  end
+
+  defp printable_key?(%{"key" => key} = event) when is_binary(key) do
+    not truthy_modifier?(Map.get(event, "ctrlKey")) and
+      not truthy_modifier?(Map.get(event, "altKey")) and
+      not truthy_modifier?(Map.get(event, "metaKey")) and
+      printable_key?(key)
+  end
+
+  defp printable_key?(key) when is_binary(key) do
+    String.length(key) == 1 and key not in ["\n", "\r", "\t", "\v", "\f"] and
+      String.printable?(key) and not String.match?(key, ~r/[\x00-\x1F\x7F]/u)
+  end
+
+  defp printable_key?(_key), do: false
+
+  defp truthy_modifier?(value), do: value in [true, "true"]
 
   defp maybe_start_theme_probe(%{theme_probe: probe} = state, _theme) when is_map(probe),
     do: state

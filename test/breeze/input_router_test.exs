@@ -1,5 +1,6 @@
 defmodule Breeze.InputRouterTest do
   use ExUnit.Case, async: true
+  import Breeze.TestSupport.WaitUntil
 
   defmodule FakeAdapter do
     @behaviour Termite.Terminal.Adapter
@@ -31,6 +32,31 @@ defmodule Breeze.InputRouterTest do
       Process.sleep(200)
       send(term.assigns.parent, :finished)
       {:noreply, term}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule FocusedInputView do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term) do
+      {:ok, term |> focus("url") |> assign(url: "hello")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box style="inline width-24">
+        <.input id="url" input-value={@url} br-change="url_changed" style="width-full">{@url}</.input>
+        <box style="width-4">tail</box>
+      </box>
+      """
+    end
+
+    def handle_event("url_changed", %{value: value}, term) do
+      {:noreply, assign(term, url: value)}
     end
 
     def handle_event(_, _, term), do: {:noreply, term}
@@ -84,5 +110,39 @@ defmodule Breeze.InputRouterTest do
     send(pid, {reader, {:data, "q"}})
     assert_receive :halted
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+  end
+
+  test "stop global keys do not halt when a focused implicit captures printable input" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: FocusedInputView,
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter],
+        halt_fun: fn -> send(parent, :halted) end,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    state = :sys.get_state(pid)
+    reader = state.reader
+    server_pid = state.server_pid
+
+    wait_until(fn ->
+      match?(
+        %{captures_printable_keys: true},
+        Breeze.Server.focused_implicit_metadata(server_pid)
+      )
+    end)
+
+    send(pid, {reader, {:data, "q"}})
+
+    refute_receive :halted, 50
+
+    wait_until(fn ->
+      :sys.get_state(server_pid).base_output =~ "helloq"
+    end)
+
+    Process.exit(pid, :normal)
   end
 end

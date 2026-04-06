@@ -120,6 +120,7 @@ defmodule Breeze.ChildServer do
        apply_theme_defaults?: metadata_term.apply_theme_defaults?,
        active_keybindings: active_keybindings(metadata_term),
        focused_implicit_id: focused_implicit_id(metadata_term, metadata_term.focused),
+       focused_implicit_meta: focused_implicit_meta(metadata_term, metadata_term.focused),
        focus_meta: metadata_term.focus_meta,
        implicit_state: metadata_term.implicit_state,
        implicit_meta: metadata_term.implicit_meta
@@ -508,26 +509,14 @@ defmodule Breeze.ChildServer do
   defp process_input(key, term) do
     event = normalize_key_event(key)
 
-    case Breeze.GlobalKeybindings.dispatch(event, term) do
-      {:stop, term} ->
-        {:stop, term}
+    steps =
+      if focused_implicit_captures_printable_key?(event, term) do
+        [:hierarchy, :focused_implicit, :local, :global, :view_direct]
+      else
+        [:global, :hierarchy, :local, :view]
+      end
 
-      {:noreply, term} ->
-        {:noreply, term}
-
-      :continue ->
-        case dispatch_input_hierarchy(term, key) do
-          nil ->
-            case dispatch_local_keybindings(event, term) do
-              {:stop, term} -> {:stop, term}
-              {:noreply, term} -> {:noreply, term}
-              :continue -> handle_event(:ignore_me, event, term)
-            end
-
-          reply ->
-            reply
-        end
-    end
+    dispatch_input_steps(steps, event, key, term)
   end
 
   defp handle_event(change, event, term, target_id \\ nil) do
@@ -577,6 +566,42 @@ defmodule Breeze.ChildServer do
   defp normalize_key_event(%{"key" => _} = event), do: event
   defp normalize_key_event(key), do: %{"key" => key}
 
+  defp dispatch_input_steps([:global | rest], event, key, term) do
+    case Breeze.GlobalKeybindings.dispatch(event, term) do
+      :continue -> dispatch_input_steps(rest, event, key, term)
+      reply -> reply
+    end
+  end
+
+  defp dispatch_input_steps([:hierarchy | rest], event, key, term) do
+    case dispatch_input_hierarchy(term, key) do
+      nil -> dispatch_input_steps(rest, event, key, term)
+      reply -> reply
+    end
+  end
+
+  defp dispatch_input_steps([:focused_implicit | rest], event, key, term) do
+    case dispatch_focused_implicit_event(event, term) do
+      :continue -> dispatch_input_steps(rest, event, key, term)
+      reply -> reply
+    end
+  end
+
+  defp dispatch_input_steps([:local | rest], event, key, term) do
+    case dispatch_local_keybindings(event, term) do
+      :continue -> dispatch_input_steps(rest, event, key, term)
+      reply -> reply
+    end
+  end
+
+  defp dispatch_input_steps([:view | _rest], event, _key, term) do
+    handle_event(:ignore_me, event, term)
+  end
+
+  defp dispatch_input_steps([:view_direct | _rest], event, _key, term) do
+    normalize_result(term.view.handle_event(:ignore_me, event, term), term)
+  end
+
   defp dispatch_local_keybindings(event, term) do
     case Breeze.Keybindings.dispatch(event, current_view_keybindings(term), term) do
       :continue -> :continue
@@ -584,6 +609,61 @@ defmodule Breeze.ChildServer do
       {:noreply, term} -> {:noreply, term}
     end
   end
+
+  defp dispatch_focused_implicit_event(event, term) do
+    {view_state, implicit_consumed, term} =
+      Breeze.RenderState.dispatch_implicit_event(
+        term,
+        term.focused,
+        event,
+        &handle_implicit_change/4
+      )
+
+    cond do
+      view_state == :stop ->
+        {:stop, term}
+
+      implicit_consumed ->
+        {:noreply, term}
+
+      true ->
+        :continue
+    end
+  end
+
+  defp focused_implicit_captures_printable_key?(event, term) do
+    printable_key?(event) and
+      match?(%{captures_printable_keys: true}, current_focused_implicit_meta(term))
+  end
+
+  defp current_focused_implicit_meta(term) do
+    case focused_child_chain(term) do
+      [{child_id, %{pid: pid}} | _] ->
+        case safe_child_metadata(pid, focused: strip_live_prefix(term.focused, child_id)) do
+          %{focused_implicit_meta: meta} when is_map(meta) -> meta
+          _ -> %{}
+        end
+
+      [] ->
+        focused_implicit_meta(term, term.focused)
+    end
+  end
+
+  defp printable_key?(%{"key" => key} = event) when is_binary(key) do
+    not truthy_modifier?(Map.get(event, "ctrlKey")) and
+      not truthy_modifier?(Map.get(event, "altKey")) and
+      not truthy_modifier?(Map.get(event, "metaKey")) and
+      printable_key?(key)
+  end
+
+  defp printable_key?(key) when is_binary(key) do
+    String.length(key) == 1 and key not in ["\n", "\r", "\t", "\v", "\f"] and
+      String.printable?(key) and not String.match?(key, ~r/[\x00-\x1F\x7F]/u)
+  end
+
+  defp printable_key?(_key), do: false
+
+  defp truthy_modifier?(value), do: value in [true, "true"]
 
   defp preload_and_attach_live_view(term, opts) do
     collector_key = {__MODULE__, :live_children, make_ref()}
@@ -998,6 +1078,13 @@ defmodule Breeze.ChildServer do
 
       true ->
         get_in(term.focus_meta, [focused, :implicit_owner])
+    end
+  end
+
+  defp focused_implicit_meta(term, focused) do
+    case focused_implicit_id(term, focused) do
+      nil -> %{}
+      id -> Map.get(term.implicit_meta, id, %{})
     end
   end
 
