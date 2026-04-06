@@ -107,6 +107,47 @@ defmodule Breeze.LiveViewTest do
     end
   end
 
+  defmodule KeybindingChild do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok,
+       term
+       |> focus("save")
+       |> put_local_keybindings([{"Esc", "Close"}])
+       |> put_focus_keybindings("save", [{"Enter", "Save"}])}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box id="save" focusable>save</box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule KeybindingFooterRoot do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box style="grid grid-cols-1 grid-rows-2 width-screen height-screen">
+        <live id="child" view={KeybindingChild} start_opts={[]}>
+        </live>
+        <box id="footer" style="height-1 width-full bg-panel overflow-hidden">
+          <.keybinding_bar keybindings={@breeze.keybindings}/>
+        </box>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule AssignEchoChild do
     use Breeze.View
 
@@ -498,6 +539,20 @@ defmodule Breeze.LiveViewTest do
 
     assert {:ok, _acc, _box, [%{box: %BackBreeze.Box{}, every_ms: 120, id: "spinner"}]} =
              ChildServer.render_snapshot(pid, focused: nil, implicit_state: %{})
+  end
+
+  test "focused child keybindings are exposed to the parent footer assign" do
+    {:ok, pid} = ChildServer.start(view: KeybindingFooterRoot, start_opts: [])
+    terminal = %Termite.Terminal{size: %{width: 64, height: 6}}
+
+    assert {:ok, _acc, box, _decorations} =
+             ChildServer.render_snapshot(pid, implicit_state: %{}, terminal: terminal)
+
+    assert box.content =~ "Esc"
+    assert box.content =~ "Close"
+    assert box.content =~ "Enter"
+    assert box.content =~ "Save"
+    assert %{active_keybindings: [%{key: "Esc"}, %{key: "Enter"}]} = ChildServer.metadata(pid)
   end
 
   test "renderer namespaces child ids and focusables" do

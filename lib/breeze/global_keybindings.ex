@@ -2,16 +2,15 @@ defmodule Breeze.GlobalKeybindings do
   @moduledoc false
 
   def dispatch(event, state) do
-    case Enum.find(keybindings(state), fn {key, _fun} -> key == event["key"] end) do
-      nil ->
+    case Breeze.Keybindings.dispatch(event, keybindings(state), state) do
+      :continue ->
         :continue
 
-      {_key, fun} when is_function(fun, 2) ->
-        case fun.(event, state) do
-          :continue -> :continue
-          {:stop, state} -> {:stop, state}
-          {:noreply, state} -> {:noreply, state}
-        end
+      {:stop, state} ->
+        {:stop, state}
+
+      {:noreply, state} ->
+        {:noreply, state}
     end
   end
 
@@ -19,6 +18,12 @@ defmodule Breeze.GlobalKeybindings do
     match?({:stop, _}, dispatch(event, state))
   rescue
     _ -> false
+  end
+
+  def visible(state) do
+    state
+    |> keybindings()
+    |> Breeze.Keybindings.visible()
   end
 
   defp keybindings(%{global_keybindings: keybindings}) when is_list(keybindings), do: keybindings

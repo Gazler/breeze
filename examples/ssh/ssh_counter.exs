@@ -23,26 +23,35 @@ end
 
 defmodule SSHCounter do
   use Breeze.View
+  import Breeze.Blocks
 
   def mount(opts, term) do
     {:ok,
-     assign(term,
+     term
+     |> assign(
        counter: 0,
        username: Keyword.get(opts, :username, "guest")
-     )}
+     )
+     |> put_local_keybindings([
+       {"ArrowUp", "Increment"},
+       {"ArrowDown", "Decrement"},
+       {"q", "Quit"}
+     ])}
   end
 
   def render(assigns) do
     ~H"""
-    <box style="flex_direction-column p-1">
-      <box style="bold">Breeze over SSH</box>
-      <box>User: {@username}</box>
-      <box>Counter: {@counter}</box>
+    <box style="grid grid-cols-1 grid-rows-2 width-screen height-screen">
       <box>
+        <box style="flex_direction-column p-1">
+          <box style="bold">Breeze over SSH</box>
+          <box>User: {@username}</box>
+          <box>Counter: {@counter}</box>
+        </box>
       </box>
-      <box>ArrowUp increments</box>
-      <box>ArrowDown decrements</box>
-      <box>Press q to quit</box>
+      <box style="height-1 bg-panel overflow-hidden">
+        <.keybinding_bar keybindings={@breeze.keybindings}/>
+      </box>
     </box>
     """
   end

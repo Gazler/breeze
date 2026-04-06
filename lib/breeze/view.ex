@@ -364,6 +364,29 @@ defmodule Breeze.View do
   end
 
   @doc """
+  Set keybindings that are active anywhere inside the current view subtree.
+  """
+  def put_local_keybindings(%{local_keybindings: _} = term, bindings) do
+    %{term | local_keybindings: Breeze.Keybindings.normalize_list(bindings)}
+  end
+
+  @doc """
+  Set keybindings that are only active when the given local focus target is focused.
+  """
+  def put_focus_keybindings(%{focus_keybindings: focus_keybindings} = term, focus_id, bindings)
+      when is_binary(focus_id) do
+    normalized = Breeze.Keybindings.normalize_list(bindings)
+    %{term | focus_keybindings: Map.put(focus_keybindings, focus_id, normalized)}
+  end
+
+  @doc """
+  Return the currently active keybinding hints for the term.
+  """
+  def active_keybindings(%{assigns: assigns}) when is_map(assigns) do
+    get_in(assigns, [:breeze, :keybindings]) || []
+  end
+
+  @doc """
   Set the active Breeze theme for the current term.
   """
   def put_theme(%{theme: _} = term, theme) do

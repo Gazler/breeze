@@ -374,13 +374,25 @@ defmodule Breeze.Renderer do
         box
       end
 
+    style =
+      element.style
+      |> maybe_resolve_intrinsic_inline_width(
+        Enum.reverse(children),
+        box.content,
+        element.attributes
+      )
+
+    children =
+      children
+      |> Enum.reverse()
+      |> maybe_resolve_inline_child_widths(style, element.attributes)
+
     opts =
       element.attributes
       |> merge_scroll_modifier(scroll_modifier)
-      |> Map.put(:style, element.style)
+      |> Map.put(:style, style)
       |> Map.put(:owner_id, id)
 
-    children = Enum.reverse(children)
     content = box.content
 
     final_box = %{Box.new(opts) | children: children, content: content}
@@ -436,6 +448,56 @@ defmodule Breeze.Renderer do
     left = if is_integer(left), do: max(left, 0), else: existing_left
 
     Map.put(attributes, :scroll, {top, left})
+  end
+
+  defp maybe_resolve_intrinsic_inline_width(style, children, content, attributes) do
+    if Map.get(attributes, :display) == :inline and Map.get(style, :overflow) == :hidden and
+         Map.get(style, :width) in [nil, :auto] do
+      Map.put(style, :width, intrinsic_inline_width(children, content))
+    else
+      style
+    end
+  end
+
+  defp maybe_resolve_inline_child_widths(children, style, attributes) do
+    if Map.get(attributes, :display) == :inline and Map.get(style, :overflow) == :hidden and
+         Map.get(style, :width) not in [nil, :auto, :full] do
+      Enum.map(children, &resolve_box_width/1)
+    else
+      children
+    end
+  end
+
+  defp resolve_box_width(%Box{} = box) do
+    children = Enum.map(box.children, &resolve_box_width/1)
+
+    width =
+      if is_integer(box.style.width),
+        do: box.style.width,
+        else: intrinsic_box_width(%{box | children: children})
+
+    %{box | children: children, width: width}
+  end
+
+  defp intrinsic_inline_width(children, content) do
+    content_width = BackBreeze.Utils.string_length(content || "")
+    child_width = Enum.reduce(children, 0, &(&2 + intrinsic_box_width(&1)))
+    max(content_width + child_width, 0)
+  end
+
+  defp intrinsic_box_width(%Box{style: %{width: width}}) when is_integer(width), do: width
+
+  defp intrinsic_box_width(%Box{style: %{display: :inline}, children: children, content: content}) do
+    intrinsic_inline_width(children, content)
+  end
+
+  defp intrinsic_box_width(%Box{children: children, content: content}) do
+    child_width =
+      children
+      |> Enum.map(&intrinsic_box_width/1)
+      |> Enum.max(fn -> 0 end)
+
+    max(BackBreeze.Utils.string_length(content || ""), child_width)
   end
 
   defp merge_live_acc(acc, child_acc) do

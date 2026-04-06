@@ -25,4 +25,19 @@ defmodule Breeze.ViewTest do
 
     assert update_implicit(term, "missing", fn {_mod, state} -> state end) == term
   end
+
+  test "put_local_keybindings and put_focus_keybindings normalize keybinding hints" do
+    term = %Breeze.Term{assigns: %{}, local_keybindings: [], focus_keybindings: %{}}
+
+    updated =
+      term
+      |> put_local_keybindings([{"q", "Quit"}])
+      |> put_focus_keybindings("editor", [{"Enter", "Save"}])
+
+    assert updated.local_keybindings == [%{key: "q", label: "Quit", handler: nil}]
+
+    assert updated.focus_keybindings == %{
+             "editor" => [%{key: "Enter", label: "Save", handler: nil}]
+           }
+  end
 end

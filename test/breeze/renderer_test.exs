@@ -396,6 +396,19 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule InlineOverflowExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="inline bg-panel height-1 overflow-hidden">
+        <box class="text-accent bold">Esc</box>
+        <box> Close</box>
+      </box>
+      """
+    end
+  end
+
   describe "render_to_string/2" do
     test "converts the boxes to terminal output" do
       assert Renderer.render_to_string(Example, %{name: "world"}) ==
@@ -416,6 +429,11 @@ defmodule Breeze.RendererTest do
 
     test "accepts inline style maps" do
       assert Renderer.render_to_string(MapStyleExample, %{}) == "\e[48;5;0;38;5;3mHello\e[0m"
+    end
+
+    test "inline overflow-hidden boxes keep their intrinsic width" do
+      assert Renderer.render_to_string(InlineOverflowExample, %{}) =~ "Esc"
+      assert Renderer.render_to_string(InlineOverflowExample, %{}) =~ "Close"
     end
 
     test "accepts BackBreeze.Style structs" do

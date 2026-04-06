@@ -62,6 +62,31 @@ defmodule Breeze.ChildServerTest do
     def handle_event(_, _, term), do: {:noreply, term}
   end
 
+  defmodule KeybindingView do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok,
+       term
+       |> focus("save")
+       |> put_local_keybindings([{"q", "Quit"}])
+       |> put_focus_keybindings("save", [
+         {"Enter", "Save", fn _event, term -> {:noreply, assign(term, saved?: true)} end}
+       ])
+       |> assign(saved?: false)}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box id="save" focusable>saved: {@saved?}</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
   test "dispatches mouse input through handle_event/3" do
     {:ok, pid} = Breeze.ChildServer.start(view: MouseView)
 
@@ -102,5 +127,17 @@ defmodule Breeze.ChildServerTest do
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert box.content =~ "right"
+  end
+
+  test "metadata exposes active keybindings and local handlers dispatch before handle_event/3" do
+    {:ok, pid} = Breeze.ChildServer.start(view: KeybindingView)
+
+    assert %{active_keybindings: [%{key: "q", label: "Quit"}, %{key: "Enter", label: "Save"}]} =
+             Breeze.ChildServer.metadata(pid)
+
+    assert {:noreply, "save", true} = Breeze.ChildServer.dispatch_input(pid, "Enter")
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, [])
+    assert box.content =~ "saved: true"
   end
 end

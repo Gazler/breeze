@@ -7,8 +7,8 @@ defmodule Breeze.ChildServer do
     GenServer.start(__MODULE__, opts)
   end
 
-  def metadata(pid) do
-    GenServer.call(pid, :metadata)
+  def metadata(pid, opts \\ []) do
+    GenServer.call(pid, {:metadata, opts})
   end
 
   def layout_snapshot(pid) do
@@ -72,6 +72,10 @@ defmodule Breeze.ChildServer do
 
     initial_assigns =
       external_assigns
+      |> Map.update(:breeze, %{keybindings: []}, fn
+        breeze when is_map(breeze) -> Map.put_new(breeze, :keybindings, [])
+        _ -> %{keybindings: []}
+      end)
       |> Map.put(:__invalidate__, invalidate)
 
     term = %Breeze.Term{
@@ -100,17 +104,25 @@ defmodule Breeze.ChildServer do
   end
 
   @impl true
-  def handle_call(:metadata, _from, term) do
+  def handle_call({:metadata, opts}, _from, term) do
+    metadata_term =
+      if Keyword.has_key?(opts, :focused) do
+        %{term | focused: Keyword.get(opts, :focused)}
+      else
+        term
+      end
+
     {:reply,
      %{
-       focused: term.focused,
-       view: term.view,
-       theme: term.theme,
-       apply_theme_defaults?: term.apply_theme_defaults?,
-       focused_implicit_id: focused_implicit_id(term, term.focused),
-       focus_meta: term.focus_meta,
-       implicit_state: term.implicit_state,
-       implicit_meta: term.implicit_meta
+       focused: metadata_term.focused,
+       view: metadata_term.view,
+       theme: metadata_term.theme,
+       apply_theme_defaults?: metadata_term.apply_theme_defaults?,
+       active_keybindings: active_keybindings(metadata_term),
+       focused_implicit_id: focused_implicit_id(metadata_term, metadata_term.focused),
+       focus_meta: metadata_term.focus_meta,
+       implicit_state: metadata_term.implicit_state,
+       implicit_meta: metadata_term.implicit_meta
      }, term}
   end
 
@@ -259,6 +271,7 @@ defmodule Breeze.ChildServer do
       assigns
       |> maybe_put_theme_assign(:theme_status, Breeze.Theme.probe_status(theme) || :ready)
       |> maybe_put_theme_assign(:actual_theme_mode, theme.mode)
+      |> put_breeze_assign(:keybindings, active_keybindings(term))
 
     %{term | assigns: assigns}
   end
@@ -278,6 +291,13 @@ defmodule Breeze.ChildServer do
 
   defp maybe_put_theme_assign(assigns, key, value) do
     if Map.has_key?(assigns, key), do: Map.put(assigns, key, value), else: assigns
+  end
+
+  defp put_breeze_assign(assigns, key, value) do
+    Map.update(assigns, :breeze, %{key => value}, fn
+      breeze when is_map(breeze) -> Map.put(breeze, key, value)
+      _ -> %{key => value}
+    end)
   end
 
   defp render_term(term, opts) do
@@ -321,13 +341,23 @@ defmodule Breeze.ChildServer do
         preload_and_attach_live_view(term, final_opts)
       end
 
+    term = sync_theme_assigns(term)
+
     initial_implicit_meta = term.implicit_meta
+    initial_focus = term.focused
+    initial_keybindings = get_in(term.assigns, [:breeze, :keybindings]) || []
 
     {term, acc, box} =
       render_pass(term, final_opts, profile_scope, profile_label, explicit_focus?)
 
+    term = sync_theme_assigns(term)
+
     {term, acc, box} =
-      if term.implicit_state != implicit_state or term.implicit_meta != initial_implicit_meta do
+      if term.implicit_state != implicit_state or term.implicit_meta != initial_implicit_meta or
+           term.focused != initial_focus or
+           (get_in(term.assigns, [:breeze, :keybindings]) || []) != initial_keybindings do
+        rerender_keybindings = get_in(term.assigns, [:breeze, :keybindings]) || []
+
         rerender_opts =
           final_opts
           |> Keyword.put(:focused, term.focused)
@@ -335,10 +365,28 @@ defmodule Breeze.ChildServer do
           |> Keyword.put(:implicit_meta, term.implicit_meta)
           |> Keyword.put(:previous_elements, term.elements)
 
-        render_pass(term, rerender_opts, profile_scope, profile_label, explicit_focus?)
+        {term, acc, box} =
+          render_pass(term, rerender_opts, profile_scope, profile_label, explicit_focus?)
+
+        term = sync_theme_assigns(term)
+
+        if (get_in(term.assigns, [:breeze, :keybindings]) || []) != rerender_keybindings do
+          final_rerender_opts =
+            rerender_opts
+            |> Keyword.put(:focused, term.focused)
+            |> Keyword.put(:implicit_state, term.implicit_state)
+            |> Keyword.put(:implicit_meta, term.implicit_meta)
+            |> Keyword.put(:previous_elements, term.elements)
+
+          render_pass(term, final_rerender_opts, profile_scope, profile_label, explicit_focus?)
+        else
+          {term, acc, box}
+        end
       else
         {term, acc, box}
       end
+
+    term = sync_theme_assigns(term)
 
     decorations =
       profile(profile_scope, profile_label, :decorations_us, fn ->
@@ -470,7 +518,11 @@ defmodule Breeze.ChildServer do
       :continue ->
         case dispatch_input_hierarchy(term, key) do
           nil ->
-            handle_event(:ignore_me, event, term)
+            case dispatch_local_keybindings(event, term) do
+              {:stop, term} -> {:stop, term}
+              {:noreply, term} -> {:noreply, term}
+              :continue -> handle_event(:ignore_me, event, term)
+            end
 
           reply ->
             reply
@@ -524,6 +576,14 @@ defmodule Breeze.ChildServer do
 
   defp normalize_key_event(%{"key" => _} = event), do: event
   defp normalize_key_event(key), do: %{"key" => key}
+
+  defp dispatch_local_keybindings(event, term) do
+    case Breeze.Keybindings.dispatch(event, current_view_keybindings(term), term) do
+      :continue -> :continue
+      {:stop, term} -> {:stop, term}
+      {:noreply, term} -> {:noreply, term}
+    end
+  end
 
   defp preload_and_attach_live_view(term, opts) do
     collector_key = {__MODULE__, :live_children, make_ref()}
@@ -692,6 +752,39 @@ defmodule Breeze.ChildServer do
 
   defp live_id(nil, id), do: id
   defp live_id(prefix, id), do: prefix <> "::" <> id
+
+  defp active_keybindings(term) do
+    Breeze.Keybindings.merge_visible([
+      focused_child_keybindings(term),
+      Breeze.Keybindings.visible(current_view_keybindings(term)),
+      Breeze.GlobalKeybindings.visible(term)
+    ])
+  end
+
+  defp focused_child_keybindings(term) do
+    case focused_child_chain(term) do
+      [{child_id, %{pid: pid}} | _] ->
+        case safe_child_metadata(pid, focused: strip_live_prefix(term.focused, child_id)) do
+          %{active_keybindings: keybindings} when is_list(keybindings) -> keybindings
+          _ -> []
+        end
+
+      [] ->
+        []
+    end
+  end
+
+  defp current_view_keybindings(term) do
+    local = Map.get(term, :local_keybindings, [])
+    focused_local = get_in(term.focus_keybindings, [term.focused]) || []
+    local ++ focused_local
+  end
+
+  defp safe_child_metadata(pid, opts) do
+    Breeze.ChildServer.metadata(pid, opts)
+  catch
+    :exit, _reason -> %{}
+  end
 
   defp translate_live_dimensions(elements, %{left: left, top: top} = viewport, prefix)
        when is_map(elements) do

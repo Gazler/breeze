@@ -22,6 +22,38 @@ defmodule Breeze.Blocks do
 
   use Breeze.View
   alias BackBreeze.Ucwidth
+
+  attr :keybindings, :list, default: []
+  attr :class, :string, default: nil
+
+  def keybinding_bar(assigns) do
+    assigns =
+      assign(assigns,
+        parts:
+          Map.get(assigns, :keybindings, [])
+          |> Enum.with_index()
+          |> Enum.flat_map(fn {%{key: key, label: label}, index} ->
+            key = to_string(key)
+            label = to_string(label || key)
+            separator? = index < length(Map.get(assigns, :keybindings, [])) - 1
+
+            [
+              %{class: "text-accent bold", content: key},
+              %{class: nil, content: " " <> label}
+            ] ++ if(separator?, do: [%{class: nil, content: "  "}], else: [])
+          end)
+      )
+
+    ~H"""
+    <box
+      :if={@parts != []}
+      class={@class || "inline width-full overflow-hidden padding-left-2 padding-right-1"}
+    >
+      <box :for={%{class: class, content: content} <- @parts} class={class}>{content}</box>
+    </box>
+    """
+  end
+
   attr :id, :string, required: true
   attr :loop, :boolean, default: true
   attr :variant, :string, default: nil

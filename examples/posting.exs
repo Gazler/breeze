@@ -30,7 +30,14 @@ defmodule Posting do
     method_index = Enum.find_index(@methods, &(&1 == method)) || 0
     user_host = current_user_host()
 
-    term = term |> Breeze.View.put_theme(Theme.builtin(:gruvbox)) |> focus("url")
+    term =
+      term
+      |> Breeze.View.put_theme(Theme.builtin(:gruvbox))
+      |> focus("url")
+      |> put_local_keybindings(base_keybindings())
+      |> put_focus_keybindings("request-header-name", [{"Enter", "Next"}])
+      |> put_focus_keybindings("request-header-value", [{"Enter", "Add header"}])
+      |> put_focus_keybindings("request-header-add", [{"Enter", "Add header"}])
 
     term =
       assign(term,
@@ -57,172 +64,162 @@ defmodule Posting do
 
   def render(assigns) do
     ~H"""
-    <box class="width-screen height-screen bg">
-      <box class="grid grid-cols-1 width-full height-full padding-left-2 padding-right-2">
-        <box class="height-3 padding-top-1 padding-bottom-1">
-          <box class="inline width-full height-1">
-            <box class="bold text-primary">Req It Ralph</box>
-            <box class="text-muted"> 0.0.1</box>
-            <box class="text-muted"> {@theme_mode}/{@actual_theme_mode} ({@theme_status})</box>
-            <box class="width-full text-right text-muted">{@user_host}</box>
-          </box>
-        </box>
-        <box style="grid grid-cols-5 height-2 padding-bottom-1">
-          <box style="text-primary width-1">▐</box>
-          <.dropdown
-            id="method"
-            selected={@method}
-            br-change="method_changed"
-            class="width-10"
-            item_style="bg-panel text"
-            menu_style="bg-panel text"
-          >
-            <:item :for={method <- @methods} value={method}>{method}</:item>
-          </.dropdown>
-          <.input
-            id="url"
-            input-value={@url}
-            input-placeholder="Enter URL"
-            br-change="url_changed"
-            style="width-full"
-          />
-          <.button class="width-8 padding-left-2" focusable="false">Send</.button>
-          <box style="bg-primary text-bg width-1">▐</box>
-        </box>
-        <box style="grid grid-cols-1 grid-rows-2 height-full">
-          <box style="grid grid-cols-2 height-full">
-            <.panel id="collection-panel" class="height-full width-full overflow-hidden bg">
-              <box class="width-full height-full padding-right-1 padding-bottom-1 overflow-hidden">
-                <.list
-                  id="collection"
-                  variant="muted"
-                  list-scroll-padding={1}
-                  class="bg height-full width-full overflow-scroll border-0 focus:border-0"
-                  item_style="width-full"
-                >
-                  <:item :for={{val, label} <- @collection} value={val}>{label}</:item>
-                </.list>
-              </box>
-            </.panel>
-            <box style="grid grid-cols-1 grid-rows-2 height-full">
-              <.panel id="request-panel" class="height-full overflow-hidden bg focus:border-accent">
-                <.tabs
-                  id="request-tabs"
-                  selected={@request_tab}
-                  variant="underline"
-                  br-change="request_tab"
-                  class="width-full height-full"
-                >
-                  <:tab value="headers" label="Headers">
-                    <box style="grid grid-cols-1 grid-rows-2 height-full">
-                      <.scroll
-                        id="request-tabs-panel-headers"
-                        scroll-autoscroll="bottom"
-                        class="height-full overflow-scroll bg"
-                        style={%{scrollbar: %{arrows: true}}}
-                      >
-                        <box
-                          :if={@request_headers == []}
-                          class="width-full height-full bg overflow-hidden"
-                        >
-                          <box
-                            class="absolute left-0 top-0 width-full height-full text-mute-70 overflow-hidden content-repeat"
-                          >
-                            ╱
-                          </box>
-                          <box class="absolute center text-center bold text-mute-40">No Headers</box>
-                        </box>
-                        <box :for={{name, value} <- @request_headers} class="inline width-full">
-                          <box class="text-primary width-18">{name}</box>
-                          <box>{value}</box>
-                        </box>
-                      </.scroll>
-                      <box style="grid grid-cols-3 gap-x-1 height-1">
-                        <.input
-                          id="request-header-name"
-                          input-value={@request_header_name}
-                          input-placeholder="Header name"
-                          br-change="request_header_name_changed"
-                          style="width-20"
-                        />
-                        <.input
-                          id="request-header-value"
-                          input-value={@request_header_value}
-                          input-placeholder="Header value"
-                          br-change="request_header_value_changed"
-                          style="width-full"
-                        />
-                        <.button id="request-header-add" class="width-7">Add</.button>
-                      </box>
-                    </box>
-                  </:tab>
-                  <:tab value="body" label="Body">
-                    <box class="text-muted">No request body</box>
-                  </:tab>
-                  <:tab value="query" label="Query">
-                    <box class="text-muted">No query parameters</box>
-                  </:tab>
-                  <:tab value="auth" label="Auth">
-                    <box class="text-muted">No auth configured</box>
-                  </:tab>
-                  <:tab value="info" label="Info">
-                    <box class="text-muted">Request metadata</box>
-                  </:tab>
-                  <:tab value="options" label="Options">
-                    <box class="text-muted">No request options</box>
-                  </:tab>
-                </.tabs>
-              </.panel>
-              <.panel id="response-panel" class="height-full overflow-hidden bg focus:border-accent">
-                <.tabs
-                  id="response-tabs"
-                  selected={@response_tab}
-                  variant="underline"
-                  br-change="response_tab"
-                  class="width-full height-full"
-                >
-                  <:tab value="body" label="Body">
-                    <box>{"  1  {"}</box>
-                    <box>{"  2    \"title\": \"foo\","}</box>
-                    <box>{"  3    \"body\": \"bar\","}</box>
-                    <box>{"  4    \"userId\": 1,"}</box>
-                    <box>{"  5    \"id\": 101"}</box>
-                    <box>{"  6  }"}</box>
-                  </:tab>
-                  <:tab value="headers" label="Headers">
-                    <box class="text-muted">Response headers</box>
-                  </:tab>
-                  <:tab value="cookies" label="Cookies">
-                    <box class="text-muted">No cookies</box>
-                  </:tab>
-                  <:tab value="trace" label="Trace">
-                    <box class="text-muted">No trace data</box>
-                  </:tab>
-                </.tabs>
-              </.panel>
+    <box class="grid grid-cols-1 grid-rows-2 width-screen height-screen bg">
+      <box class="width-full height-full padding-left-2 padding-right-2">
+        <box class="grid grid-cols-1 width-full height-full">
+          <box class="height-3 padding-top-1 padding-bottom-1">
+            <box class="inline width-full height-1">
+              <box class="bold text-primary">Req It Ralph</box>
+              <box class="text-muted"> 0.0.1</box>
+              <box class="text-muted"> {@theme_mode}/{@actual_theme_mode} ({@theme_status})</box>
+              <box class="width-full text-right text-muted">{@user_host}</box>
             </box>
           </box>
-          <box style="inline height-1 width-full bg-panel overflow-hidden">
-            <box class="bg-primary text-bg bold">{" ^j "}</box>
-            <box> Send  </box>
-            <box class="bg-primary text-bg bold">{" ^t "}</box>
-            <box> Method  </box>
-            <box class="bg-primary text-bg bold">{" Tab "}</box>
-            <box> Next  </box>
-            <box class="bg-primary text-bg bold">{" F1 "}</box>
-            <box> Help  </box>
-            <box class="bg-primary text-bg bold">{" F2 "}</box>
-            <box> Debug  </box>
-            <box class="bg-primary text-bg bold">{" F3 "}</box>
-            <box> Theme  </box>
-            <box class="bg-primary text-bg bold">{" F4 "}</box>
-            <box> Inspect  </box>
-            <box class="bg-primary text-bg bold">{" PgUp "}</box>
-            <box> Inspect Dock  </box>
-            <box class="bg-primary text-bg bold">{" q "}</box>
-            <box> Quit </box>
+          <box style="grid grid-cols-5 height-2 padding-bottom-1">
+            <box style="text-primary width-1">▐</box>
+            <.dropdown
+              id="method"
+              selected={@method}
+              br-change="method_changed"
+              class="width-10"
+              item_style="bg-panel text"
+              menu_style="bg-panel text"
+            >
+              <:item :for={method <- @methods} value={method}>{method}</:item>
+            </.dropdown>
+            <.input
+              id="url"
+              input-value={@url}
+              input-placeholder="Enter URL"
+              br-change="url_changed"
+              style="width-full"
+            />
+            <.button class="width-8 padding-left-2" focusable="false">Send</.button>
+            <box style="bg-primary text-bg width-1">▐</box>
+          </box>
+          <box style="grid grid-cols-1 grid-rows-2 height-full">
+            <box style="grid grid-cols-2 height-full">
+              <.panel id="collection-panel" class="height-full width-full overflow-hidden bg">
+                <box class="width-full height-full padding-right-1 padding-bottom-1 overflow-hidden">
+                  <.list
+                    id="collection"
+                    variant="muted"
+                    list-scroll-padding={1}
+                    class="bg height-full width-full overflow-scroll border-0 focus:border-0"
+                    item_style="width-full"
+                  >
+                    <:item :for={{val, label} <- @collection} value={val}>{label}</:item>
+                  </.list>
+                </box>
+              </.panel>
+              <box style="grid grid-cols-1 grid-rows-2 height-full">
+                <.panel id="request-panel" class="height-full overflow-hidden bg focus:border-accent">
+                  <.tabs
+                    id="request-tabs"
+                    selected={@request_tab}
+                    variant="underline"
+                    br-change="request_tab"
+                    class="width-full height-full"
+                  >
+                    <:tab value="headers" label="Headers">
+                      <box style="grid grid-cols-1 grid-rows-2 height-full">
+                        <.scroll
+                          id="request-tabs-panel-headers"
+                          scroll-autoscroll="bottom"
+                          class="height-full overflow-scroll bg"
+                          style={%{scrollbar: %{arrows: true}}}
+                        >
+                          <box
+                            :if={@request_headers == []}
+                            class="width-full height-full bg overflow-hidden"
+                          >
+                            <box
+                              class="absolute left-0 top-0 width-full height-full text-mute-70 overflow-hidden content-repeat"
+                            >
+                              ╱
+                            </box>
+                            <box class="absolute center text-center bold text-mute-40">
+                              No Headers
+                            </box>
+                          </box>
+                          <box :for={{name, value} <- @request_headers} class="inline width-full">
+                            <box class="text-primary width-18">{name}</box>
+                            <box>{value}</box>
+                          </box>
+                        </.scroll>
+                        <box style="grid grid-cols-3 gap-x-1 height-1">
+                          <.input
+                            id="request-header-name"
+                            input-value={@request_header_name}
+                            input-placeholder="Header name"
+                            br-change="request_header_name_changed"
+                            style="width-20"
+                          />
+                          <.input
+                            id="request-header-value"
+                            input-value={@request_header_value}
+                            input-placeholder="Header value"
+                            br-change="request_header_value_changed"
+                            style="width-full"
+                          />
+                          <.button id="request-header-add" class="width-7">Add</.button>
+                        </box>
+                      </box>
+                    </:tab>
+                    <:tab value="body" label="Body">
+                      <box class="text-muted">No request body</box>
+                    </:tab>
+                    <:tab value="query" label="Query">
+                      <box class="text-muted">No query parameters</box>
+                    </:tab>
+                    <:tab value="auth" label="Auth">
+                      <box class="text-muted">No auth configured</box>
+                    </:tab>
+                    <:tab value="info" label="Info">
+                      <box class="text-muted">Request metadata</box>
+                    </:tab>
+                    <:tab value="options" label="Options">
+                      <box class="text-muted">No request options</box>
+                    </:tab>
+                  </.tabs>
+                </.panel>
+                <.panel
+                  id="response-panel"
+                  class="height-full overflow-hidden bg focus:border-accent"
+                >
+                  <.tabs
+                    id="response-tabs"
+                    selected={@response_tab}
+                    variant="underline"
+                    br-change="response_tab"
+                    class="width-full height-full"
+                  >
+                    <:tab value="body" label="Body">
+                      <box>{"  1  {"}</box>
+                      <box>{"  2    \"title\": \"foo\","}</box>
+                      <box>{"  3    \"body\": \"bar\","}</box>
+                      <box>{"  4    \"userId\": 1,"}</box>
+                      <box>{"  5    \"id\": 101"}</box>
+                      <box>{"  6  }"}</box>
+                    </:tab>
+                    <:tab value="headers" label="Headers">
+                      <box class="text-muted">Response headers</box>
+                    </:tab>
+                    <:tab value="cookies" label="Cookies">
+                      <box class="text-muted">No cookies</box>
+                    </:tab>
+                    <:tab value="trace" label="Trace">
+                      <box class="text-muted">No trace data</box>
+                    </:tab>
+                  </.tabs>
+                </.panel>
+              </box>
+            </box>
           </box>
         </box>
+      </box>
+      <box style="height-1 width-full bg-panel overflow-hidden">
+        <.keybinding_bar keybindings={@breeze.keybindings}/>
       </box>
       <.modal :if={@show_help} screen-dim id="help" width={56} height={15} br-change="help_closed">
         <:title>Keyboard Shortcuts</:title>
@@ -405,6 +402,19 @@ defmodule Posting do
 
         "#{user}@#{host}"
     end
+  end
+
+  defp base_keybindings do
+    [
+      {"^t", "Method"},
+      {"Tab", "Next"},
+      {"F1", "Help"},
+      {"F2", "Debug"},
+      {"F3", "Theme"},
+      {"F4", "Inspect"},
+      {"PgUp", "Inspect Dock"},
+      {"q", "Quit"}
+    ]
   end
 end
 

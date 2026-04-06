@@ -13,6 +13,8 @@ defmodule Breeze.Term do
     assigns: %{},
     external_assigns: %{},
     global_keybindings: [],
+    local_keybindings: [],
+    focus_keybindings: %{},
     focused: nil,
     allow_unfocused?: false,
     focusables: [],
