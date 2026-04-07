@@ -259,6 +259,11 @@ defmodule Breeze.View do
     quote do
       import Breeze.View
       Module.register_attribute(__MODULE__, :breeze_components, accumulate: true)
+      Module.register_attribute(__MODULE__, :__attrs__, accumulate: true)
+      Module.register_attribute(__MODULE__, :__slot_attrs__, accumulate: true)
+      Module.register_attribute(__MODULE__, :__slots__, accumulate: true)
+      Module.register_attribute(__MODULE__, :__slot__, accumulate: false)
+      @on_definition Breeze.View
       @before_compile Breeze.View
     end
   end
@@ -281,6 +286,17 @@ defmodule Breeze.View do
   end
 
   defmacro __before_compile__(env) do
+    attrs = pop_attrs(env)
+    slots = pop_slots(env)
+
+    validate_misplaced_attrs!(attrs, env.file, fn ->
+      "cannot define attributes without a related function component"
+    end)
+
+    validate_misplaced_slots!(slots, env.file, fn ->
+      "cannot define slots without a related function component"
+    end)
+
     components =
       env.module
       |> Module.get_attribute(:breeze_components)
@@ -302,20 +318,316 @@ defmodule Breeze.View do
     end
   end
 
-  defmacro attr(_name, _type) do
-    quote(do: :ok)
+  defmacro attr(name, type) do
+    quote bind_quoted: [name: name, type: type] do
+      Breeze.View.__attr__!(__MODULE__, name, type, [], __ENV__.line, __ENV__.file)
+    end
   end
 
-  defmacro attr(_name, _type, _opts) do
-    quote(do: :ok)
+  defmacro attr(name, type, opts) do
+    quote bind_quoted: [name: name, type: type, opts: opts] do
+      Breeze.View.__attr__!(__MODULE__, name, type, opts, __ENV__.line, __ENV__.file)
+    end
   end
 
-  defmacro slot(_name) do
-    quote(do: :ok)
+  defmacro slot(name) do
+    quote bind_quoted: [name: name] do
+      Breeze.View.__slot__!(__MODULE__, name, [], __ENV__.line, __ENV__.file, fn -> nil end)
+    end
   end
 
-  defmacro slot(_name, _opts) do
-    quote(do: :ok)
+  defmacro slot(name, opts) do
+    {block, opts} = Keyword.pop(opts, :do)
+
+    quote do
+      Breeze.View.__slot__!(
+        __MODULE__,
+        unquote(name),
+        unquote(opts),
+        __ENV__.line,
+        __ENV__.file,
+        fn -> unquote(block) end
+      )
+    end
+  end
+
+  def __attr__!(module, name, type, opts, line, file) when is_atom(name) and is_list(opts) do
+    slot = Module.get_attribute(module, :__slot__)
+    {doc, opts} = Keyword.pop(opts, :doc, nil)
+    {required, opts} = Keyword.pop(opts, :required, false)
+
+    if not (is_binary(doc) or is_nil(doc) or doc == false) do
+      compile_error!(line, file, ":doc must be a string or false, got: #{inspect(doc)}")
+    end
+
+    if not is_boolean(required) do
+      compile_error!(line, file, ":required must be a boolean, got: #{inspect(required)}")
+    end
+
+    key = if slot, do: :__slot_attrs__, else: :__attrs__
+
+    Module.put_attribute(module, key, %{
+      slot: slot,
+      name: name,
+      type: type,
+      required: required,
+      opts: opts,
+      doc: doc,
+      line: line
+    })
+
+    :ok
+  end
+
+  def __slot__!(module, name, opts, line, file, block_fun) when is_atom(name) and is_list(opts) do
+    {doc, opts} = Keyword.pop(opts, :doc, nil)
+    {required, opts} = Keyword.pop(opts, :required, false)
+
+    if not (is_binary(doc) or is_nil(doc) or doc == false) do
+      compile_error!(line, file, ":doc must be a string or false, got: #{inspect(doc)}")
+    end
+
+    if not is_boolean(required) do
+      compile_error!(line, file, ":required must be a boolean, got: #{inspect(required)}")
+    end
+
+    Module.put_attribute(module, :__slot__, name)
+
+    slot_attrs =
+      try do
+        block_fun.()
+        module |> Module.get_attribute(:__slot_attrs__) |> List.wrap() |> Enum.reverse()
+      after
+        Module.put_attribute(module, :__slot__, nil)
+        Module.delete_attribute(module, :__slot_attrs__)
+      end
+
+    Module.put_attribute(module, :__slots__, %{
+      name: name,
+      required: required,
+      opts: opts,
+      doc: doc,
+      line: line,
+      attrs: slot_attrs
+    })
+
+    :ok
+  end
+
+  def __on_definition__(env, kind, name, args, _guards, _body) do
+    attrs = pop_attrs(env)
+    slots = pop_slots(env)
+
+    if attrs != [] or slots != [] do
+      if kind in [:def, :defp] and length(args) == 1 do
+        if kind == :def do
+          register_component_doc(env, slots, attrs)
+        end
+      else
+        validate_misplaced_attrs!(attrs, env.file, fn ->
+          case length(args) do
+            1 ->
+              "could not define attributes for function #{name}/1"
+
+            arity ->
+              "cannot declare attributes for function #{name}/#{arity}. Components must be functions with arity 1"
+          end
+        end)
+
+        validate_misplaced_slots!(slots, env.file, fn ->
+          case length(args) do
+            1 ->
+              "could not define slots for function #{name}/1"
+
+            arity ->
+              "cannot declare slots for function #{name}/#{arity}. Components must be functions with arity 1"
+          end
+        end)
+      end
+    end
+  end
+
+  defp register_component_doc(env, slots, attrs) do
+    case Module.get_attribute(env.module, :doc) do
+      {_line, false} ->
+        :ok
+
+      {line, doc} ->
+        Module.put_attribute(env.module, :doc, {line, build_component_doc(doc, slots, attrs)})
+
+      nil ->
+        Module.put_attribute(env.module, :doc, {env.line, build_component_doc("", slots, attrs)})
+    end
+  end
+
+  defp build_component_doc(doc, slots, attrs) do
+    [left | right] = String.split(doc, "[INSERT LVATTRDOCS]")
+
+    IO.iodata_to_binary([
+      build_left_doc(left),
+      build_component_docs(slots, attrs),
+      build_right_doc(right)
+    ])
+  end
+
+  defp build_left_doc(""), do: [""]
+  defp build_left_doc(left), do: [left, ?\n]
+
+  defp build_right_doc(""), do: []
+  defp build_right_doc(right), do: [?\n, right]
+
+  defp build_component_docs([], []), do: []
+  defp build_component_docs(slots, []), do: [build_slots_docs(slots)]
+  defp build_component_docs([], attrs), do: [build_attrs_docs(attrs)]
+
+  defp build_component_docs(slots, attrs),
+    do: [build_attrs_docs(attrs), ?\n, build_slots_docs(slots)]
+
+  defp build_attrs_docs(attrs) do
+    [
+      "## Attributes\n",
+      for attr <- attrs, attr.doc != false and attr.type != :global do
+        [
+          "\n* ",
+          build_attr_name(attr),
+          build_attr_type(attr),
+          build_attr_required(attr),
+          build_hyphen(attr),
+          build_attr_doc_and_default(attr, "  ")
+        ]
+      end,
+      case Enum.find(attrs, &(&1.type == :global)) do
+        nil -> []
+        attr -> build_attr_doc_and_default(attr, "  ")
+      end
+    ]
+  end
+
+  defp build_slots_docs(slots) do
+    [
+      "## Slots\n",
+      for slot <- slots, slot.doc != false do
+        slot_attrs = Enum.filter(slot.attrs, &(&1.doc != false and &1.slot == slot.name))
+
+        [
+          "\n* ",
+          build_slot_name(slot),
+          build_slot_required(slot),
+          build_slot_doc(slot, slot_attrs)
+        ]
+      end
+    ]
+  end
+
+  defp build_slot_name(%{name: name}), do: ["`", Atom.to_string(name), "`"]
+  defp build_slot_required(%{required: true}), do: [" (required)"]
+  defp build_slot_required(_), do: []
+
+  defp build_slot_doc(%{doc: nil}, []), do: []
+  defp build_slot_doc(%{doc: doc}, []), do: [" - ", build_doc(doc, "  ", false)]
+
+  defp build_slot_doc(%{doc: nil}, slot_attrs),
+    do: [" - Accepts attributes:\n", build_slot_attrs_docs(slot_attrs)]
+
+  defp build_slot_doc(%{doc: doc}, slot_attrs) do
+    [
+      " - ",
+      build_doc(doc, "  ", true),
+      "Accepts attributes:\n",
+      build_slot_attrs_docs(slot_attrs)
+    ]
+  end
+
+  defp build_slot_attrs_docs(slot_attrs) do
+    for slot_attr <- slot_attrs do
+      [
+        "\n  * ",
+        build_attr_name(slot_attr),
+        build_attr_type(slot_attr),
+        build_attr_required(slot_attr),
+        build_hyphen(slot_attr),
+        build_attr_doc_and_default(slot_attr, "    ")
+      ]
+    end
+  end
+
+  defp build_attr_name(%{name: name}), do: ["`", Atom.to_string(name), "` "]
+  defp build_attr_type(%{type: type}), do: ["(`", inspect(type), "`)"]
+  defp build_attr_required(%{required: true}), do: [" (required)"]
+  defp build_attr_required(_), do: []
+
+  defp build_attr_doc_and_default(%{doc: doc, type: :global, opts: opts}, indent) do
+    [
+      "\n* Global attributes are accepted.",
+      if(doc, do: [" ", build_doc(doc, indent, false)], else: []),
+      case Keyword.get(opts, :include) do
+        inc when is_list(inc) and inc != [] ->
+          [" Supports all globals plus: ", build_literal(inc), "."]
+
+        _ ->
+          []
+      end
+    ]
+  end
+
+  defp build_attr_doc_and_default(%{doc: doc, opts: opts}, indent) do
+    case Keyword.fetch(opts, :default) do
+      {:ok, default} ->
+        if doc do
+          [build_doc(doc, indent, true), "Defaults to ", build_literal(default), "."]
+        else
+          ["Defaults to ", build_literal(default), "."]
+        end
+
+      :error ->
+        if doc, do: [build_doc(doc, indent, false)], else: []
+    end
+  end
+
+  defp build_doc(doc, indent, text_after?) do
+    doc = String.trim(doc)
+    [head | tail] = String.split(doc, ["\r\n", "\n"])
+    dot = if String.ends_with?(doc, "."), do: [], else: [?.]
+
+    tail =
+      Enum.map(tail, fn
+        "" -> "\n"
+        other -> [?\n, indent | other]
+      end)
+
+    case tail do
+      [] when text_after? -> [[head | tail], dot, ?\s]
+      [] -> [[head | tail], dot]
+      _ when text_after? -> [[head | tail], "\n\n", indent]
+      _ -> [[head | tail], "\n"]
+    end
+  end
+
+  defp build_literal(literal), do: [?`, inspect(literal, charlists: :as_list), ?`]
+  defp build_hyphen(%{doc: doc}) when is_binary(doc), do: [" - "]
+  defp build_hyphen(%{opts: []}), do: []
+  defp build_hyphen(%{opts: _}), do: [" - "]
+
+  defp pop_attrs(env),
+    do: env.module |> Module.delete_attribute(:__attrs__) |> List.wrap() |> Enum.reverse()
+
+  defp pop_slots(env),
+    do: env.module |> Module.delete_attribute(:__slots__) |> List.wrap() |> Enum.reverse()
+
+  defp validate_misplaced_attrs!([], _file, _message_fun), do: :ok
+
+  defp validate_misplaced_attrs!([%{line: line} | _], file, message_fun) do
+    compile_error!(line, file, message_fun.())
+  end
+
+  defp validate_misplaced_slots!([], _file, _message_fun), do: :ok
+
+  defp validate_misplaced_slots!([%{line: line} | _], file, message_fun) do
+    compile_error!(line, file, message_fun.())
+  end
+
+  defp compile_error!(line, file, msg) do
+    raise CompileError, line: line, file: file, description: msg
   end
 
   @typedoc "Runtime slot entry generated by Breeze.Template"
