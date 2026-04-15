@@ -367,6 +367,15 @@ defmodule Breeze.Implicit.InputTest do
              Input.handle_event(nil, %{"key" => "\x01"}, %{value: "hello", cursor: 2})
   end
 
+  test "printable chunks are inserted in one change" do
+    assert {{:change, %{value: "heXYZllo", cursor: 5}}, %{value: "heXYZllo", cursor: 5}} =
+             Input.handle_event(
+               nil,
+               %{"key" => "XYZ", "__batched_printable__" => true},
+               %{value: "hello", cursor: 2}
+             )
+  end
+
   test "animate leaves unfocused content untouched" do
     assert %Box{content: "hello"} =
              Input.animate(:root, %Box{content: "hello"}, [], %{value: "hello", cursor: 2}, %{})
@@ -558,5 +567,21 @@ defmodule Breeze.Implicit.InputTest do
     assert {:noreply, "website", true} = ChildServer.dispatch_input(pid, "q")
     assert {:ok, _acc, box} = ChildServer.render(pid, [])
     assert box.content =~ "historyq"
+  end
+
+  test "focused inputs consume batched printable chunks before global keybindings" do
+    {:ok, pid} =
+      ChildServer.start(
+        view: OverflowInputView,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    assert {:ok, _acc, _box} = ChildServer.render(pid, [])
+
+    assert {:noreply, "website", true} =
+             ChildServer.dispatch_input(pid, %{"key" => "qq", "__batched_printable__" => true})
+
+    assert {:ok, _acc, box} = ChildServer.render(pid, [])
+    assert box.content =~ "historyqq"
   end
 end

@@ -650,10 +650,11 @@ defmodule Breeze.ChildServer do
   end
 
   defp printable_key?(%{"key" => key} = event) when is_binary(key) do
-    not truthy_modifier?(Map.get(event, "ctrlKey")) and
-      not truthy_modifier?(Map.get(event, "altKey")) and
-      not truthy_modifier?(Map.get(event, "metaKey")) and
-      printable_key?(key)
+    batched_printable_event?(event) or
+      (not truthy_modifier?(Map.get(event, "ctrlKey")) and
+         not truthy_modifier?(Map.get(event, "altKey")) and
+         not truthy_modifier?(Map.get(event, "metaKey")) and
+         printable_key?(key))
   end
 
   defp printable_key?(key) when is_binary(key) do
@@ -662,6 +663,18 @@ defmodule Breeze.ChildServer do
   end
 
   defp printable_key?(_key), do: false
+
+  defp batched_printable_event?(%{"__batched_printable__" => true, "key" => key})
+       when is_binary(key) do
+    key != "" and
+      String.printable?(key) and
+      Enum.all?(String.graphemes(key), fn grapheme ->
+        grapheme not in ["\n", "\r", "\t", "\v", "\f"] and
+          not String.match?(grapheme, ~r/[\x00-\x1F\x7F]/u)
+      end)
+  end
+
+  defp batched_printable_event?(_event), do: false
 
   defp truthy_modifier?(value), do: value in [true, "true"]
 

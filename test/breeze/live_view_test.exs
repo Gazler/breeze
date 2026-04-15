@@ -635,6 +635,8 @@ defmodule Breeze.LiveViewTest do
     assert Enum.any?(snapshot, fn entry ->
              entry.label == "counter-child" and entry.metric == :element_count and entry.value > 0
            end)
+
+    assert Breeze.DebugProfiler.snapshot(profile_scope) == []
   end
 
   defmodule DualLiveExample do

@@ -68,7 +68,7 @@ defmodule Breeze.Server do
     :pending_started_at,
     :last_render_at,
     :last_interaction_at,
-    queued_input: [],
+    queued_input: :queue.new(),
     input_flush_scheduled?: false,
     decorations: [],
     children: %{},
@@ -468,17 +468,21 @@ defmodule Breeze.Server do
     end
   end
 
-  defp flush_input_batch(%{queued_input: []} = state), do: {:noreply, state}
+  defp flush_input_batch(state) do
+    case queue_out(state.queued_input) do
+      {:empty, _queue} ->
+        {:noreply, state}
 
-  defp flush_input_batch(%{queued_input: [decoded | rest]} = state) do
-    state = %{state | queued_input: rest}
+      {{:value, decoded}, queue} ->
+        state = %{state | queued_input: queue}
 
-    case process_batched_input(decoded, state) do
-      {:stop, state} ->
-        {:stop, state}
+        case process_batched_input(decoded, state) do
+          {:stop, state} ->
+            {:stop, state}
 
-      {:noreply, state} ->
-        continue_flushing_or_pause(state)
+          {:noreply, state} ->
+            continue_flushing_or_pause(state)
+        end
     end
   end
 
@@ -488,17 +492,30 @@ defmodule Breeze.Server do
     handle_mouse(event, state)
   end
 
-  defp process_batched_input(decoded, state), do: handle_deferred_or_sync_input(decoded, state)
-
-  defp continue_flushing_or_pause(%{queued_input: [next | _]} = state) do
-    if sync_input_message?(next, state) do
-      flush_input_batch(state)
+  defp process_batched_input({:key, key}, state) do
+    if batchable_printable_input?(key, state) do
+      {key, state} = coalesce_printable_keys_from_queue(key, state)
+      handle_deferred_or_sync_input({:key, batched_printable_event(key)}, state)
     else
-      {:noreply, state}
+      handle_deferred_or_sync_input({:key, key}, state)
     end
   end
 
-  defp continue_flushing_or_pause(state), do: {:noreply, state}
+  defp process_batched_input(decoded, state), do: handle_deferred_or_sync_input(decoded, state)
+
+  defp continue_flushing_or_pause(state) do
+    case queue_peek(state.queued_input) do
+      {:value, next} ->
+        if sync_input_message?(next, state) do
+          flush_input_batch(state)
+        else
+          {:noreply, state}
+        end
+
+      :empty ->
+        {:noreply, state}
+    end
+  end
 
   defp handle_deferred_or_sync_input(decoded, state) do
     if sync_input_message?(decoded, state) do
@@ -595,22 +612,39 @@ defmodule Breeze.Server do
 
   defp sync_input_message?(_, _state), do: false
 
-  defp coalesce_wheel_events_from_queue(event, %{queued_input: [next | rest]} = state, repeat) do
-    case next do
-      {:mouse, %{button: button} = next_event} ->
+  defp coalesce_wheel_events_from_queue(event, state, repeat) do
+    case queue_out(state.queued_input) do
+      {{:value, {:mouse, %{button: button} = next_event}}, queue} ->
         if button == event.button and wheel_match?(event, next_event) do
-          coalesce_wheel_events_from_queue(event, %{state | queued_input: rest}, repeat + 1)
+          coalesce_wheel_events_from_queue(event, %{state | queued_input: queue}, repeat + 1)
         else
           {Map.put(event, :repeat, repeat), state}
         end
 
-      _ ->
+      {{:value, _next}, _queue} ->
+        {Map.put(event, :repeat, repeat), state}
+
+      {:empty, _queue} ->
         {Map.put(event, :repeat, repeat), state}
     end
   end
 
-  defp coalesce_wheel_events_from_queue(event, state, repeat),
-    do: {Map.put(event, :repeat, repeat), state}
+  defp coalesce_printable_keys_from_queue(key, state) do
+    case queue_out(state.queued_input) do
+      {{:value, {:key, next_key}}, queue} ->
+        if batchable_printable_input?(next_key, state) do
+          coalesce_printable_keys_from_queue(key <> next_key, %{state | queued_input: queue})
+        else
+          {key, state}
+        end
+
+      {{:value, _next}, _queue} ->
+        {key, state}
+
+      {:empty, _queue} ->
+        {key, state}
+    end
+  end
 
   defp wheel_match?(left, right) do
     left.action == right.action and left.x == right.x and left.y == right.y and
@@ -664,6 +698,10 @@ defmodule Breeze.Server do
     key in ["\t", "ShiftTab"] or focused_implicit?(state)
   end
 
+  defp batchable_printable_input?(key, state) do
+    raw_printable_key?(key) and focused_implicit_captures_printable_key?(state, key)
+  end
+
   defp stop_global_key?(key, state) do
     Breeze.GlobalKeybindings.stop_action?(%{"key" => key}, state)
   end
@@ -679,6 +717,13 @@ defmodule Breeze.Server do
   defp focused_implicit_meta(state) do
     Map.get(focused_child_or_root_metadata(state), :focused_implicit_meta, %{})
   end
+
+  defp focused_implicit_captures_printable_key?(state, key) when is_binary(key) do
+    raw_printable_key?(key) and
+      match?(%{captures_printable_keys: true}, focused_implicit_meta(state))
+  end
+
+  defp focused_implicit_captures_printable_key?(_state, _key), do: false
 
   defp focused_child_or_root_metadata(state) do
     case focused_child_chain(state) do
@@ -1552,7 +1597,7 @@ defmodule Breeze.Server do
     |> Map.new(fn {id, dims} -> {id, Breeze.Viewport.from_dimensions(dims)} end)
   end
 
-  defp patchable_live_child?("debug"), do: true
+  defp patchable_live_child?(child_id) when is_binary(child_id), do: true
   defp patchable_live_child?(_child_id), do: false
 
   defp debug_child_id?("debug"), do: true
@@ -1657,7 +1702,7 @@ defmodule Breeze.Server do
     |> Map.put(:pending_ref, nil)
     |> Map.put(:pending_started_at, nil)
     |> Map.put(:input_flush_scheduled?, false)
-    |> Map.put(:queued_input, [])
+    |> Map.put(:queued_input, :queue.new())
     |> Map.put(:animation_timer, nil)
     |> Map.put(:next_tick_at, nil)
     |> Map.put(:decorations, [])
@@ -1734,7 +1779,7 @@ defmodule Breeze.Server do
         |> Map.put(:last_overlays, [])
         |> Map.put(:pending_ref, nil)
         |> Map.put(:pending_started_at, nil)
-        |> Map.put(:queued_input, [])
+        |> Map.put(:queued_input, :queue.new())
         |> Map.put(:input_flush_scheduled?, false)
         |> maybe_render_base(cause)
 
@@ -2315,13 +2360,11 @@ defmodule Breeze.Server do
     end
   end
 
-  defp enqueue_input(state, decoded) do
-    update_in(state.queued_input, &(&1 ++ [decoded]))
-  end
+  defp enqueue_input(state, decoded), do: update_in(state.queued_input, &:queue.in(decoded, &1))
 
   defp schedule_input_flush(%{input_flush_scheduled?: true} = state), do: state
 
-  defp schedule_input_flush(%{queued_input: []} = state), do: state
+  defp schedule_input_flush(%{queued_input: {[], []}} = state), do: state
 
   defp schedule_input_flush(state) do
     send(self(), @flush_input_batch)
@@ -2429,6 +2472,24 @@ defmodule Breeze.Server do
         reply
     end
   end
+
+  defp queue_out(queue), do: :queue.out(queue)
+
+  defp queue_peek(queue) do
+    case :queue.peek(queue) do
+      :empty -> :empty
+      value -> {:value, value}
+    end
+  end
+
+  defp raw_printable_key?(key) when is_binary(key) do
+    String.length(key) == 1 and key not in ["\n", "\r", "\t", "\v", "\f"] and
+      String.printable?(key) and not String.match?(key, ~r/[\x00-\x1F\x7F]/u)
+  end
+
+  defp raw_printable_key?(_key), do: false
+
+  defp batched_printable_event(key), do: %{"key" => key, "__batched_printable__" => true}
 
   defp focused_child_chain(%{focused: nil}), do: []
 

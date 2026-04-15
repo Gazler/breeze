@@ -111,13 +111,43 @@ defmodule PostingTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      not state.input_flush_scheduled? and state.queued_input == []
+      not state.input_flush_scheduled? and :queue.is_empty(state.queued_input)
     end)
 
     state = :sys.get_state(pid)
 
     refute state.input_flush_scheduled?
-    assert state.queued_input == []
+    assert :queue.is_empty(state.queued_input)
+
+    Process.exit(pid, :normal)
+  end
+
+  test "server drains a burst of printable input for posting" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: Posting,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    Enum.each(1..100, fn _ -> send(pid, {reader, {:data, "x"}}) end)
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      term = :sys.get_state(state.view_pid)
+
+      not state.input_flush_scheduled? and :queue.is_empty(state.queued_input) and
+        String.ends_with?(term.assigns.url, String.duplicate("x", 100))
+    end)
+
+    state = :sys.get_state(pid)
+    term = :sys.get_state(state.view_pid)
+
+    assert :queue.is_empty(state.queued_input)
+    assert String.ends_with?(term.assigns.url, String.duplicate("x", 100))
 
     Process.exit(pid, :normal)
   end
@@ -140,7 +170,7 @@ defmodule PostingTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      not state.input_flush_scheduled? and state.queued_input == []
+      not state.input_flush_scheduled? and :queue.is_empty(state.queued_input)
     end)
 
     assert %{enabled?: false, visible?: false, selected_id: nil} =
@@ -262,7 +292,9 @@ defmodule PostingTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      Process.alive?(pid) and not state.input_flush_scheduled? and state.queued_input == []
+
+      Process.alive?(pid) and not state.input_flush_scheduled? and
+        :queue.is_empty(state.queued_input)
     end)
 
     assert Process.alive?(pid)

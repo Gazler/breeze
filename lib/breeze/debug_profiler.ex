@@ -28,7 +28,20 @@ defmodule Breeze.DebugProfiler do
     ensure_table()
     ensure_handler()
 
-    :ets.match_object(@table, {{scope, :_, :_}, :_})
+    entries = :ets.match_object(@table, {{scope, :_, :_}, :_})
+
+    :ets.select_delete(
+      @table,
+      [
+        {
+          {{scope, :"$1", :"$2"}, :_},
+          [],
+          [true]
+        }
+      ]
+    )
+
+    entries
     |> Enum.map(fn {{^scope, label, metric}, value} ->
       %{label: label, metric: metric, value: value}
     end)

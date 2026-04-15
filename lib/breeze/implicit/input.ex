@@ -99,11 +99,15 @@ defmodule Breeze.Implicit.Input do
       else: change(%{state | cursor: end_cursor} |> normalize_state())
   end
 
-  def handle_event(_, %{"key" => key}, state) do
-    if insertable_key?(key) do
+  def handle_event(_, %{"key" => key} = event, state) do
+    if insertable_key?(key, event) do
       {before, rest} = split_value(state.value, state.cursor)
       value = before <> key <> rest
-      change(%{state | value: value, cursor: state.cursor + 1} |> normalize_state())
+
+      change(
+        %{state | value: value, cursor: state.cursor + String.length(key)}
+        |> normalize_state()
+      )
     else
       {:noreply, state}
     end
@@ -292,14 +296,22 @@ defmodule Breeze.Implicit.Input do
     |> Enum.join()
   end
 
-  defp insertable_key?(key) when is_binary(key) do
+  defp insertable_key?(key, %{"__batched_printable__" => true}) when is_binary(key) do
+    key != "" and
+      String.printable?(key) and
+      Enum.all?(String.graphemes(key), fn grapheme ->
+        not control_character?(grapheme) and grapheme not in ["\n", "\r", "\t", "\v", "\f"]
+      end)
+  end
+
+  defp insertable_key?(key, _event) when is_binary(key) do
     String.length(key) == 1 and
       not control_character?(key) and
       String.printable?(key) and
       key not in ["\n", "\r", "\t", "\v", "\f"]
   end
 
-  defp insertable_key?(_key), do: false
+  defp insertable_key?(_key, _event), do: false
 
   defp control_character?(<<codepoint::utf8>>) when codepoint < 32, do: true
   defp control_character?(<<"\x7f">>), do: true
