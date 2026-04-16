@@ -267,6 +267,21 @@ defmodule Breeze.Implicit.InputTest do
              })
   end
 
+  test "animate positions the overlay by terminal cell width for wide characters" do
+    assert {:ok, %Box{content: "a好b"}, overlays: [%{x: 3, y: 0, char: "b", visible?: true}]} =
+             Input.animate(
+               :root,
+               %Box{content: "a好b"},
+               [focused: true],
+               %{value: "a好b", cursor: 2},
+               %{
+                 layout: %{left: 0, top: 0},
+                 now: 0,
+                 last_interaction_at: nil
+               }
+             )
+  end
+
   test "animate keeps the overlay visible right after interaction" do
     box = %Box{content: "hello", style: %BackBreeze.Style{border: BackBreeze.Border.line()}}
 
@@ -292,6 +307,51 @@ defmodule Breeze.Implicit.InputTest do
                %{value: "hello world", cursor: 11, viewport_width: 6},
                %{
                  layout: %{left: 6, top: 4},
+                 now: 0,
+                 last_interaction_at: nil
+               }
+             )
+  end
+
+  test "animate scrolls wide characters without splitting their cell width" do
+    assert {:ok, %Box{content: " bc"}, overlays: [%{x: 3, y: 0, char: " ", visible?: true}]} =
+             Input.animate(
+               :root,
+               %Box{content: "a好bc"},
+               [focused: true],
+               %{value: "a好bc", cursor: 4, viewport_width: 4},
+               %{
+                 layout: %{left: 0, top: 0},
+                 now: 0,
+                 last_interaction_at: nil
+               }
+             )
+  end
+
+  test "animate preserves cell alignment when scrolling through repeated wide characters" do
+    assert {:ok, %Box{content: " 好"}, overlays: [%{x: 3, y: 0, char: " ", visible?: true}]} =
+             Input.animate(
+               :root,
+               %Box{content: "好好"},
+               [focused: true],
+               %{value: "好好", cursor: 2, viewport_width: 4},
+               %{
+                 layout: %{left: 0, top: 0},
+                 now: 0,
+                 last_interaction_at: nil
+               }
+             )
+  end
+
+  test "animate preserves alignment when a prefixed viewport clips into repeated wide characters" do
+    assert {:ok, %Box{content: " 好"}, overlays: [%{x: 3, y: 0, char: " ", visible?: true}]} =
+             Input.animate(
+               :root,
+               %Box{content: "a好好"},
+               [focused: true],
+               %{value: "a好好", cursor: 3, viewport_width: 4},
+               %{
+                 layout: %{left: 0, top: 0},
                  now: 0,
                  last_interaction_at: nil
                }

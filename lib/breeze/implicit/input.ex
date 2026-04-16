@@ -1,6 +1,7 @@
 defmodule Breeze.Implicit.Input do
   @moduledoc false
 
+  alias BackBreeze.Ucwidth
   alias Breeze.Theme
 
   @type state :: %{
@@ -196,11 +197,15 @@ defmodule Breeze.Implicit.Input do
   end
 
   defp display_cursor_index(content, %{value: value, cursor: cursor}) when is_binary(content) do
-    prefix_len(content, value) + cursor
+    clamped_cursor = min(max(cursor, 0), String.length(value))
+
+    prefix_display_width(content, value) +
+      display_width(take_graphemes(value, clamped_cursor)) +
+      max(cursor - clamped_cursor, 0)
   end
 
   defp cursor_char(content, display_cursor) when is_binary(content) do
-    String.at(content, display_cursor) || " "
+    grapheme_at_display_column(content, display_cursor) || " "
   end
 
   defp source_content(_content, %{value: "", placeholder: placeholder})
@@ -227,13 +232,17 @@ defmodule Breeze.Implicit.Input do
        when is_binary(content) and is_integer(width) and width > 0 do
     width = content_viewport_width(width, box)
     display_cursor = display_cursor_index(content, state)
-    content_length = String.length(content)
+    content_width = display_width(content)
     scrolled? = display_cursor >= width and width > 1
     visible_width = visible_width(scrolled?, width)
-    scroll_left = scroll_left(display_cursor, visible_width, content_length)
-    visible_cursor = visible_cursor_index(display_cursor, scroll_left, width, scrolled?)
+    scroll_left = scroll_left(display_cursor, visible_width, content_width)
 
-    {slice_graphemes(content, scroll_left, visible_width), visible_cursor}
+    {visible_content, actual_scroll_left} =
+      slice_display_columns(content, scroll_left, visible_width)
+
+    visible_cursor = visible_cursor_index(display_cursor, actual_scroll_left, width, scrolled?)
+
+    {visible_content, visible_cursor}
   end
 
   defp render_visible_content(content, state, _layout, _box) when is_binary(content) do
@@ -273,7 +282,7 @@ defmodule Breeze.Implicit.Input do
     min(max(display_cursor - scroll_left, 0), max(width - 1, 0))
   end
 
-  defp prefix_len(content, value) when is_binary(content) and is_binary(value) do
+  defp prefix_display_width(content, value) when is_binary(content) and is_binary(value) do
     cond do
       value == "" and String.starts_with?(content, " ") ->
         1
@@ -283,17 +292,91 @@ defmodule Breeze.Implicit.Input do
 
       true ->
         case String.split(content, value, parts: 2) do
-          [prefix, _suffix] -> String.length(prefix)
+          [prefix, _suffix] -> display_width(prefix)
           _ -> 0
         end
     end
   end
 
-  defp slice_graphemes(content, start, visible_width) do
-    content
+  defp slice_display_columns(content, start, visible_width) do
+    {_column, graphemes, actual_start, _used_width} =
+      Enum.reduce_while(String.graphemes(content), {0, [], nil, 0}, fn grapheme,
+                                                                       {column, acc, actual_start,
+                                                                        used_width} ->
+        grapheme_width = grapheme_width(grapheme)
+        next_column = column + grapheme_width
+
+        cond do
+          next_column <= start ->
+            {:cont, {next_column, acc, actual_start, used_width}}
+
+          column < start ->
+            clipped_width = next_column - start
+
+            if clipped_width <= visible_width do
+              {:cont,
+               {next_column, [String.duplicate(" ", clipped_width) | acc], start,
+                used_width + clipped_width}}
+            else
+              {:halt, {column, acc, actual_start, used_width}}
+            end
+
+          used_width + grapheme_width <= visible_width ->
+            {:cont,
+             {next_column, [grapheme | acc], actual_start || column, used_width + grapheme_width}}
+
+          used_width < visible_width ->
+            trailing_width = visible_width - used_width
+
+            {:halt,
+             {column, [String.duplicate(" ", trailing_width) | acc], actual_start || column,
+              visible_width}}
+
+          true ->
+            {:halt, {column, acc, actual_start, used_width}}
+        end
+      end)
+
+    {graphemes |> Enum.reverse() |> Enum.join(), actual_start || start}
+  end
+
+  defp take_graphemes(value, count) when is_binary(value) and is_integer(count) and count > 0 do
+    value
     |> String.graphemes()
-    |> Enum.slice(start, visible_width)
+    |> Enum.take(count)
     |> Enum.join()
+  end
+
+  defp take_graphemes(_value, _count), do: ""
+
+  defp display_width(value) when is_binary(value) do
+    value
+    |> String.graphemes()
+    |> Enum.reduce(0, fn grapheme, total -> total + grapheme_width(grapheme) end)
+  end
+
+  defp grapheme_at_display_column(content, display_column)
+       when is_binary(content) and display_column >= 0 do
+    {grapheme, _column} =
+      Enum.reduce_while(String.graphemes(content), {nil, 0}, fn grapheme, {_found, column} ->
+        width = grapheme_width(grapheme)
+
+        cond do
+          column == display_column -> {:halt, {grapheme, column}}
+          column > display_column -> {:halt, {nil, column}}
+          true -> {:cont, {nil, column + width}}
+        end
+      end)
+
+    grapheme
+  end
+
+  defp grapheme_at_display_column(_content, _display_column), do: nil
+
+  defp grapheme_width(grapheme) when is_binary(grapheme) do
+    grapheme
+    |> Ucwidth.width()
+    |> max(0)
   end
 
   defp insertable_key?(key, %{"__batched_printable__" => true}) when is_binary(key) do

@@ -152,6 +152,27 @@ defmodule PostingTest do
     Process.exit(pid, :normal)
   end
 
+  test "posting keeps repeated wide characters contiguous in the url row" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    for key <- String.graphemes(String.duplicate("好", 6)) do
+      assert {:noreply, "url", true} = Breeze.ChildServer.dispatch_input(pid, key)
+    end
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    url_row =
+      box.content
+      |> visible()
+      |> String.split("\n")
+      |> Enum.at(3)
+
+    assert url_row =~ "posts好好好好好好"
+  end
+
   test "inspector is opt-in and stays disabled by default" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader
