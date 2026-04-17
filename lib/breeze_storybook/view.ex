@@ -7,14 +7,17 @@ defmodule Breeze.Storybook.View do
 
   def mount(opts, term) do
     story_directory = Keyword.get(opts, :directory, "storybook")
-    stories = Registry.stories(story_directory)
-    current = Registry.first_story(story_directory)
+    story_file = Keyword.get(opts, :file)
+    registry_opts = storybook_registry_opts(story_file)
+    stories = Registry.stories(story_directory, registry_opts)
+    current = Registry.first_story(story_directory, registry_opts)
 
     {:ok,
      term
      |> Map.put(:global_keybindings, storybook_global_keybindings())
      |> assign(
        story_directory: story_directory,
+       story_file: story_file,
        stories: stories,
        current_story_id: current && current.id,
        current_variant_id: first_variant_id(current),
@@ -67,7 +70,11 @@ defmodule Breeze.Storybook.View do
           </box>
         </.panel>
         <box class="bg-panel width-full height-full">
-          <.panel id="storybook-preview-panel" class={"width-full height-#{@preview_panel_height}"}>
+          <.panel
+            id="storybook-preview-panel"
+            class={"width-full height-#{@preview_panel_height}"}
+            focus_within={false}
+          >
             <:title>{@preview_title}</:title>
             <box class="width-full height-full bg-panel overflow-hidden">
               <box
@@ -90,47 +97,48 @@ defmodule Breeze.Storybook.View do
                 </box>
                 <box class="text-muted">{@story_description}</box>
                 <box
-                  class={"absolute left-0 top-#{@preview_story_top} width-#{@preview_story_width} height-#{@preview_story_height} overflow-hidden"}
+                  class={"absolute left-0 top-#{@preview_story_top} width-#{@preview_story_width} height-#{@preview_story_height} overflow-hidden bg-panel"}
                 >
                   <live
                     id="storybook-preview"
                     view={@current_story.module}
                     start_opts={[directory: @current_story.directory, file: @current_story.file]}
                     assigns={@preview_story_assigns}
-                    class={"width-#{@preview_story_width} height-#{@preview_story_height}"}
+                    class={"width-#{@preview_story_width} height-#{@preview_story_height} bg-panel"}
                   >
                   </live>
                 </box>
               </box>
             </box>
           </.panel>
-          <.panel
-            id="storybook-details"
-            class="width-full height-full"
-            scroll
-            scroll_class="width-full height-full bg-panel focus:scrollbar-primary"
-          >
+          <.panel id="storybook-details" class="width-full height-full" focus_within={false}>
             <:title>{@details_title}</:title>
-            <box class="bold">Description</box>
-            <box class="text-muted">{@story_description}</box>
-            <box>
+            <box
+              id="storybook-details-scroll"
+              implicit={Breeze.Implicit.Scroll}
+              class="width-full height-full bg-panel overflow-scroll scrollbar-arrows"
+            >
+              <box class="bold">Description</box>
+              <box class="text-muted">{@story_description}</box>
+              <box>
+              </box>
+              <box class="text-muted">Group: {@current_story.group}</box>
+              <box class="text-muted">Module: {inspect(@current_story.module)}</box>
+              <box :if={@story_source} class="text-muted">Source: {@story_source}</box>
+              <box>
+              </box>
+              <box class="bold">Notes</box>
+              <box :for={note <- @story_notes} class="text-muted">• {note}</box>
+              <box :if={@story_notes == []} class="text-muted">No notes yet.</box>
+              <box>
+              </box>
+              <box class="bold">Discovered Blocks</box>
+              <box class="text-muted">{Enum.map_join(@discovered_components, ", ", & &1.id)}</box>
+              <box>
+              </box>
+              <box class="bold">Missing Stories</box>
+              <box class="text-muted">{@inventory_summary}</box>
             </box>
-            <box class="text-muted">Group: {@current_story.group}</box>
-            <box class="text-muted">Module: {inspect(@current_story.module)}</box>
-            <box :if={@story_source} class="text-muted">Source: {@story_source}</box>
-            <box>
-            </box>
-            <box class="bold">Notes</box>
-            <box :for={note <- @story_notes} class="text-muted">• {note}</box>
-            <box :if={@story_notes == []} class="text-muted">No notes yet.</box>
-            <box>
-            </box>
-            <box class="bold">Discovered Blocks</box>
-            <box class="text-muted">{Enum.map_join(@discovered_components, ", ", & &1.id)}</box>
-            <box>
-            </box>
-            <box class="bold">Missing Stories</box>
-            <box class="text-muted">{@inventory_summary}</box>
           </.panel>
         </box>
       </box>
@@ -148,7 +156,12 @@ defmodule Breeze.Storybook.View do
   end
 
   def handle_event("select_story", %{value: story_id}, term) do
-    story = Registry.story(story_id, term.assigns.story_directory)
+    story =
+      Registry.story(
+        story_id,
+        term.assigns.story_directory,
+        storybook_registry_opts(term.assigns[:story_file])
+      )
 
     {:noreply,
      term
@@ -208,7 +221,7 @@ defmodule Breeze.Storybook.View do
 
   defp current_story(assigns) do
     Enum.find(assigns.stories, &(&1.id == assigns.current_story_id)) ||
-      Registry.first_story(assigns.story_directory)
+      Registry.first_story(assigns.story_directory, storybook_registry_opts(assigns[:story_file]))
   end
 
   defp current_variant(story, current_variant_id) do
@@ -319,7 +332,10 @@ defmodule Breeze.Storybook.View do
   defp step_variant(term, delta) do
     story =
       Enum.find(term.assigns.stories, &(&1.id == term.assigns.current_story_id)) ||
-        Registry.first_story(term.assigns.story_directory)
+        Registry.first_story(
+          term.assigns.story_directory,
+          storybook_registry_opts(term.assigns[:story_file])
+        )
 
     variants = Map.get(story, :variants, [])
     count = length(variants)
@@ -344,7 +360,7 @@ defmodule Breeze.Storybook.View do
 
     current_story =
       term.assigns
-      |> Map.take([:stories, :current_story_id, :story_directory])
+      |> Map.take([:stories, :current_story_id, :story_directory, :story_file])
       |> current_story()
 
     preview_panel_width = max(screen_width - 27, 20)
@@ -359,4 +375,7 @@ defmodule Breeze.Storybook.View do
       preview_story_height: preview_story_height
     )
   end
+
+  defp storybook_registry_opts(nil), do: []
+  defp storybook_registry_opts(file), do: [file: file]
 end

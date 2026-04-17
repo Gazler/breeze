@@ -1,38 +1,49 @@
 defmodule Breeze.Storybook.Registry do
   @moduledoc false
 
-  def story_modules(directory \\ default_directory()) do
+  def story_modules(directory \\ default_directory(), opts \\ []) do
     directory
-    |> story_entries()
+    |> story_entries(opts)
     |> Enum.map(& &1.module)
   end
 
-  def stories(directory \\ default_directory()) do
+  def stories(directory \\ default_directory(), opts \\ []) do
     directory
-    |> story_entries()
+    |> story_entries(opts)
     |> Enum.map(fn %{module: module, file: file} -> normalize_story(module, file) end)
     |> Enum.sort_by(&{&1.group, &1.title})
   end
 
-  def story(id, directory \\ default_directory()) when is_binary(id) do
-    Enum.find(stories(directory), &(&1.id == id))
+  def story(id, directory \\ default_directory(), opts \\ []) when is_binary(id) do
+    Enum.find(stories(directory, opts), &(&1.id == id))
   end
 
-  def first_story(directory \\ default_directory()) do
-    List.first(stories(directory))
+  def first_story(directory \\ default_directory(), opts \\ []) do
+    List.first(stories(directory, opts))
   end
 
   defp default_directory do
     Path.expand("../../storybook", __DIR__)
   end
 
-  defp story_entries(directory) do
+  defp story_entries(directory, opts) do
     directory
-    |> expand_directory()
-    |> Path.join("*.story.exs")
-    |> Path.wildcard()
-    |> Enum.sort()
+    |> story_files(opts)
     |> Enum.flat_map(&load_story_entry/1)
+  end
+
+  defp story_files(directory, opts) do
+    case Keyword.get(opts, :file) do
+      nil ->
+        directory
+        |> expand_directory()
+        |> Path.join("*.story.exs")
+        |> Path.wildcard()
+        |> Enum.sort()
+
+      file ->
+        [expand_story_file(directory, file)]
+    end
   end
 
   defp load_story_entry(file) do
@@ -48,6 +59,23 @@ defmodule Breeze.Storybook.Registry do
     case Path.type(directory) do
       :absolute -> directory
       _ -> Path.expand("../../#{directory}", __DIR__)
+    end
+  end
+
+  defp expand_story_file(directory, file) do
+    case Path.type(file) do
+      :absolute ->
+        file
+
+      _ ->
+        expanded_directory = expand_directory(directory)
+        candidate = Path.expand(file, expanded_directory)
+
+        if File.exists?(candidate) do
+          candidate
+        else
+          Path.expand(file)
+        end
     end
   end
 

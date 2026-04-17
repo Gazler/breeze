@@ -96,7 +96,8 @@ defmodule Breeze.Server do
     rendered_flags: %{},
     rendered_focus_meta: %{},
     rendered_implicit_state: %{},
-    rendered_implicit_meta: %{}
+    rendered_implicit_meta: %{},
+    pending_sync_child_render_id: nil
   ]
 
   @type option ::
@@ -183,7 +184,10 @@ defmodule Breeze.Server do
         apply_theme_defaults?: apply_theme_defaults?,
         server: self(),
         global_keybindings: Keyword.get(opts, :global_keybindings, []),
-        invalidate: fn -> send(session, :child_invalidated) end
+        invalidate: fn
+          nil -> send(session, :child_invalidated)
+          child_id -> send(session, {:child_invalidated, child_id})
+        end
       )
 
     Process.monitor(view_pid)
@@ -569,14 +573,14 @@ defmodule Breeze.Server do
             key when key in ["\t", "ShiftTab"] ->
               state
               |> touch_interaction()
-              |> safe_apply_input_reply(fn state ->
-                Breeze.ChildServer.dispatch_input(state.view_pid, key)
+              |> safe_apply_tab_input_reply(fn state ->
+                Breeze.ChildServer.dispatch_input(state.view_pid, key, invalidate: false)
               end)
 
             key ->
               state
               |> touch_interaction()
-              |> safe_apply_input_reply(fn state ->
+              |> safe_apply_hierarchy_input_reply(fn state ->
                 dispatch_input_hierarchy(state, key)
               end)
           end
@@ -684,6 +688,16 @@ defmodule Breeze.Server do
 
       {:noreply, focused, _consumed} ->
         {:noreply, Map.put(state, :focused, focused)}
+    end
+  end
+
+  defp apply_hierarchy_input_reply(state, reply) do
+    case apply_input_reply(state, reply) do
+      {:noreply, next_state} ->
+        {:noreply, maybe_schedule_sync_child_render(next_state, state.focused, reply)}
+
+      other ->
+        other
     end
   end
 
@@ -875,6 +889,7 @@ defmodule Breeze.Server do
     case render_invalidated_child(state, child_id) do
       {:ok, state} -> state
       {:crash, state} -> state
+      {:error, _reason} -> maybe_render_base(state, :child_invalidated)
       :error -> maybe_render_base(state, :child_invalidated)
     end
   end
@@ -910,6 +925,14 @@ defmodule Breeze.Server do
   end
 
   defp maybe_render_after_input(%{pending_ref: ref} = state) when not is_nil(ref), do: state
+
+  defp maybe_render_after_input(%{pending_sync_child_render_id: child_id} = state)
+       when is_binary(child_id) do
+    state
+    |> Map.put(:pending_sync_child_render_id, nil)
+    |> maybe_render_invalidated_child(child_id)
+  end
+
   defp maybe_render_after_input(state), do: maybe_render_base(state, :input_flush)
 
   defp force_full_redraw(state, cause) do
@@ -1019,8 +1042,9 @@ defmodule Breeze.Server do
   defp render_invalidated_child(state, child_id) do
     try do
       with true <- patchable_live_child?(child_id),
-           %{pid: pid, view: view} <- Map.get(state.children, child_id),
+           %{pid: pid, view: view} = child <- Map.get(state.children, child_id),
            %Breeze.Viewport{} = viewport <- Map.get(state.rendered_elements, child_id) do
+        child_terminal = live_child_terminal(state.terminal, viewport)
         tracking_ref = begin_render_tracking()
         profile_scope = make_ref()
         Breeze.DebugProfiler.reset(profile_scope)
@@ -1031,7 +1055,7 @@ defmodule Breeze.Server do
                  Breeze.ChildServer.render_snapshot(pid,
                    focused: strip_live_prefix(state.focused, child_id),
                    implicit_state: %{},
-                   terminal: state.terminal,
+                   terminal: child_terminal,
                    theme: state.theme,
                    live_prefix: child_id,
                    render_tracking_ref: tracking_ref,
@@ -1054,21 +1078,25 @@ defmodule Breeze.Server do
 
         child_render_us = System.monotonic_time(:microsecond) - started_at
 
-        %{missing: missing, decorations: tracked_decorations, child_timings: child_timings} =
+        %{missing: missing, decorations: tracked_decorations, child_timings: _child_timings} =
           finish_render_tracking(tracking_ref)
 
         cond do
           missing != [] ->
-            :error
+            {:error, {:missing_live_children, missing}}
 
-          child_decorations != [] or tracked_decorations != [] or child_timings != [] ->
-            :error
+          child_decorations != [] or tracked_decorations != [] ->
+            {:error,
+             {:decorations_present, %{child: child_decorations, tracked: tracked_decorations}}}
 
           true ->
             fragment =
               child_box
-              |> wrap_child_fragment(viewport)
-              |> BackBreeze.Box.render(terminal: state.terminal)
+              |> wrap_child_fragment(
+                viewport,
+                live_placeholder_style(child, state, child_terminal)
+              )
+              |> BackBreeze.Box.render(terminal: child_terminal)
               |> Map.fetch!(:content)
 
             composed_at = System.monotonic_time(:microsecond)
@@ -1083,8 +1111,7 @@ defmodule Breeze.Server do
               state
               |> Map.put(:terminal, terminal)
               |> Map.put(:last_frame_payload, nil)
-              |> Map.put(:last_frame_lines, nil)
-              |> Map.put(:last_overlays, [])
+              |> Map.update(:last_frame_lines, nil, &invalidate_patched_rows(&1, viewport))
 
             next_state =
               if debug_child_id?(child_id) do
@@ -1116,7 +1143,9 @@ defmodule Breeze.Server do
             {:ok, next_state}
         end
       else
-        _ -> :error
+        false -> {:error, :not_patchable}
+        nil -> {:error, :missing_child}
+        _ -> {:error, :missing_viewport}
       end
     catch
       {:crash_state, crash_state} -> {:crash, crash_state}
@@ -1218,6 +1247,22 @@ defmodule Breeze.Server do
       {_pair, row}, acc -> MapSet.put(acc, row)
     end)
   end
+
+  defp invalidate_patched_rows(nil, _viewport), do: nil
+
+  defp invalidate_patched_rows(lines, %{top: top, height: height})
+       when is_list(lines) and is_integer(top) and is_integer(height) and height > 0 do
+    last_row = top + height - 1
+
+    lines
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {_line, row} when row >= top and row <= last_row -> nil
+      {line, _row} -> line
+    end)
+  end
+
+  defp invalidate_patched_rows(lines, _viewport), do: lines
 
   defp changed_overlay_rows(prev_overlays, overlays) do
     prev_map = overlay_row_map(prev_overlays)
@@ -1649,31 +1694,29 @@ defmodule Breeze.Server do
   defp debug_child_id?("debug"), do: true
   defp debug_child_id?(_child_id), do: false
 
-  defp wrap_child_fragment(child_box, viewport) do
+  defp wrap_child_fragment(child_box, viewport, fill_style) do
+    fill_style = fill_style || %{}
+
     BackBreeze.Box.new(
-      style: %{width: viewport.width, height: viewport.height, overflow: :hidden},
+      style:
+        Map.merge(fill_style, %{
+          width: viewport.width,
+          height: viewport.height,
+          overflow: :hidden
+        }),
       children: [child_box]
     )
   end
 
   defp child_patch_payload(fragment, viewport) do
     fragment
-    |> :binary.split("\n", [:global])
+    |> child_patch_lines(viewport.height)
     |> Enum.with_index()
     |> Enum.map(fn {line, row_offset} ->
       row = Integer.to_string(viewport.top + row_offset + 1)
       col = Integer.to_string(viewport.left + 1)
-      width = Integer.to_string(viewport.width)
 
       [
-        "\e[",
-        row,
-        ";",
-        col,
-        "H",
-        "\e[",
-        width,
-        "X",
         "\e[",
         row,
         ";",
@@ -1683,6 +1726,71 @@ defmodule Breeze.Server do
       ]
     end)
     |> IO.iodata_to_binary()
+  end
+
+  # Child patches must repaint the full live viewport height so stale rows from a
+  # larger prior child frame do not bleed through after the child shrinks.
+  defp child_patch_lines(fragment, height) when is_integer(height) and height > 0 do
+    lines =
+      fragment
+      |> :binary.split("\n", [:global])
+      |> Enum.take(height)
+
+    lines ++ List.duplicate("", max(height - length(lines), 0))
+  end
+
+  defp child_patch_lines(fragment, _height), do: :binary.split(fragment, "\n", [:global])
+
+  defp live_placeholder_style(%{attrs: attrs}, state, terminal) when is_list(attrs) or is_map(attrs) do
+    style_state =
+      Breeze.Style.empty()
+      |> Breeze.Style.put_class(fetch_live_attr(attrs, :class, nil))
+      |> Breeze.Style.put_style(fetch_live_attr(attrs, :style, nil))
+
+    element =
+      Breeze.Style.to_element(style_state,
+        theme: state.theme,
+        terminal: terminal,
+        apply_theme_defaults: state.apply_theme_defaults?
+      )
+
+    element.style
+    |> Map.take([:background_color, :foreground_color, :bold, :italic, :reverse])
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+  end
+
+  defp live_placeholder_style(_child, _state, _terminal), do: %{}
+
+  defp live_child_terminal(terminal, %{width: width, height: height} = viewport) do
+    width = live_child_terminal_dimension(width, Map.get(viewport, :viewport_width))
+    height = live_child_terminal_dimension(height, Map.get(viewport, :viewport_height))
+
+    if is_integer(width) and width > 0 and is_integer(height) and height > 0 do
+      resize_virtual_terminal(terminal, width, height)
+    else
+      terminal
+    end
+  end
+
+  defp live_child_terminal(terminal, _viewport), do: terminal
+
+  defp live_child_terminal_dimension(primary, _secondary)
+       when is_integer(primary) and primary > 0,
+       do: primary
+
+  defp live_child_terminal_dimension(_primary, secondary)
+       when is_integer(secondary) and secondary > 0,
+       do: secondary
+
+  defp live_child_terminal_dimension(_primary, _secondary), do: nil
+
+  defp resize_virtual_terminal(%Termite.Terminal{} = terminal, width, height) do
+    %{terminal | size: %{width: width, height: height}}
+  end
+
+  defp resize_virtual_terminal(nil, width, height) do
+    %Termite.Terminal{size: %{width: width, height: height}}
   end
 
   defp stop(state) do
@@ -1710,6 +1818,63 @@ defmodule Breeze.Server do
       {:crash, crash} -> {:noreply, enter_crash_state(state, crash)}
     end
   end
+
+  defp safe_apply_tab_input_reply(state, fun) do
+    previous_focused = state.focused
+
+    case safe_call(fn -> fun.(state) end) do
+      {:ok, {:crash, crash}} ->
+        {:noreply, enter_crash_state(state, crash)}
+
+      {:ok, reply} ->
+        apply_tab_input_reply(state, previous_focused, reply)
+
+      {:crash, crash} ->
+        {:noreply, enter_crash_state(state, crash)}
+    end
+  end
+
+  defp safe_apply_hierarchy_input_reply(state, fun) do
+    case safe_call(fn -> fun.(state) end) do
+      {:ok, {:crash, crash}} -> {:noreply, enter_crash_state(state, crash)}
+      {:ok, reply} -> apply_hierarchy_input_reply(state, reply)
+      {:crash, crash} -> {:noreply, enter_crash_state(state, crash)}
+    end
+  end
+
+  defp apply_tab_input_reply(state, previous_focused, reply) do
+    case apply_input_reply(state, reply) do
+      {:noreply, next_state} ->
+        {:noreply, maybe_schedule_sync_child_render(next_state, previous_focused, reply)}
+
+      other ->
+        other
+    end
+  end
+
+  defp maybe_schedule_sync_child_render(state, previous_focused, {:noreply, focused, true}),
+    do: put_sync_child_render_id(state, previous_focused, focused)
+
+  defp maybe_schedule_sync_child_render(state, _previous_focused, _reply), do: state
+
+  defp put_sync_child_render_id(state, previous_focused, focused) do
+    case live_child_id_for_focus(state, focused) ||
+           live_child_id_for_focus(state, previous_focused) do
+      nil -> state
+      child_id -> Map.put(state, :pending_sync_child_render_id, child_id)
+    end
+  end
+
+  defp live_child_id_for_focus(%{children: children}, focused) when is_binary(focused) do
+    children
+    |> Map.keys()
+    |> Enum.filter(fn child_id ->
+      focused == child_id or String.starts_with?(focused, child_id <> "::")
+    end)
+    |> Enum.max_by(&String.length/1, fn -> nil end)
+  end
+
+  defp live_child_id_for_focus(_state, _focused), do: nil
 
   defp safe_call(fun) when is_function(fun, 0) do
     try do
@@ -2226,6 +2391,7 @@ defmodule Breeze.Server do
       view: view,
       start_opts: start_opts,
       assigns: assigns,
+      attrs: attrs,
       persistent: persistent
     }
   end

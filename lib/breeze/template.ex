@@ -549,8 +549,8 @@ defmodule Breeze.Template do
   defp normalize_output(data) when is_list(data), do: IO.iodata_to_binary(data)
   defp normalize_output(data), do: to_string(data)
 
-  defp content_surface?(%BackBreeze.VirtualText{}), do: true
-  defp content_surface?([%BackBreeze.TextSpan{} | _]), do: true
+  defp content_surface?(%{__struct__: BackBreeze.VirtualText}), do: true
+  defp content_surface?([%{__struct__: BackBreeze.TextSpan} | _]), do: true
   defp content_surface?(_value), do: false
 
   defp extract_standalone_content_surface(segments, ctx) do

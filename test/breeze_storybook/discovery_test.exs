@@ -18,4 +18,11 @@ defmodule Breeze.Storybook.DiscoveryTest do
     assert Enum.any?(stories, &(&1.id == "input"))
     assert %{id: "tabs"} = Registry.story("tabs")
   end
+
+  test "registry can load a single story file" do
+    stories = Registry.stories("storybook", file: "dropdown.story.exs")
+
+    assert Enum.map(stories, & &1.id) == ["dropdown"]
+    assert %{id: "dropdown"} = Registry.first_story("storybook", file: "dropdown.story.exs")
+  end
 end

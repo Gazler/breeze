@@ -215,30 +215,26 @@ defmodule Breeze.Renderer do
     build_tree(rest, box, children, style_state, flags, acc, opts)
   end
 
-  defp build_tree(
-         [%BackBreeze.VirtualText{} = content | rest],
-         box,
-         children,
-         style_state,
-         flags,
-         acc,
-         opts
-       ) do
-    box = %{box | content: content}
-    build_tree(rest, box, children, style_state, flags, acc, opts)
+  defp build_tree([content | rest], box, children, style_state, flags, acc, opts)
+       when is_map(content) do
+    if virtual_text_surface?(content) do
+      box = %{box | content: content}
+      build_tree(rest, box, children, style_state, flags, acc, opts)
+    else
+      children = children ++ [content]
+      build_tree(rest, box, children, style_state, flags, acc, opts)
+    end
   end
 
-  defp build_tree(
-         [[%BackBreeze.TextSpan{} | _] = content | rest],
-         box,
-         children,
-         style_state,
-         flags,
-         acc,
-         opts
-       ) do
-    box = %{box | content: content}
-    build_tree(rest, box, children, style_state, flags, acc, opts)
+  defp build_tree([content | rest], box, children, style_state, flags, acc, opts)
+       when is_list(content) do
+    if text_span_list?(content) do
+      box = %{box | content: content}
+      build_tree(rest, box, children, style_state, flags, acc, opts)
+    else
+      children = children ++ [content]
+      build_tree(rest, box, children, style_state, flags, acc, opts)
+    end
   end
 
   defp build_tree([{:live, attrs} | rest], box, children, style_state, flags, acc, opts) do
@@ -1095,6 +1091,12 @@ defmodule Breeze.Renderer do
     |> Map.keys()
     |> Enum.max(fn -> 0 end)
   end
+
+  defp virtual_text_surface?(%{__struct__: BackBreeze.VirtualText}), do: true
+  defp virtual_text_surface?(_value), do: false
+
+  defp text_span_list?([%{__struct__: BackBreeze.TextSpan} | _rest]), do: true
+  defp text_span_list?(_value), do: false
 
   defp profile(nil, _label, _metric, fun), do: fun.()
 

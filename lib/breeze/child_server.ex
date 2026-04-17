@@ -23,8 +23,8 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, {:render_snapshot, opts})
   end
 
-  def dispatch_input(pid, input) do
-    GenServer.call(pid, {:input, input})
+  def dispatch_input(pid, input, opts \\ []) do
+    GenServer.call(pid, {:input, input, opts})
   end
 
   def set_focus(pid, focused) do
@@ -146,9 +146,9 @@ defmodule Breeze.ChildServer do
     reply_from_input_result(handle_event(change, event, touched_term), touched_term)
   end
 
-  def handle_call({:input, input}, _from, term) do
+  def handle_call({:input, input, opts}, _from, term) do
     touched_term = touch_interaction(term)
-    reply_from_input_result(process_input(input, touched_term), touched_term)
+    reply_from_input_result(process_input(input, touched_term), touched_term, opts)
   end
 
   def handle_call({:set_focus, focused}, _from, term) do
@@ -188,8 +188,8 @@ defmodule Breeze.ChildServer do
     {:noreply, next_term}
   end
 
-  def handle_info({:child_invalidated, _child_id}, term) do
-    notify_invalidate(term)
+  def handle_info({:child_invalidated, child_id}, term) do
+    notify_invalidate(term, child_id)
     {:noreply, term}
   end
 
@@ -886,7 +886,11 @@ defmodule Breeze.ChildServer do
     start_opts = fetch_live_attr(attrs, :start_opts, [])
     assigns = fetch_live_attr(attrs, :assigns, %{}) |> Map.new()
     parent = self()
-    invalidate = fn -> send(parent, {:child_invalidated, id}) end
+
+    invalidate = fn
+      nil -> send(parent, {:child_invalidated, id})
+      child_id -> send(parent, {:child_invalidated, live_id(id, child_id)})
+    end
 
     {:ok, pid} =
       Breeze.ChildServer.start(
@@ -1201,27 +1205,29 @@ defmodule Breeze.ChildServer do
     %{term | last_interaction_at: System.monotonic_time(:millisecond)}
   end
 
-  defp reply_from_input_result({:noreply, next_term}, term) do
+  defp reply_from_input_result(result, term, opts \\ [])
+
+  defp reply_from_input_result({:noreply, next_term}, term, opts) do
     next_term = apply_focus_transitions(term, next_term)
-    notify_invalidate(next_term)
+    maybe_notify_invalidate(next_term, opts)
     {:reply, {:noreply, next_term.focused, next_term != term}, next_term}
   end
 
-  defp reply_from_input_result({:noreply, focused, consumed}, term) do
+  defp reply_from_input_result({:noreply, focused, consumed}, term, opts) do
     next_term = %{term | focused: focused, allow_unfocused?: is_nil(focused)}
-    notify_invalidate(next_term)
+    maybe_notify_invalidate(next_term, opts)
     {:reply, {:noreply, next_term.focused, consumed}, next_term}
   end
 
-  defp reply_from_input_result({:stop, next_term}, term) do
+  defp reply_from_input_result({:stop, next_term}, term, opts) do
     next_term = apply_focus_transitions(term, next_term)
-    notify_invalidate(next_term)
+    maybe_notify_invalidate(next_term, opts)
     {:stop, :normal, {:stop, next_term.focused, true}, next_term}
   end
 
-  defp reply_from_input_result({:stop, focused, consumed}, term) do
+  defp reply_from_input_result({:stop, focused, consumed}, term, opts) do
     next_term = %{term | focused: focused, allow_unfocused?: is_nil(focused)}
-    notify_invalidate(next_term)
+    maybe_notify_invalidate(next_term, opts)
     {:stop, :normal, {:stop, next_term.focused, consumed}, next_term}
   end
 
@@ -1273,8 +1279,11 @@ defmodule Breeze.ChildServer do
     end
   end
 
-  defp notify_invalidate(term) do
+  defp notify_invalidate(term), do: notify_invalidate(term, nil)
+
+  defp notify_invalidate(term, child_id) do
     case Map.get(term.assigns, :__invalidate__) do
+      fun when is_function(fun, 1) -> fun.(child_id)
       fun when is_function(fun, 0) -> fun.()
       _ -> :ok
     end
