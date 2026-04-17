@@ -295,22 +295,7 @@ defmodule Posting do
   def handle_event("request_header_value_changed", %{value: value}, term),
     do: {:noreply, assign(term, request_header_value: value)}
 
-  def handle_event(_, %{"key" => "\x14"}, term) do
-    term =
-      update_implicit(term, "method", fn
-        {Breeze.Implicit.Dropdown, state} ->
-          if state.open? do
-            Breeze.Implicit.Dropdown.close(state)
-          else
-            Breeze.Implicit.Dropdown.open(state)
-          end
-
-        {_mod, state} ->
-          state
-      end)
-
-    {:noreply, focus(term, "method")}
-  end
+  def handle_event(_, %{"key" => "\x14"} = event, term), do: toggle_method_dropdown(event, term)
 
   def handle_event("request_tab", %{value: tab}, term),
     do: {:noreply, assign(term, request_tab: tab)}
@@ -406,7 +391,7 @@ defmodule Posting do
 
   defp base_keybindings do
     [
-      {"^t", "Method"},
+      {"^t", "Method", &toggle_method_dropdown/2},
       {"Tab", "Next"},
       {"F1", "Help"},
       {"F2", "Debug"},
@@ -415,6 +400,23 @@ defmodule Posting do
       {"PgUp", "Inspect Dock"},
       {"q", "Quit"}
     ]
+  end
+
+  defp toggle_method_dropdown(_event, term) do
+    term =
+      update_implicit(term, "method", fn
+        {Breeze.Implicit.Dropdown, state} ->
+          if state.open? do
+            Breeze.Implicit.Dropdown.close(state)
+          else
+            Breeze.Implicit.Dropdown.open(state)
+          end
+
+        {_mod, state} ->
+          state
+      end)
+
+    {:noreply, focus(term, "method")}
   end
 end
 

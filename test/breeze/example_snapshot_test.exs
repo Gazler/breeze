@@ -1,6 +1,7 @@
 defmodule Breeze.ExampleSnapshotTest do
   use ExUnit.Case, async: false
   use Breeze.SnapshotAssertions
+  import Breeze.TestSupport.WaitUntil
 
   @docs_modules [
     Access,
@@ -58,6 +59,19 @@ defmodule Breeze.ExampleSnapshotTest do
     end)
 
     :ok
+  end
+
+  defmodule SnapshotAdapter do
+    @behaviour Termite.Terminal.Adapter
+
+    def start(opts) do
+      {width, height} = Keyword.get(opts, :size, {80, 24})
+      {:ok, %{ref: make_ref(), size: %{width: width, height: height}}}
+    end
+
+    def reader(term), do: {:ok, term.ref}
+    def write(term, _str), do: {:ok, term}
+    def resize(term), do: term.size
   end
 
   test "counter example snapshots increment and decrement" do
@@ -151,6 +165,34 @@ defmodule Breeze.ExampleSnapshotTest do
     on_exit(fn -> Breeze.Test.stop(session) end)
 
     assert_snapshot(Breeze.Test.render!(session), "examples/posting/initial.ansi",
+      snapshot_dir: "../__snapshots__"
+    )
+  end
+
+  test "posting example snapshots method dropdown opened through server input decoding" do
+    terminal = Termite.Terminal.start(adapter: SnapshotAdapter, size: {120, 24})
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: Posting,
+        terminal: terminal,
+        reader: reader,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    on_exit(fn -> Process.exit(pid, :normal) end)
+
+    send(pid, {reader, {:data, "\x14"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      state.debug_stats[:last_render_cause] == :child_invalidated and
+        state.base_output =~ "GET" and state.base_output =~ "DELETE"
+    end)
+
+    assert_snapshot(:sys.get_state(pid).base_output, "examples/posting/method-open.ansi",
       snapshot_dir: "../__snapshots__"
     )
   end

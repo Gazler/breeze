@@ -50,6 +50,24 @@ defmodule PostingTest do
              Breeze.ChildServer.metadata(pid).implicit_state["method"]
   end
 
+  test "Ctrl-T opens the method dropdown when the url input is focused via decoded key event" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert %{focused: "url"} = Breeze.ChildServer.metadata(pid)
+
+    assert {:noreply, "method", true} =
+             Breeze.ChildServer.dispatch_input(pid, %{"ctrlKey" => true, "key" => "t"})
+
+    assert {:ok, _acc, open_box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert visible(open_box.content) =~ "GET"
+    assert visible(open_box.content) =~ "▲"
+
+    assert {Breeze.Implicit.Dropdown, %{open?: true}} =
+             Breeze.ChildServer.metadata(pid).implicit_state["method"]
+  end
+
   test "headers form adds a request header" do
     terminal = %Termite.Terminal{size: %{width: 120, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)

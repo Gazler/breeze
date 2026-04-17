@@ -57,7 +57,7 @@ defmodule Breeze.Keybindings do
     normalized = normalize_list(bindings)
 
     case Enum.find(normalized, fn binding ->
-           binding.key == event["key"] and is_function(binding.handler, 2)
+           event_matches_binding_key?(event, binding.key) and is_function(binding.handler, 2)
          end) do
       nil ->
         :continue
@@ -66,4 +66,24 @@ defmodule Breeze.Keybindings do
         handler.(event, term)
     end
   end
+
+  defp event_matches_binding_key?(%{"key" => event_key} = event, <<"^", key::binary>>)
+       when is_binary(event_key) do
+    ctrl_character_event?(event_key, key) or
+      (Map.get(event, "ctrlKey") == true and String.downcase(event_key) == String.downcase(key))
+  end
+
+  defp event_matches_binding_key?(%{"key" => event_key}, binding_key),
+    do: event_key == binding_key
+
+  defp event_matches_binding_key?(_, _), do: false
+
+  defp ctrl_character_event?(event_key, key)
+       when byte_size(event_key) == 1 and byte_size(key) == 1 do
+    <<event_code>> = event_key
+    <<key_code>> = String.downcase(key)
+    event_code < 32 and event_code == key_code - 96
+  end
+
+  defp ctrl_character_event?(_, _), do: false
 end
