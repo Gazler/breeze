@@ -18,10 +18,12 @@ I mainly built it for writing snake, which is in the examples directory.
 - LiveView style API
 - mount/2
 - handle_event/3
-- components
+- function components
 - attributes
 - slots
 - Scrollable viewports via implicit modifiers (`scroll_y`, `scroll_x`, `scroll`)
+- Built-in blocks for common UI patterns (`list`, `dropdown`, `tabs`,
+  `markdown`, `scroll`, `panel`, `modal`)
 
 ## Missing features
 
@@ -30,7 +32,6 @@ I mainly built it for writing snake, which is in the examples directory.
 - A decent way to handle logging
 - A decent way to handle errors/exceptions
 - scrollbars for viewport/list components
-- A component library
 - handle colour variants
 
 ## Does this actually use LiveView?
@@ -48,10 +49,12 @@ Breeze can be installed by adding `breeze` to your list of dependencies in
 ```elixir
 def deps do
   [
-    {:breeze, "~> 0.2.0"}
+    {:breeze, "~> 0.3.0"}
   ]
 end
 ```
+
+API docs, including previews for the built-in blocks, are published with ExDoc.
 
 ## Formatter
 
@@ -61,6 +64,7 @@ Breeze ships with a `mix format` plugin for `~H` templates:
 # .formatter.exs
 [
   plugins: [Breeze.HTMLFormatter],
+  import_deps: [:breeze],
   inputs: ["{mix,.formatter}.exs", "{config,lib,test}/**/*.{ex,exs}"]
 ]
 ```
@@ -68,33 +72,51 @@ Breeze ships with a `mix format` plugin for `~H` templates:
 ## Examples
 
 ```elixir
-Mix.install([{:breeze, "~> 0.2.0"}])
+Mix.install([{:breeze, "~> 0.3.0"}])
 
 defmodule Demo do
   use Breeze.View
+  import Breeze.Blocks
 
-  def mount(_opts, term), do: {:ok, assign(term, counter: 0)}
+  def mount(_opts, term) do
+    {:ok,
+     term
+     |> assign(counter: 0)
+     |> put_local_keybindings([
+       {"ArrowUp", "Increment"},
+       {"ArrowDown", "Decrement"}
+     ])}
+  end
 
   def render(assigns) do
     ~H"""
-      <box style="text-5 bold">Counter: <%= @counter %></box>
+    <box style="grid grid-cols-1 grid-rows-2 width-screen height-screen">
+      <box>
+        <box style="text-5 bold">Counter: {@counter}</box>
+      </box>
+      <box style="height-1 bg-panel overflow-hidden">
+        <.keybinding_bar keybindings={@breeze.keybindings}/>
+      </box>
+    </box>
     """
   end
 
-  def handle_event(_, %{"key" => "ArrowUp"}, term), do:
+  def handle_event(_, %{"key" => "ArrowUp"}, term),
     {:noreply, assign(term, counter: term.assigns.counter + 1)}
 
-  def handle_event(_, %{"key" => "ArrowDown"}, term), do:
+  def handle_event(_, %{"key" => "ArrowDown"}, term),
     {:noreply, assign(term, counter: term.assigns.counter - 1)}
 
-  def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
   def handle_event(_, _, term), do: {:noreply, term}
 end
 
-Breeze.Server.start_link(view: Demo)
-receive do
-end
-
+Breeze.Example.run(
+  [
+    view: Demo,
+    global_keybindings: [{"q", "Quit", fn _event, term -> {:stop, term} end}]
+  ],
+  keep_alive: :infinity
+)
 ```
 
 More examples are available in the examples directory.
@@ -113,7 +135,8 @@ defmodule DemoEntrypoint do
 
     Breeze.Server.start_link(
       view: Demo,
-      terminal_opts: Termite.SSH.Session.terminal_opts(session)
+      terminal_opts: Termite.SSH.Session.terminal_opts(session),
+      halt_fun: fn -> :ok end
     )
   end
 end
