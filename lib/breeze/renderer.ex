@@ -800,6 +800,9 @@ defmodule Breeze.Renderer do
         {key, value}, {acc, seq_cache} when key == :__wide_glyphs__ ->
           {Map.put(acc, key, value), seq_cache}
 
+        {key, value}, {acc, seq_cache} when key == :__default_fill__ ->
+          {Map.put(acc, key, value), seq_cache}
+
         {{y, x} = key, {char, seq}}, {acc, seq_cache} ->
           if point_in_any_region?(x, y, regions) do
             {Map.put(acc, key, {char, seq}), seq_cache}

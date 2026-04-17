@@ -995,7 +995,7 @@ defmodule Breeze.Server do
                 child_dimensions =
                   case safe_call(fn -> Breeze.ChildServer.layout_snapshot(pid) end) do
                     {:ok, snapshot} ->
-                      translate_live_dimensions(snapshot.elements, viewport, full_id)
+                      translate_live_dimensions(snapshot.elements, viewport, full_id, child_box)
 
                     _ ->
                       %{}
@@ -1437,7 +1437,7 @@ defmodule Breeze.Server do
 
   defp translate_decoration_layout(layout, _viewport), do: layout
 
-  defp translate_live_dimensions(elements, %{left: left, top: top} = viewport, prefix)
+  defp translate_live_dimensions(elements, %{left: left, top: top} = viewport, prefix, child_box)
        when is_map(elements) do
     translated_elements =
       Map.new(elements, fn {id, viewport} ->
@@ -1462,12 +1462,16 @@ defmodule Breeze.Server do
          }}
       end)
 
-    Map.put(translated_elements, prefix, live_root_dimensions(translated_elements, viewport))
+    Map.put(
+      translated_elements,
+      prefix,
+      live_root_dimensions(translated_elements, viewport, child_box)
+    )
   end
 
-  defp translate_live_dimensions(_elements, _viewport, _prefix), do: %{}
+  defp translate_live_dimensions(_elements, _viewport, _prefix, _child_box), do: %{}
 
-  defp live_root_dimensions(translated_elements, viewport) do
+  defp live_root_dimensions(translated_elements, viewport, child_box) do
     width = Map.get(viewport, :width, 0)
     height = Map.get(viewport, :height, 0)
 
@@ -1483,57 +1487,79 @@ defmodule Breeze.Server do
         content_height: Map.get(viewport, :content_height, height)
       }
     else
-      translated_elements
-      |> Map.values()
-      |> Enum.reduce(nil, fn dims, acc ->
-        left = Map.get(dims, :left, 0)
-        top = Map.get(dims, :top, 0)
-        right = left + max(Map.get(dims, :width, 0) - 1, 0)
-        bottom = top + max(Map.get(dims, :height, 0) - 1, 0)
-
-        case acc do
-          nil ->
-            %{left: left, top: top, right: right, bottom: bottom}
-
-          acc ->
-            %{
-              left: min(acc.left, left),
-              top: min(acc.top, top),
-              right: max(acc.right, right),
-              bottom: max(acc.bottom, bottom)
-            }
-        end
-      end)
-      |> case do
+      case child_root_dimensions(viewport, child_box) do
         nil ->
-          %{
-            left: Map.get(viewport, :left, 0),
-            top: Map.get(viewport, :top, 0),
-            width: 0,
-            height: 0,
-            viewport_width: 0,
-            viewport_height: 0,
-            content_width: 0,
-            content_height: 0
-          }
+          translated_elements
+          |> Map.values()
+          |> Enum.reduce(nil, fn dims, acc ->
+            left = Map.get(dims, :left, 0)
+            top = Map.get(dims, :top, 0)
+            right = left + max(Map.get(dims, :width, 0) - 1, 0)
+            bottom = top + max(Map.get(dims, :height, 0) - 1, 0)
 
-        bounds ->
-          width = max(bounds.right - bounds.left + 1, 0)
-          height = max(bounds.bottom - bounds.top + 1, 0)
+            case acc do
+              nil ->
+                %{left: left, top: top, right: right, bottom: bottom}
 
-          %{
-            left: bounds.left,
-            top: bounds.top,
-            width: width,
-            height: height,
-            viewport_width: width,
-            viewport_height: height,
-            content_width: width,
-            content_height: height
-          }
+              acc ->
+                %{
+                  left: min(acc.left, left),
+                  top: min(acc.top, top),
+                  right: max(acc.right, right),
+                  bottom: max(acc.bottom, bottom)
+                }
+            end
+          end)
+          |> case do
+            nil ->
+              %{
+                left: Map.get(viewport, :left, 0),
+                top: Map.get(viewport, :top, 0),
+                width: 0,
+                height: 0,
+                viewport_width: 0,
+                viewport_height: 0,
+                content_width: 0,
+                content_height: 0
+              }
+
+            bounds ->
+              width = max(bounds.right - bounds.left + 1, 0)
+              height = max(bounds.bottom - bounds.top + 1, 0)
+
+              %{
+                left: bounds.left,
+                top: bounds.top,
+                width: width,
+                height: height,
+                viewport_width: width,
+                viewport_height: height,
+                content_width: width,
+                content_height: height
+              }
+          end
+
+        root_dims ->
+          root_dims
       end
     end
   end
+
+  defp child_root_dimensions(%{left: left, top: top}, %{width: width, height: height})
+       when is_integer(width) and width > 0 and is_integer(height) and height > 0 do
+    %{
+      left: left,
+      top: top,
+      width: width,
+      height: height,
+      viewport_width: width,
+      viewport_height: height,
+      content_width: width,
+      content_height: height
+    }
+  end
+
+  defp child_root_dimensions(_viewport, _child_box), do: nil
 
   defp namespace_live_id(nil, _full_id), do: nil
   defp namespace_live_id(id, full_id), do: full_id <> "::" <> id

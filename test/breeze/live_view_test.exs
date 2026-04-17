@@ -107,6 +107,48 @@ defmodule Breeze.LiveViewTest do
     end
   end
 
+  defmodule HeaderedLiveChild do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok, assign(term, count: 0)}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box>Captured logs</box>
+        <box>Showing debug+ logs.</box>
+        <box id="body" style="border-rounded width-20 height-3">Count: {@count}</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def handle_info(:bump, term) do
+      {:noreply, assign(term, count: term.assigns.count + 1)}
+    end
+
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule HeaderedLiveRoot do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box>Crash Handler Demo</box>
+        <box>
+        </box>
+        <live id="child" view={HeaderedLiveChild}>
+        </live>
+      </box>
+      """
+    end
+  end
+
   defmodule KeybindingChild do
     use Breeze.View
 
@@ -1348,6 +1390,43 @@ defmodule Breeze.LiveViewTest do
 
     assert next_state.debug_stats[:render_base_count] > initial_render_count
     assert next_state.debug_stats[:last_render_cause] == :child_invalidated
+
+    Process.exit(pid, :normal)
+  end
+
+  test "child patch payload starts at the live root even when the live placeholder has no explicit size" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: HeaderedLiveRoot,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      Map.has_key?(state.children, "child")
+    end)
+
+    child = :sys.get_state(pid).children["child"]
+    drain_terminal_writes()
+
+    assert {:noreply, nil} = Breeze.ChildServer.dispatch_info(child.pid, :bump, terminal)
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      state.debug_stats[:last_render_cause] == :child_patch
+    end)
+
+    writes =
+      wait_until(fn ->
+        writes = drain_terminal_writes()
+        if writes == [], do: false, else: writes
+      end)
+
+    assert Enum.any?(writes, &String.starts_with?(&1, "\e[3;1H"))
+    refute Enum.any?(writes, &String.starts_with?(&1, "\e[5;1H"))
 
     Process.exit(pid, :normal)
   end
