@@ -25,15 +25,6 @@ I mainly built it for writing snake, which is in the examples directory.
 - Built-in blocks for common UI patterns (`list`, `dropdown`, `tabs`,
   `markdown`, `scroll`, `panel`, `modal`)
 
-## Missing features
-
-- behaviours for all of the modules that expect callbacks
-- Whitespace is a bit janky in the template engine
-- A decent way to handle logging
-- A decent way to handle errors/exceptions
-- scrollbars for viewport/list components
-- handle colour variants
-
 ## Does this actually use LiveView?
 
 No. Breeze now ships with its own `~H` sigil and template runtime.
@@ -101,10 +92,10 @@ defmodule Demo do
     """
   end
 
-  def handle_event(_, %{"key" => "ArrowUp"}, term),
+  def handle_event(_, %{"key" => "ArrowUp"}, term), do:
     {:noreply, assign(term, counter: term.assigns.counter + 1)}
 
-  def handle_event(_, %{"key" => "ArrowDown"}, term),
+  def handle_event(_, %{"key" => "ArrowDown"}, term), do:
     {:noreply, assign(term, counter: term.assigns.counter - 1)}
 
   def handle_event(_, _, term), do: {:noreply, term}
