@@ -1,5 +1,5 @@
 %{
-  "back_breeze": {:git, "https://github.com/Gazler/back_breeze.git", "11004cd2a322faf5b2c535f49ad503215237116a", []},
+  "back_breeze": {:hex, :back_breeze, "0.4.0", "ecf6fc6e9e84837156d3fa01d96c8be1c7750140f78cc824db2bd06b1a78d142", [:mix], [{:termite, "~> 0.4.2 or ~> 0.5", [hex: :termite, repo: "hexpm", optional: false]}], "hexpm", "a41872c2703bc784911de4a4e4322c902731ae2d577fe03da54107d5825e2c57"},
   "earmark_parser": {:hex, :earmark_parser, "1.4.41", "ab34711c9dc6212dda44fcd20ecb87ac3f3fce6f0ca2f28d4a00e4154f8cd599", [:mix], [], "hexpm", "a81a04c7e34b6617c2792e291b5a2e57ab316365c2644ddc553bb9ed863ebefa"},
   "ex_doc": {:hex, :ex_doc, "0.34.2", "13eedf3844ccdce25cfd837b99bea9ad92c4e511233199440488d217c92571e8", [:mix], [{:earmark_parser, "~> 1.4.39", [hex: :earmark_parser, repo: "hexpm", optional: false]}, {:makeup_c, ">= 0.1.0", [hex: :makeup_c, repo: "hexpm", optional: true]}, {:makeup_elixir, "~> 0.14 or ~> 1.0", [hex: :makeup_elixir, repo: "hexpm", optional: false]}, {:makeup_erlang, "~> 0.1 or ~> 1.0", [hex: :makeup_erlang, repo: "hexpm", optional: false]}, {:makeup_html, ">= 0.1.0", [hex: :makeup_html, repo: "hexpm", optional: true]}], "hexpm", "5ce5f16b41208a50106afed3de6a2ed34f4acfd65715b82a0b84b49d995f95c1"},
   "file_system": {:hex, :file_system, "1.1.1", "31864f4685b0148f25bd3fbef2b1228457c0c89024ad67f7a81a3ffbc0bbad3a", [:mix], [], "hexpm", "7a15ff97dfe526aeefb090a7a9d3d03aa907e100e262a0f8f7746b78f8f87a5d"},
@@ -8,5 +8,5 @@
   "makeup_erlang": {:hex, :makeup_erlang, "1.0.1", "c7f58c120b2b5aa5fd80d540a89fdf866ed42f1f3994e4fe189abebeab610839", [:mix], [{:makeup, "~> 1.0", [hex: :makeup, repo: "hexpm", optional: false]}], "hexpm", "8a89a1eeccc2d798d6ea15496a6e4870b75e014d1af514b1b71fa33134f57814"},
   "nimble_parsec": {:hex, :nimble_parsec, "1.4.2", "8efba0122db06df95bfaa78f791344a89352ba04baedd3849593bfce4d0dc1c6", [:mix], [], "hexpm", "4b21398942dda052b403bbe1da991ccd03a053668d147d53fb8c4e0efe09c973"},
   "telemetry": {:hex, :telemetry, "1.4.1", "ab6de178e2b29b58e8256b92b382ea3f590a47152ca3651ea857a6cae05ac423", [:rebar3], [], "hexpm", "2172e05a27531d3d31dd9782841065c50dd5c3c7699d95266b2edd54c2dafa1c"},
-  "termite": {:git, "https://github.com/Gazler/termite.git", "21731b9e373243ab5ed75141e5fc7c3297e7a0a0", []},
+  "termite": {:hex, :termite, "0.4.2", "22c784a3c634d6e6851b5994586d9aae198d7da0ec4534f493e2a718971373aa", [:mix], [], "hexpm", "15d77e59372bb556dc5f19c65af08aec8a2c91e97257a65dfef01444b39c555b"},
 }

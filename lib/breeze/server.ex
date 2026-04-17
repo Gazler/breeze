@@ -497,6 +497,7 @@ defmodule Breeze.Server do
       {key, state} = coalesce_printable_keys_from_queue(key, state)
       handle_deferred_or_sync_input({:key, batched_printable_event(key)}, state)
     else
+      {key, state} = coalesce_repeated_keys_from_queue(key, state)
       handle_deferred_or_sync_input({:key, key}, state)
     end
   end
@@ -634,6 +635,23 @@ defmodule Breeze.Server do
       {{:value, {:key, next_key}}, queue} ->
         if batchable_printable_input?(next_key, state) do
           coalesce_printable_keys_from_queue(key <> next_key, %{state | queued_input: queue})
+        else
+          {key, state}
+        end
+
+      {{:value, _next}, _queue} ->
+        {key, state}
+
+      {:empty, _queue} ->
+        {key, state}
+    end
+  end
+
+  defp coalesce_repeated_keys_from_queue(key, state) do
+    case queue_out(state.queued_input) do
+      {{:value, {:key, next_key}}, queue} ->
+        if next_key == key and not batchable_printable_input?(next_key, state) do
+          coalesce_repeated_keys_from_queue(key, %{state | queued_input: queue})
         else
           {key, state}
         end

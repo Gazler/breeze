@@ -77,23 +77,42 @@ defmodule Breeze.Template do
   end
 
   defp node_to_tree({:text, segments}, ctx) do
-    {acc, trailing_text} =
-      Enum.reduce(segments, {[], ""}, fn
-        {:expr, expr}, {acc, text} ->
-          case render_slot_expr(expr, ctx) do
-            {:slot, nodes} ->
-              acc = if text == "", do: acc, else: acc ++ [text]
-              {acc ++ nodes, ""}
+    case extract_standalone_content_surface(segments, ctx) do
+      {:ok, value} ->
+        [value]
 
-            :not_a_slot ->
-              {acc, text <> normalize_output(eval_expr(expr, ctx))}
-          end
+      :error ->
+        {acc, trailing_text} =
+          Enum.reduce(segments, {[], ""}, fn
+            {:expr, expr}, {acc, text} ->
+              case render_slot_expr(expr, ctx) do
+                {:slot, nodes} ->
+                  acc = if text == "", do: acc, else: acc ++ [text]
+                  {acc ++ nodes, ""}
 
-        literal, {acc, text} when is_binary(literal) ->
-          {acc, text <> literal}
-      end)
+                :not_a_slot ->
+                  case eval_expr(expr, ctx) do
+                    nil ->
+                      {acc, text}
 
-    if trailing_text == "", do: acc, else: acc ++ [trailing_text]
+                    "" ->
+                      {acc, text}
+
+                    value ->
+                      if is_binary(value) do
+                        {acc, text <> value}
+                      else
+                        {acc, text <> normalize_output(value)}
+                      end
+                  end
+              end
+
+            literal, {acc, text} when is_binary(literal) ->
+              {acc, text <> literal}
+          end)
+
+        if trailing_text == "", do: acc, else: acc ++ [trailing_text]
+    end
   end
 
   defp node_to_tree({:expr, expr}, ctx) do
@@ -103,9 +122,18 @@ defmodule Breeze.Template do
 
       :not_a_slot ->
         case eval_expr(expr, ctx) do
-          nil -> []
-          "" -> []
-          other -> [normalize_output(other)]
+          nil ->
+            []
+
+          "" ->
+            []
+
+          other ->
+            cond do
+              is_binary(other) -> [other]
+              content_surface?(other) -> [other]
+              true -> [normalize_output(other)]
+            end
         end
     end
   end
@@ -520,6 +548,32 @@ defmodule Breeze.Template do
   defp normalize_output(data) when is_binary(data), do: data
   defp normalize_output(data) when is_list(data), do: IO.iodata_to_binary(data)
   defp normalize_output(data), do: to_string(data)
+
+  defp content_surface?(%BackBreeze.VirtualText{}), do: true
+  defp content_surface?([%BackBreeze.TextSpan{} | _]), do: true
+  defp content_surface?(_value), do: false
+
+  defp extract_standalone_content_surface(segments, ctx) do
+    case Enum.reject(segments, &blank_text_segment?/1) do
+      [{:expr, expr}] ->
+        case render_slot_expr(expr, ctx) do
+          :not_a_slot ->
+            case eval_expr(expr, ctx) do
+              value ->
+                if content_surface?(value), do: {:ok, value}, else: :error
+            end
+
+          {:slot, _nodes} ->
+            :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp blank_text_segment?(segment) when is_binary(segment), do: String.trim(segment) == ""
+  defp blank_text_segment?(_segment), do: false
 
   defp normalize_assigns(assigns) when is_map(assigns), do: assigns
   defp normalize_assigns(assigns) when is_list(assigns), do: Map.new(assigns)

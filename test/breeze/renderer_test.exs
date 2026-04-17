@@ -1,5 +1,6 @@
 defmodule Breeze.RendererTest do
   use ExUnit.Case, async: true
+  alias BackBreeze.VirtualText.Source
   alias Breeze.Renderer
 
   defmodule Example do
@@ -165,6 +166,16 @@ defmodule Breeze.RendererTest do
         <box value="b">BBBBBB</box>
         <box value="c">CCCCCC</box>
       </box>
+      """
+    end
+  end
+
+  defmodule VirtualTextChildContentExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-12 height-4 border overflow-hidden">{@content}</box>
       """
     end
   end
@@ -493,6 +504,30 @@ defmodule Breeze.RendererTest do
   end
 
   describe "render/3" do
+    test "supports virtual text as child content" do
+      content =
+        Source.lazy(
+          cache_key: :renderer_virtual_text_child,
+          intrinsic_width: 12,
+          line_count_fn: fn _width -> 3 end,
+          slice_fn: fn start_line, visible_count, _width ->
+            Enum.map(start_line..(start_line + visible_count - 1), fn
+              0 -> [{"Alpha", %{bold: true}}]
+              1 -> "Beta"
+              _ -> ""
+            end)
+          end
+        )
+
+      {_acc, box} =
+        Renderer.render(VirtualTextChildContentExample, %{content: content},
+          terminal: %Termite.Terminal{size: %{width: 12, height: 4}}
+        )
+
+      assert box.content =~ "Alpha"
+      assert box.content =~ "Beta"
+    end
+
     test "scroll panels wire the scroll implicit" do
       {:ok, pid} = Breeze.ChildServer.start(view: ScrollPanelExample, start_opts: [])
       on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)

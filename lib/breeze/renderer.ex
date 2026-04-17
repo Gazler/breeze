@@ -160,6 +160,28 @@ defmodule Breeze.Renderer do
   end
 
   defp build_tree(
+         [{:attribute, ["content", content]} | rest],
+         box,
+         children,
+         style_state,
+         flags,
+         acc,
+         opts
+       ) do
+    acc = %{acc | flags: Keyword.put(acc.flags, :content, content)}
+
+    build_tree(
+      rest,
+      %{box | content: content},
+      children,
+      style_state,
+      Keyword.put(flags, :content, content),
+      acc,
+      opts
+    )
+  end
+
+  defp build_tree(
          [{:attribute, [flag, value]} | rest],
          box,
          children,
@@ -190,6 +212,32 @@ defmodule Breeze.Renderer do
   defp build_tree([content | rest], box, children, style_state, flags, acc, opts)
        when is_binary(content) do
     box = %{box | content: String.trim_trailing(content, "\n  ")}
+    build_tree(rest, box, children, style_state, flags, acc, opts)
+  end
+
+  defp build_tree(
+         [%BackBreeze.VirtualText{} = content | rest],
+         box,
+         children,
+         style_state,
+         flags,
+         acc,
+         opts
+       ) do
+    box = %{box | content: content}
+    build_tree(rest, box, children, style_state, flags, acc, opts)
+  end
+
+  defp build_tree(
+         [[%BackBreeze.TextSpan{} | _] = content | rest],
+         box,
+         children,
+         style_state,
+         flags,
+         acc,
+         opts
+       ) do
+    box = %{box | content: content}
     build_tree(rest, box, children, style_state, flags, acc, opts)
   end
 

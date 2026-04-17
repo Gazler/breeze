@@ -75,13 +75,14 @@ defmodule Breeze.LoggerTest do
     {:ok, _acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
     :sys.replace_state(pid, fn term -> Breeze.View.assign(term, lines: lines) end)
     {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
-    initial_scroll = logger_viewport(acc).scroll
+    bottom_scroll = logger_viewport(acc).scroll
+    assert bottom_scroll == {0, 0}
 
     assert {:noreply, "logger", true} =
              ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "k"})
 
     {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
-    assert logger_viewport(acc).scroll == {elem(initial_scroll, 0) - 1, 0}
+    assert logger_viewport(acc).scroll == {15, 0}
   end
 
   test "focused logger still receives non-scroll keys" do

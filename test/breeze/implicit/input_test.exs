@@ -481,8 +481,10 @@ defmodule Breeze.Implicit.InputTest do
              }
            } = :sys.get_state(pid)
 
-    assert box.content =~ "?include=author,history "
-    refute box.content =~ "https://jsonplaceholder.typicode.com/posts"
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+
+    assert plain_content =~ "?include=author,history "
+    refute plain_content =~ "https://jsonplaceholder.typicode.com/posts"
   end
 
   test "child server keeps the cursor pinned when typing at the overflow edge" do
@@ -490,7 +492,9 @@ defmodule Breeze.Implicit.InputTest do
     {:ok, pid} = ChildServer.start(view: OverflowInputView, terminal: terminal)
 
     assert {:ok, _acc, initial_box} = ChildServer.render(pid, terminal: terminal)
-    assert initial_box.content =~ "?include=author,history "
+
+    assert Regex.replace(~r/\e\[[0-9;]*m/u, initial_box.content, "") =~
+             "?include=author,history "
 
     assert {:noreply, "website", true} = ChildServer.dispatch_input(pid, "!")
 
@@ -504,8 +508,10 @@ defmodule Breeze.Implicit.InputTest do
 
     assert {:ok, _acc, next_box} = ChildServer.render(pid, terminal: terminal)
 
-    assert next_box.content =~ "include=author,history! "
-    refute next_box.content =~ "comments?include=author,history"
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, next_box.content, "")
+
+    assert plain_content =~ "include=author,history! "
+    refute plain_content =~ "comments?include=author,history"
   end
 
   test "child server scrolls back left after backspace from the overflow edge" do
@@ -527,8 +533,10 @@ defmodule Breeze.Implicit.InputTest do
 
     assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
 
-    assert box.content =~ "?include=author,history "
-    refute box.content =~ "include=author,history!"
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+
+    assert plain_content =~ "?include=author,history "
+    refute plain_content =~ "include=author,history!"
   end
 
   test "child server reveals earlier content when moving left out of the overflow edge" do
@@ -543,8 +551,10 @@ defmodule Breeze.Implicit.InputTest do
 
     assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
 
-    assert box.content =~ "23/comments?include=aut "
-    refute box.content =~ "?include=author,history "
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+
+    assert plain_content =~ "23/comments?include=aut "
+    refute plain_content =~ "?include=author,history "
   end
 
   test "public input block keeps its left inset after change rerenders" do
@@ -552,13 +562,13 @@ defmodule Breeze.Implicit.InputTest do
     {:ok, pid} = ChildServer.start(view: BlockInputView, terminal: terminal)
 
     assert {:ok, _acc, initial_box} = ChildServer.render(pid, terminal: terminal)
-    assert initial_box.content =~ " hello world"
+    assert Regex.replace(~r/\e\[[0-9;]*m/u, initial_box.content, "") =~ " hello world"
 
     assert {:noreply, "url"} = ChildServer.dispatch_info(pid, :append_bang, terminal)
 
     assert {:ok, _acc, next_box} = ChildServer.render(pid, terminal: terminal)
 
-    assert next_box.content =~ " hello world!"
+    assert Regex.replace(~r/\e\[[0-9;]*m/u, next_box.content, "") =~ " hello world!"
   end
 
   test "public input block keeps padding inside the box and cursor aligned" do

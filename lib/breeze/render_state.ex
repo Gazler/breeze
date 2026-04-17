@@ -23,7 +23,8 @@ defmodule Breeze.RenderState do
         {next_implicit_state, next_events}
       end)
 
-    {implicits, implicit_meta, _current, _mod, _last_id, _root_attrs} = implicit_build_state
+    {implicits, implicit_meta, _current, _mod, _last_id, _root_attrs} =
+      finalize_implicit_build_state(implicit_build_state, term)
 
     raw_dimensions =
       build_dimensions(sorted_elements, acc.dimensions)
@@ -104,6 +105,22 @@ defmodule Breeze.RenderState do
   end
 
   defp initial_implicit_build_state, do: {%{}, %{}, [], nil, nil, %{}}
+
+  defp finalize_implicit_build_state(
+         {implicit_acc, implicit_meta, current, mod, last_id, root_attrs},
+         term
+       ) do
+    if mod && last_id do
+      items = Enum.reverse(current)
+
+      {implicit_acc, implicit_meta} =
+        add_implicit_item(implicit_acc, implicit_meta, term, last_id, mod, items, root_attrs)
+
+      {implicit_acc, implicit_meta, [], nil, nil, %{}}
+    else
+      {implicit_acc, implicit_meta, current, mod, last_id, root_attrs}
+    end
+  end
 
   defp reduce_implicit_item({idx, elem}, state, term, total) do
     {implicit_acc, implicit_meta, current, mod, last_id, root_attrs} = state

@@ -128,6 +128,49 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule BufferedScrollView do
+    use Breeze.View
+
+    alias BackBreeze.VirtualText.Source
+
+    def mount(_opts, term) do
+      {:ok, term |> focus("scroll") |> assign(content: build_content())}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box
+        id="scroll"
+        implicit={Breeze.Implicit.Scroll}
+        focusable
+        class="width-screen height-screen overflow-scroll"
+      >
+        {@content}
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+
+    defp build_content do
+      Source.lazy(
+        cache_key: :buffered_scroll_view,
+        intrinsic_width: 12,
+        line_count_fn: fn _width -> 200 end,
+        slice_fn: fn start_line, visible_count, _width ->
+          Enum.map(start_line..(start_line + visible_count - 1), fn line_no ->
+            if line_no < 200 do
+              "Line " <> String.pad_leading(Integer.to_string(line_no + 1), 3, "0")
+            else
+              ""
+            end
+          end)
+        end
+      )
+    end
+  end
+
   defmodule KeybindingFooterRoot do
     use Breeze.View
     import Breeze.Blocks
@@ -775,6 +818,33 @@ defmodule Breeze.LiveViewTest do
     child_after = :sys.get_state(pid).children["preview"]
     assert child_after.assigns == %{variant: "accent"}
     assert child_after.pid == child_before.pid
+
+    Process.exit(pid, :normal)
+  end
+
+  test "server coalesces repeated identical key events in the input queue" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: BufferedScrollView,
+        terminal: terminal
+      )
+
+    Enum.each(1..5, fn _ -> send(pid, {reader, {:data, "\e[6~"}}) end)
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      not state.input_flush_scheduled? and :queue.is_empty(state.queued_input)
+    end)
+
+    %{view_pid: view_pid} = :sys.get_state(pid)
+
+    assert %{implicit_state: %{"scroll" => {Breeze.Implicit.Scroll, scroll_state}}} =
+             Breeze.ChildServer.metadata(view_pid)
+
+    assert scroll_state.offset_y == 23
 
     Process.exit(pid, :normal)
   end
