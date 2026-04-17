@@ -302,6 +302,7 @@ defmodule Breeze.ChildServer do
   end
 
   defp render_term(term, opts) do
+    previous_term = term
     explicit_focus? = Keyword.has_key?(opts, :focused)
     term = maybe_put_terminal(term, Keyword.get(opts, :terminal))
     term = prune_dead_children(term)
@@ -313,12 +314,18 @@ defmodule Breeze.ChildServer do
 
     term = %{term | theme: theme}
     term = %{term | focused: Keyword.get(opts, :focused, term.focused)}
-    implicit_state = Keyword.get(opts, :implicit_state, %{}) |> Map.merge(term.implicit_state)
+
+    initial_implicit_state =
+      Keyword.get(opts, :implicit_state, %{})
+      |> Map.merge(term.retained_implicit_state)
+      |> Map.merge(term.implicit_state)
+
+    previous_elements = Map.merge(term.retained_elements, term.elements)
 
     opts =
       opts
-      |> Keyword.put(:implicit_state, implicit_state)
-      |> Keyword.put(:previous_elements, term.elements)
+      |> Keyword.put(:implicit_state, initial_implicit_state)
+      |> Keyword.put(:previous_elements, previous_elements)
       |> Keyword.put(:theme, theme)
       |> Keyword.put(:theme_source, term.theme_source || term.theme)
       |> Keyword.put(:apply_theme_defaults, term.apply_theme_defaults?)
@@ -329,7 +336,7 @@ defmodule Breeze.ChildServer do
     final_opts =
       opts
       |> Keyword.put(:focused, term.focused)
-      |> Keyword.put(:implicit_state, implicit_state)
+      |> Keyword.put(:implicit_state, initial_implicit_state)
       |> Keyword.put(:implicit_meta, term.implicit_meta)
       |> Keyword.put(:last_render_at, term.last_render_at)
       |> Keyword.put(:last_interaction_at, term.last_interaction_at)
@@ -342,8 +349,27 @@ defmodule Breeze.ChildServer do
         preload_and_attach_live_view(term, final_opts)
       end
 
+    {term, bootstrapped_initial_render_state?} =
+      maybe_bootstrap_initial_render_state(
+        term,
+        final_opts,
+        initial_implicit_state,
+        explicit_focus?
+      )
+
+    first_pass_implicit_state =
+      if bootstrapped_initial_render_state?, do: term.implicit_state, else: initial_implicit_state
+
+    final_opts =
+      final_opts
+      |> Keyword.put(:focused, term.focused)
+      |> Keyword.put(:implicit_state, first_pass_implicit_state)
+      |> Keyword.put(:implicit_meta, term.implicit_meta)
+      |> Keyword.put(:previous_elements, previous_elements)
+
     term = sync_theme_assigns(term)
 
+    initial_implicit_state = term.implicit_state
     initial_implicit_meta = term.implicit_meta
     initial_focus = term.focused
     initial_keybindings = get_in(term.assigns, [:breeze, :keybindings]) || []
@@ -354,8 +380,10 @@ defmodule Breeze.ChildServer do
     term = sync_theme_assigns(term)
 
     {term, acc, box} =
-      if term.implicit_state != implicit_state or term.implicit_meta != initial_implicit_meta or
+      if term.implicit_state != initial_implicit_state or
+           term.implicit_meta != initial_implicit_meta or
            term.focused != initial_focus or
+           layout_rerender_needed?(term, previous_elements) or
            (get_in(term.assigns, [:breeze, :keybindings]) || []) != initial_keybindings do
         rerender_keybindings = get_in(term.assigns, [:breeze, :keybindings]) || []
 
@@ -388,6 +416,7 @@ defmodule Breeze.ChildServer do
       end
 
     term = sync_theme_assigns(term)
+    term = retain_inactive_render_state(previous_term, term)
 
     decorations =
       profile(profile_scope, profile_label, :decorations_us, fn ->
@@ -397,7 +426,112 @@ defmodule Breeze.ChildServer do
     {term, acc, box, decorations}
   end
 
+  defp maybe_bootstrap_initial_render_state(term, opts, implicit_state, explicit_focus?) do
+    if term.implicit_state == %{} and term.implicit_meta == %{} do
+      prepass_opts =
+        opts
+        |> Keyword.put(:implicit_state, implicit_state)
+        |> Keyword.delete(:live_view)
+        |> Keyword.put(:live_placeholder, true)
+        |> Keyword.put(:layout_prepass, true)
+
+      {acc, box} = Breeze.Renderer.render_tree(term.view, term.assigns, prepass_opts)
+
+      %{dimensions: dimensions} = BackBreeze.Box.render_with_dimensions(box, prepass_opts)
+
+      %{elements: elements, mouse_targets: mouse_targets} =
+        Breeze.RenderState.build_layout(
+          acc,
+          dimensions,
+          Map.get(acc, :live_dimensions, %{})
+        )
+
+      bootstrap =
+        Breeze.RenderState.bootstrap(
+          %{term | implicit_state: implicit_state},
+          acc
+        )
+
+      focus_memory =
+        Breeze.Focus.remember_focus(
+          term.focus_memory,
+          term.focused,
+          bootstrap.focus_meta
+        )
+
+      focused =
+        if explicit_focus? do
+          term.focused
+        else
+          trapped_scope = Breeze.Focus.trapped_scope?(bootstrap.focusables, bootstrap.focus_meta)
+
+          if term.allow_unfocused? and is_nil(term.focused) and not trapped_scope do
+            nil
+          else
+            Breeze.Focus.normalize_focus(
+              term.focused,
+              bootstrap.focusables,
+              bootstrap.focus_meta,
+              focus_memory
+            )
+          end
+        end
+
+      {%{
+         term
+         | implicit_state: bootstrap.implicit_state,
+           implicit_meta: bootstrap.implicit_meta,
+           focusables: bootstrap.focusables,
+           focus_meta: bootstrap.focus_meta,
+           focus_memory: focus_memory,
+           focused: focused,
+           elements: elements,
+           mouse_targets: mouse_targets
+       }, true}
+    else
+      {term, false}
+    end
+  end
+
+  defp requires_layout_rerender?(term) do
+    Enum.any?(term.implicit_meta, fn
+      {_id, %{requires_layout_rerender: true}} -> true
+      _ -> false
+    end)
+  end
+
+  defp layout_rerender_needed?(term, previous_elements) do
+    requires_layout_rerender?(term) and
+      Enum.any?(term.implicit_meta, fn
+        {id, %{requires_layout_rerender: true}} ->
+          Map.get(term.elements, id) != Map.get(previous_elements, id)
+
+        _ ->
+          false
+      end)
+  end
+
+  defp retain_inactive_render_state(previous_term, next_term) do
+    retained_elements =
+      previous_term.retained_elements
+      |> Map.merge(previous_term.elements)
+      |> Map.drop(Map.keys(next_term.elements))
+
+    retained_implicit_state =
+      previous_term.retained_implicit_state
+      |> Map.merge(previous_term.implicit_state)
+      |> Map.drop(Map.keys(next_term.implicit_state))
+
+    %{
+      next_term
+      | retained_elements: retained_elements,
+        retained_implicit_state: retained_implicit_state
+    }
+  end
+
   defp render_pass(term, opts, profile_scope, profile_label, explicit_focus?) do
+    term = %{term | implicit_state: Keyword.get(opts, :implicit_state, term.implicit_state)}
+
     {acc, box} =
       profile(profile_scope, profile_label, :child_render_us, fn ->
         Breeze.Renderer.render(term.view, term.assigns, opts)
@@ -679,33 +813,40 @@ defmodule Breeze.ChildServer do
   defp truthy_modifier?(value), do: value in [true, "true"]
 
   defp preload_and_attach_live_view(term, opts) do
-    collector_key = {__MODULE__, :live_children, make_ref()}
-    Process.put(collector_key, [])
-
-    preload_opts =
-      Keyword.put(opts, :live_view, fn attrs, _child_opts ->
-        id = fetch_live_attr!(attrs, :id)
-        Process.put(collector_key, [{id, attrs} | Process.get(collector_key, [])])
-        :preloaded
-      end)
-
-    _ = Breeze.Renderer.render(term.view, term.assigns, preload_opts)
-
     discovered =
-      collector_key
-      |> Process.get([])
+      term.view.render(term.assigns)
+      |> Breeze.Template.render_to_tree(term.assigns)
+      |> collect_live_nodes([])
       |> Enum.reverse()
       |> Enum.uniq_by(&elem(&1, 0))
 
-    Process.delete(collector_key)
-
     term = ensure_children(term, discovered)
 
-    live_view = fn attrs, child_opts ->
-      render_live_child(attrs, child_opts, term)
-    end
+    if discovered == [] do
+      {term, opts}
+    else
+      live_view = fn attrs, child_opts ->
+        render_live_child(attrs, child_opts, term)
+      end
 
-    {term, Keyword.put(opts, :live_view, live_view)}
+      {term, Keyword.put(opts, :live_view, live_view)}
+    end
+  end
+
+  defp collect_live_nodes(nodes, acc) when is_list(nodes) do
+    Enum.reduce(nodes, acc, fn
+      {:live, attrs}, acc ->
+        [{fetch_live_attr!(attrs, :id), attrs} | acc]
+
+      {:box, _attrs, children}, acc ->
+        collect_live_nodes(children, acc)
+
+      {_tag, _attrs, children}, acc when is_list(children) ->
+        collect_live_nodes(children, acc)
+
+      _other, acc ->
+        acc
+    end)
   end
 
   defp ensure_children(term, live_children) do

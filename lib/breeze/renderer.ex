@@ -315,6 +315,7 @@ defmodule Breeze.Renderer do
   end
 
   defp build_tree([], box, children, style_state, flags, acc, opts) do
+    render_opts = opts
     %{focusables: focusables} = acc
     implicit_state = Keyword.get(opts, :implicit_state, %{})
     implicit_owner = Keyword.get(flags, :implicit_owner)
@@ -403,25 +404,6 @@ defmodule Breeze.Renderer do
         )
       )
 
-    box =
-      if implicit && function_exported?(implicit_mod, :animate, 5) do
-        animated_box =
-          %{box | style: struct(BackBreeze.Style, element.style)}
-
-        implicit_mod
-        |> apply(:animate, [
-          type,
-          animated_box,
-          flags,
-          implicit,
-          animation_ctx(opts, id, focused, previous_layout)
-        ])
-        |> normalize_animation_result()
-        |> elem(0)
-      else
-        box
-      end
-
     style =
       element.style
       |> maybe_resolve_intrinsic_inline_width(
@@ -444,6 +426,23 @@ defmodule Breeze.Renderer do
     content = box.content
 
     final_box = %{Box.new(opts) | children: children, content: content}
+
+    final_box =
+      if implicit && function_exported?(implicit_mod, :animate, 5) &&
+           not Keyword.get(render_opts, :layout_prepass, false) do
+        implicit_mod
+        |> apply(:animate, [
+          type,
+          final_box,
+          flags,
+          implicit,
+          animation_ctx(render_opts, id, focused, previous_layout)
+        ])
+        |> normalize_animation_result()
+        |> elem(0)
+      else
+        final_box
+      end
 
     boxes =
       acc.boxes

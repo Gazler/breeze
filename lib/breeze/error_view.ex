@@ -250,30 +250,34 @@ defmodule Breeze.ErrorView do
       Enum.with_index(entries)
       |> Enum.map(fn {_entry, index} -> %{value: Integer.to_string(index)} end)
 
-    list_state =
+    {list_state, _list_meta} =
       case Map.get(implicit_state, @stacktrace_id) do
         {Breeze.Implicit.List, state} ->
-          Breeze.Implicit.List.init(
-            stacktrace_children,
-            list_root_attrs(assigns, selected_index),
-            state
+          normalize_init_result(
+            Breeze.Implicit.List.init(
+              stacktrace_children,
+              list_root_attrs(assigns, selected_index),
+              state
+            )
           )
 
         _ ->
-          Breeze.Implicit.List.init(
-            stacktrace_children,
-            list_root_attrs(assigns, selected_index),
-            %{}
+          normalize_init_result(
+            Breeze.Implicit.List.init(
+              stacktrace_children,
+              list_root_attrs(assigns, selected_index),
+              %{}
+            )
           )
       end
 
-    history_state =
+    {history_state, _history_meta} =
       case Map.get(implicit_state, @history_id) do
         {Breeze.Implicit.Scroll, state} ->
-          Breeze.Implicit.Scroll.init([], %{}, state)
+          normalize_init_result(Breeze.Implicit.Scroll.init([], %{}, state))
 
         _ ->
-          Breeze.Implicit.Scroll.init([], %{}, %{})
+          normalize_init_result(Breeze.Implicit.Scroll.init([], %{}, %{}))
       end
 
     %{
@@ -281,6 +285,9 @@ defmodule Breeze.ErrorView do
       @history_id => {Breeze.Implicit.Scroll, history_state}
     }
   end
+
+  defp normalize_init_result({:ok, state, meta}) when is_list(meta), do: {state, Map.new(meta)}
+  defp normalize_init_result(state), do: {state, %{}}
 
   defp selected_index(crash, entries) do
     default = default_selected_index(entries)

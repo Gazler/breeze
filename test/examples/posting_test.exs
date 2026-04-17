@@ -84,6 +84,44 @@ defmodule PostingTest do
     assert %{focused: "request-header-name"} = Breeze.ChildServer.metadata(pid)
   end
 
+  test "header input implicit state survives switching tabs away and back" do
+    terminal = %Termite.Terminal{size: %{width: 120, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert {:noreply, "request-header-name", true} =
+             Breeze.ChildServer.set_focus(pid, "request-header-name")
+
+    for key <- String.graphemes("ABCDE") do
+      assert {:noreply, "request-header-name", true} = Breeze.ChildServer.dispatch_input(pid, key)
+    end
+
+    assert {:noreply, "request-header-name", true} =
+             Breeze.ChildServer.dispatch_input(pid, "ArrowLeft")
+
+    assert {:noreply, "request-header-name", true} =
+             Breeze.ChildServer.dispatch_input(pid, "ArrowLeft")
+
+    assert {Breeze.Implicit.Input, %{cursor: 3}} =
+             Breeze.ChildServer.metadata(pid).implicit_state["request-header-name"]
+
+    assert {:noreply, _focused, true} =
+             Breeze.ChildServer.dispatch_event(pid, "request_tab", %{value: "body"})
+
+    assert {:ok, _acc, body_box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert visible(body_box.content) =~ "No request body"
+
+    assert {:noreply, _focused, true} =
+             Breeze.ChildServer.dispatch_event(pid, "request_tab", %{value: "headers"})
+
+    assert {:ok, _acc, headers_box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert visible(headers_box.content) =~ "ABCDE"
+
+    assert {Breeze.Implicit.Input, %{cursor: 3}} =
+             Breeze.ChildServer.metadata(pid).implicit_state["request-header-name"]
+  end
+
   defmodule FakeAdapter do
     @behaviour Termite.Terminal.Adapter
 

@@ -135,20 +135,22 @@ defmodule Breeze.Implicit.ScrollTest do
 
   describe "init/3" do
     test "carries autoscroll configuration from root attrs" do
-      state = Scroll.init([], %{"scroll-autoscroll": "bottom"}, %{})
+      assert {:ok, state, meta} = Scroll.init([], %{"scroll-autoscroll": "bottom"}, %{})
 
       assert state.offset_y == 0
       assert state.autoscroll == "bottom"
       assert state.pinned_bottom == true
+      assert meta[:requires_layout_rerender] == true
     end
 
     test "preserves prior scroll state" do
-      state =
-        Scroll.init([], %{}, %{offset_y: 4, autoscroll: "bottom", pinned_bottom: false})
+      assert {:ok, state, meta} =
+               Scroll.init([], %{}, %{offset_y: 4, autoscroll: "bottom", pinned_bottom: false})
 
       assert state.offset_y == 4
       assert state.autoscroll == "bottom"
       assert state.pinned_bottom == false
+      assert meta[:requires_layout_rerender] == true
     end
   end
 

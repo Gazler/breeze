@@ -76,7 +76,8 @@ defmodule Breeze.LoggerTest do
     :sys.replace_state(pid, fn term -> Breeze.View.assign(term, lines: lines) end)
     {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
     bottom_scroll = logger_viewport(acc).scroll
-    assert bottom_scroll == {0, 0}
+    assert elem(bottom_scroll, 0) > 0
+    assert elem(bottom_scroll, 1) == 0
 
     assert {:noreply, "logger", true} =
              ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "k"})

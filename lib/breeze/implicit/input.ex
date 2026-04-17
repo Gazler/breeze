@@ -17,6 +17,13 @@ defmodule Breeze.Implicit.Input do
 
     cursor =
       case Map.fetch(root_attrs, :"input-cursor") do
+        {:ok, nil} ->
+          if Map.get(last_state, :value) == value and is_integer(Map.get(last_state, :cursor)) do
+            Map.get(last_state, :cursor)
+          else
+            max_cursor(value)
+          end
+
         {:ok, raw_cursor} ->
           if is_binary(raw_cursor), do: String.to_integer(raw_cursor), else: raw_cursor
 
@@ -37,7 +44,11 @@ defmodule Breeze.Implicit.Input do
     state = Map.merge(last_state, attrs_state)
     state = normalize_state(state)
 
-    {:ok, state, rerender_every: 500, active_when_focused: true, captures_printable_keys: true}
+    {:ok, state,
+     rerender_every: 500,
+     active_when_focused: true,
+     captures_printable_keys: true,
+     requires_layout_rerender: true}
   end
 
   @spec handle_event(term(), map(), state()) :: {:noreply, state()} | {{:change, map()}, state()}
@@ -144,6 +155,36 @@ defmodule Breeze.Implicit.Input do
     }
 
     {:ok, %{box | content: content}, overlays: [overlay]}
+  end
+
+  def animate(
+        :root,
+        box,
+        _flags,
+        state,
+        %{now: now, last_interaction_at: last_interaction_at} = ctx
+      ) do
+    case initial_layout(box) do
+      nil ->
+        box
+
+      layout ->
+        source = source_content(box.content, state)
+        {content, display_cursor} = render_visible_content(source, state, layout, box)
+        theme = Map.get(ctx, :theme)
+        defaults = Theme.default_style(theme)
+
+        overlay = %{
+          x: content_left_offset(box) + display_cursor,
+          y: content_top_offset(box),
+          char: cursor_char(content, display_cursor),
+          foreground_color: Map.get(defaults, :background_color),
+          background_color: Theme.color(theme, :cursor) || Theme.color(theme, :accent),
+          visible?: Breeze.TerminalOverlay.visible?(now, last_interaction_at)
+        }
+
+        {:ok, %{box | content: content}, overlays: [overlay]}
+    end
   end
 
   def animate(:root, box, _flags, _state, _ctx), do: box
@@ -256,6 +297,16 @@ defmodule Breeze.Implicit.Input do
     |> Map.put_new(:viewport_width, Map.get(state, :viewport_width))
     |> Breeze.Viewport.from_dimensions()
   end
+
+  defp initial_layout(%{width: width}) when is_integer(width) and width > 0 do
+    Breeze.Viewport.from_dimensions(%{width: width, height: 1, left: 0, top: 0})
+  end
+
+  defp initial_layout(%{style: %{width: width}}) when is_integer(width) and width > 0 do
+    Breeze.Viewport.from_dimensions(%{width: width, height: 1, left: 0, top: 0})
+  end
+
+  defp initial_layout(_box), do: nil
 
   defp visible_width(true, width) when width > 1 do
     width - 1

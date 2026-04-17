@@ -154,9 +154,13 @@ defmodule Breeze.Implicit.InputTest do
   end
 
   test "init returns normalized state and cursor animation metadata" do
-    assert {:ok, %{cursor: 0, value: "", placeholder: nil},
-            rerender_every: 500, active_when_focused: true, captures_printable_keys: true} =
+    assert {:ok, %{cursor: 0, value: "", placeholder: nil}, meta} =
              Input.init([], %{id: "input"}, %{})
+
+    assert meta[:rerender_every] == 500
+    assert meta[:active_when_focused] == true
+    assert meta[:captures_printable_keys] == true
+    assert meta[:requires_layout_rerender] == true
   end
 
   test "backspace clamps an out-of-range cursor" do
@@ -168,9 +172,13 @@ defmodule Breeze.Implicit.InputTest do
     assert {:noreply, %{value: "", cursor: 0}} =
              Input.handle_event(nil, %{"key" => "\x7f"}, %{value: "", cursor: 0})
 
-    assert {:ok, %{value: "", cursor: 0, placeholder: nil},
-            rerender_every: 500, active_when_focused: true, captures_printable_keys: true} =
+    assert {:ok, %{value: "", cursor: 0, placeholder: nil}, meta} =
              Input.init([], %{:"input-value" => "", :"input-cursor" => 4}, %{})
+
+    assert meta[:rerender_every] == 500
+    assert meta[:active_when_focused] == true
+    assert meta[:captures_printable_keys] == true
+    assert meta[:requires_layout_rerender] == true
   end
 
   test "placeholder inputs do not allow moving the cursor right" do
@@ -180,33 +188,45 @@ defmodule Breeze.Implicit.InputTest do
   end
 
   test "init prefers input attrs over previous implicit state" do
-    assert {:ok, %{value: "", cursor: 0, placeholder: nil},
-            rerender_every: 500, active_when_focused: true, captures_printable_keys: true} =
+    assert {:ok, %{value: "", cursor: 0, placeholder: nil}, meta} =
              Input.init([], %{:"input-value" => "", :"input-cursor" => 0}, %{
                value: "stale",
                cursor: 5,
                placeholder: "stale"
              })
+
+    assert meta[:rerender_every] == 500
+    assert meta[:active_when_focused] == true
+    assert meta[:captures_printable_keys] == true
+    assert meta[:requires_layout_rerender] == true
   end
 
   test "init preserves the previous cursor when rerendering the same value without input-cursor" do
-    assert {:ok, %{value: "hello", cursor: 2, placeholder: nil},
-            rerender_every: 500, active_when_focused: true, captures_printable_keys: true} =
+    assert {:ok, %{value: "hello", cursor: 2, placeholder: nil}, meta} =
              Input.init([], %{:"input-value" => "hello"}, %{
                value: "hello",
                cursor: 2,
                placeholder: nil
              })
+
+    assert meta[:rerender_every] == 500
+    assert meta[:active_when_focused] == true
+    assert meta[:captures_printable_keys] == true
+    assert meta[:requires_layout_rerender] == true
   end
 
   test "init moves the cursor to the end when the value changes without input-cursor" do
-    assert {:ok, %{value: "hello!", cursor: 6, placeholder: nil},
-            rerender_every: 500, active_when_focused: true, captures_printable_keys: true} =
+    assert {:ok, %{value: "hello!", cursor: 6, placeholder: nil}, meta} =
              Input.init([], %{:"input-value" => "hello!"}, %{
                value: "hello",
                cursor: 2,
                placeholder: nil
              })
+
+    assert meta[:rerender_every] == 500
+    assert meta[:active_when_focused] == true
+    assert meta[:captures_printable_keys] == true
+    assert meta[:requires_layout_rerender] == true
   end
 
   test "renders placeholder content when the value is empty" do

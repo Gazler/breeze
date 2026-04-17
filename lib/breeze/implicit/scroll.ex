@@ -15,11 +15,13 @@ defmodule Breeze.Implicit.Scroll do
     autoscroll =
       Map.get(root_attrs, :"scroll-autoscroll", Map.get(last_state, :autoscroll))
 
-    %{
+    state = %{
       offset_y: Map.get(last_state, :offset_y, 0),
       autoscroll: autoscroll,
       pinned_bottom: Map.get(last_state, :pinned_bottom, autoscroll == "bottom")
     }
+
+    {:ok, state, requires_layout_rerender: true}
   end
 
   def handle_event(_, %{"key" => key, "element" => element}, state)

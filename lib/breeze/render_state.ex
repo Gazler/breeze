@@ -3,28 +3,27 @@ defmodule Breeze.RenderState do
 
   alias Breeze.Viewport
 
+  def bootstrap(term, acc) do
+    sorted_elements = Enum.sort(acc.elements)
+    total = length(sorted_elements)
+
+    {implicits, implicit_meta, events} = init_implicits_and_events(sorted_elements, term, total)
+    focus_meta = Breeze.Focus.build_meta(acc.elements, implicits)
+
+    %{
+      implicit_state: implicits,
+      implicit_meta: implicit_meta,
+      events: events,
+      focusables: acc.focusables,
+      focus_meta: focus_meta
+    }
+  end
+
   def build(term, acc) do
     sorted_elements = Enum.sort(acc.elements)
     total = length(sorted_elements)
 
-    {implicit_build_state, events} =
-      Enum.reduce(sorted_elements, {initial_implicit_build_state(), %{}}, fn {_idx, elem} = item,
-                                                                             {implicit_state,
-                                                                              events} ->
-        next_implicit_state =
-          reduce_implicit_item(item, implicit_state, term, total)
-
-        id = Keyword.get(elem, :id)
-        change = Keyword.get(elem, :"br-change")
-
-        next_events =
-          if change, do: Map.put(events, id, %{change: change}), else: events
-
-        {next_implicit_state, next_events}
-      end)
-
-    {implicits, implicit_meta, _current, _mod, _last_id, _root_attrs} =
-      finalize_implicit_build_state(implicit_build_state, term)
+    {implicits, implicit_meta, events} = init_implicits_and_events(sorted_elements, term, total)
 
     raw_dimensions =
       build_dimensions(sorted_elements, acc.dimensions)
@@ -44,8 +43,41 @@ defmodule Breeze.RenderState do
     }
   end
 
+  def build_layout(acc, dimensions, live_dimensions \\ %{}) do
+    raw_dimensions =
+      build_dimensions(Enum.sort(acc.elements), dimensions)
+      |> Map.merge(live_dimensions)
+
+    {elements, mouse_targets} = build_layout_maps(raw_dimensions)
+
+    %{elements: elements, mouse_targets: mouse_targets}
+  end
+
   def build_dimensions(acc) do
     build_dimensions(Enum.sort(acc.elements), acc.dimensions)
+  end
+
+  defp init_implicits_and_events(sorted_elements, term, total) do
+    {implicit_build_state, events} =
+      Enum.reduce(sorted_elements, {initial_implicit_build_state(), %{}}, fn {_idx, elem} = item,
+                                                                             {implicit_state,
+                                                                              events} ->
+        next_implicit_state =
+          reduce_implicit_item(item, implicit_state, term, total)
+
+        id = Keyword.get(elem, :id)
+        change = Keyword.get(elem, :"br-change")
+
+        next_events =
+          if change, do: Map.put(events, id, %{change: change}), else: events
+
+        {next_implicit_state, next_events}
+      end)
+
+    {implicits, implicit_meta, _current, _mod, _last_id, _root_attrs} =
+      finalize_implicit_build_state(implicit_build_state, term)
+
+    {implicits, implicit_meta, events}
   end
 
   defp build_dimensions(sorted_elements, dimensions) do
