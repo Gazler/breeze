@@ -1741,7 +1741,8 @@ defmodule Breeze.Server do
 
   defp child_patch_lines(fragment, _height), do: :binary.split(fragment, "\n", [:global])
 
-  defp live_placeholder_style(%{attrs: attrs}, state, terminal) when is_list(attrs) or is_map(attrs) do
+  defp live_placeholder_style(%{attrs: attrs}, state, terminal)
+       when is_list(attrs) or is_map(attrs) do
     style_state =
       Breeze.Style.empty()
       |> Breeze.Style.put_class(fetch_live_attr(attrs, :class, nil))
