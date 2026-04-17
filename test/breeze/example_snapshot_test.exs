@@ -197,6 +197,17 @@ defmodule Breeze.ExampleSnapshotTest do
     )
   end
 
+  test "posting example snapshots help modal centered" do
+    session = Breeze.Test.start!(Posting, size: {120, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert {:noreply, "help", true} = Breeze.Test.input(session, "F1")
+
+    assert_snapshot(Breeze.Test.render!(session), "examples/posting/help-open.ansi",
+      snapshot_dir: "../__snapshots__"
+    )
+  end
+
   test "docs example snapshots stdlib scrolling" do
     session =
       Breeze.Test.start!(Docs,
