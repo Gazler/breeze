@@ -33,6 +33,7 @@ defmodule SSHPostingEntrypoint do
       view: Posting,
       start_opts: [username: session.username],
       terminal_opts: Termite.SSH.Session.terminal_opts(session),
+      halt_fun: fn -> :ok end,
       hide_cursor: true,
       mouse: [mode: :motion],
       inspector: true,

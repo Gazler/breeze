@@ -8,8 +8,7 @@ defmodule Demo do
      |> assign(counter: 0)
      |> put_local_keybindings([
        {"ArrowUp", "Increment"},
-       {"ArrowDown", "Decrement"},
-       {"q", "Quit"}
+       {"ArrowDown", "Decrement"}
      ])}
   end
 
@@ -38,7 +37,7 @@ end
 Breeze.Example.run(
   [
     view: Demo,
-    global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+    global_keybindings: [{"q", "Quit", fn _event, term -> {:stop, term} end}]
   ],
   keep_alive: :infinity
 )
