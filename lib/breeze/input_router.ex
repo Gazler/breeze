@@ -177,13 +177,7 @@ defmodule Breeze.InputRouter do
     end
   end
 
-  defp requested_system_theme?(:system), do: true
-
-  defp requested_system_theme?(%Breeze.Theme{mode: :system}), do: true
-
-  defp requested_system_theme?(%Breeze.Theme{variables: %{requested_theme: :system}}), do: true
-
-  defp requested_system_theme?(_theme), do: false
+  defp requested_system_theme?(theme), do: Breeze.Theme.requested_system?(theme)
 
   defp consume_theme_probe_reply(%{theme_probe: probe} = state, data) do
     {palette, buffer} = Breeze.Theme.merge_runtime_palette_data(probe.buffer, probe.palette, data)

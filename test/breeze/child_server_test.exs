@@ -1,6 +1,8 @@
 defmodule Breeze.ChildServerTest do
   use ExUnit.Case, async: true
 
+  alias Breeze.Theme
+
   defmodule MouseView do
     use Breeze.View
 
@@ -139,5 +141,50 @@ defmodule Breeze.ChildServerTest do
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, [])
     assert box.content =~ "saved: true"
+  end
+
+  test "palette notifications refresh system themes loaded from a theme struct source" do
+    ref = make_ref()
+
+    terminal = %Termite.Terminal{
+      reader: ref,
+      size: %{width: 80, height: 24}
+    }
+
+    theme_source = Theme.system()
+
+    {:ok, pid} =
+      Breeze.ChildServer.start(
+        view: MouseView,
+        terminal: terminal,
+        theme: theme_source,
+        theme_source: theme_source
+      )
+
+    assert %{theme: %{mode: :system16}} = Breeze.ChildServer.metadata(pid)
+
+    assert :ready =
+             Theme.finish_runtime_palette_probe(terminal, %{
+               1 => {170, 34, 51},
+               2 => {34, 170, 51},
+               3 => {204, 187, 51},
+               4 => {51, 85, 170},
+               5 => {153, 51, 170},
+               6 => {51, 170, 170},
+               7 => {221, 221, 221},
+               8 => {119, 119, 119},
+               9 => {221, 102, 68},
+               10 => {68, 204, 85},
+               11 => {230, 209, 90},
+               12 => {95, 123, 224},
+               13 => {179, 107, 212},
+               14 => {90, 214, 214},
+               background: {16, 17, 18},
+               foreground: {240, 240, 240}
+             })
+
+    send(pid, {:breeze_theme_palette, {:reader, ref}, :ready})
+
+    assert %{theme: %{mode: :system}} = Breeze.ChildServer.metadata(pid)
   end
 end

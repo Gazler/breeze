@@ -56,6 +56,56 @@ defmodule Breeze.Theme do
   @spec defaults_enabled?(term()) :: boolean()
   def defaults_enabled?(theme), do: theme not in [nil, false]
 
+  @spec requested_system?(term()) :: boolean()
+  def requested_system?(:system), do: true
+  def requested_system?(%__MODULE__{mode: :system}), do: true
+  def requested_system?(%__MODULE__{variables: %{requested_theme: :system}}), do: true
+
+  def requested_system?(theme) when is_list(theme) do
+    if Keyword.keyword?(theme), do: requested_system?(Map.new(theme)), else: false
+  end
+
+  def requested_system?(theme) when is_map(theme) do
+    variables = Map.get(theme, :variables) || Map.get(theme, "variables") || %{}
+
+    requested_theme =
+      Map.get(variables, :requested_theme) || Map.get(variables, "requested_theme")
+
+    mode =
+      Map.get(theme, :mode) || Map.get(theme, "mode") || Map.get(theme, :type) ||
+        Map.get(theme, "type")
+
+    requested_theme == :system or normalize_mode(mode) == :system
+  end
+
+  def requested_system?(_theme), do: false
+
+  @spec normalize_requested_source(term()) :: term()
+  def normalize_requested_source(%__MODULE__{
+        mode: :system16,
+        variables: %{requested_theme: :system}
+      }),
+      do: :system
+
+  def normalize_requested_source(theme) when is_list(theme) do
+    if Keyword.keyword?(theme), do: normalize_requested_source(Map.new(theme)), else: theme
+  end
+
+  def normalize_requested_source(theme) when is_map(theme) do
+    variables = Map.get(theme, :variables) || Map.get(theme, "variables") || %{}
+
+    requested_theme =
+      Map.get(variables, :requested_theme) || Map.get(variables, "requested_theme")
+
+    mode =
+      Map.get(theme, :mode) || Map.get(theme, "mode") || Map.get(theme, :type) ||
+        Map.get(theme, "type")
+
+    if requested_theme == :system and normalize_mode(mode) != :system, do: :system, else: theme
+  end
+
+  def normalize_requested_source(theme), do: theme
+
   @spec probe_status(t() | map() | keyword() | atom() | nil) ::
           :ready | :pending | :unavailable | nil
   def probe_status(theme) do

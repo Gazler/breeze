@@ -98,7 +98,7 @@ defmodule Breeze.ChildServer do
         term
       end
 
-    maybe_probe_system_theme(term.theme_source, term.terminal, term.server)
+    maybe_probe_system_theme(term.theme, term.terminal, term.server)
     term = sync_theme_assigns(term)
     {:ok, term}
   end
@@ -181,11 +181,20 @@ defmodule Breeze.ChildServer do
   end
 
   @impl true
-  def handle_info({:breeze_theme_palette, _key, _status}, %{theme_source: :system} = term) do
-    theme = Breeze.Theme.new(:system, terminal: term.terminal)
-    next_term = %{term | theme: theme} |> sync_theme_assigns()
-    notify_invalidate(next_term)
-    {:noreply, next_term}
+  def handle_info({:breeze_theme_palette, _key, _status}, term) do
+    if requested_system_theme?(term.theme) do
+      theme =
+        term.theme_source
+        |> Kernel.||(term.theme)
+        |> Breeze.Theme.normalize_requested_source()
+        |> Breeze.Theme.new(terminal: term.terminal)
+
+      next_term = %{term | theme: theme} |> sync_theme_assigns()
+      notify_invalidate(next_term)
+      {:noreply, next_term}
+    else
+      {:noreply, term}
+    end
   end
 
   def handle_info({:child_invalidated, child_id}, term) do
@@ -220,7 +229,7 @@ defmodule Breeze.ChildServer do
       term
       |> apply_focus_transitions(next_term)
 
-    maybe_probe_system_theme(next_term.theme_source, next_term.terminal, next_term.server)
+    maybe_probe_system_theme(next_term.theme, next_term.terminal, next_term.server)
     next_term = sync_theme_assigns(next_term)
     notify_invalidate(next_term)
     {:reply, {:noreply, next_term.focused}, next_term}
@@ -231,7 +240,7 @@ defmodule Breeze.ChildServer do
       term
       |> apply_focus_transitions(next_term)
 
-    maybe_probe_system_theme(next_term.theme_source, next_term.terminal, next_term.server)
+    maybe_probe_system_theme(next_term.theme, next_term.terminal, next_term.server)
     next_term = sync_theme_assigns(next_term)
     maybe_notify_invalidate(next_term, opts)
     {:reply, {:noreply, next_term.focused}, next_term}
@@ -260,12 +269,16 @@ defmodule Breeze.ChildServer do
   defp maybe_put_terminal(term, nil), do: term
   defp maybe_put_terminal(term, terminal), do: %{term | terminal: terminal}
 
-  defp maybe_probe_system_theme(:system, terminal, server) do
-    if is_pid(server), do: send(server, {:ensure_runtime_palette, :system})
-    Breeze.Theme.ensure_runtime_palette_async(terminal, self())
+  defp maybe_probe_system_theme(theme, terminal, server) do
+    if requested_system_theme?(theme) do
+      if is_pid(server), do: send(server, {:ensure_runtime_palette, :system})
+      Breeze.Theme.ensure_runtime_palette_async(terminal, self())
+    else
+      :ok
+    end
   end
 
-  defp maybe_probe_system_theme(_theme_input, _terminal, _server), do: :ok
+  defp requested_system_theme?(theme), do: Breeze.Theme.requested_system?(theme)
 
   defp sync_theme_assigns(%{theme: theme, assigns: assigns} = term) when is_map(assigns) do
     assigns =
@@ -1208,7 +1221,12 @@ defmodule Breeze.ChildServer do
   defp reply_from_input_result(result, term, opts \\ [])
 
   defp reply_from_input_result({:noreply, next_term}, term, opts) do
-    next_term = apply_focus_transitions(term, next_term)
+    next_term =
+      term
+      |> apply_focus_transitions(next_term)
+
+    maybe_probe_system_theme(next_term.theme, next_term.terminal, next_term.server)
+    next_term = sync_theme_assigns(next_term)
     maybe_notify_invalidate(next_term, opts)
     {:reply, {:noreply, next_term.focused, next_term != term}, next_term}
   end
@@ -1220,7 +1238,11 @@ defmodule Breeze.ChildServer do
   end
 
   defp reply_from_input_result({:stop, next_term}, term, opts) do
-    next_term = apply_focus_transitions(term, next_term)
+    next_term =
+      term
+      |> apply_focus_transitions(next_term)
+      |> sync_theme_assigns()
+
     maybe_notify_invalidate(next_term, opts)
     {:stop, :normal, {:stop, next_term.focused, true}, next_term}
   end
