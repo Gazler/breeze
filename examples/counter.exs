@@ -37,6 +37,7 @@ end
 Breeze.Example.run(
   [
     view: Demo,
+    alt_screen: false,
     global_keybindings: [{"q", "Quit", fn _event, term -> {:stop, term} end}]
   ],
   keep_alive: :infinity

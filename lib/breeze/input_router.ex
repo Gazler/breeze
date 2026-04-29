@@ -9,6 +9,7 @@ defmodule Breeze.InputRouter do
     :server_pid,
     :halt_fun,
     :theme_probe,
+    :alt_screen?,
     global_keybindings: []
   ]
 
@@ -18,10 +19,12 @@ defmodule Breeze.InputRouter do
 
   @impl true
   def init(opts) do
+    alt_screen? = Keyword.get(opts, :alt_screen, true)
     hide_cursor? = Keyword.get(opts, :hide_cursor, true)
     mouse = Keyword.get(opts, :mouse, false)
     terminal = build_terminal(opts)
     reader = terminal.reader
+    terminal = if alt_screen?, do: Termite.Screen.alt_screen(terminal), else: terminal
     terminal = if hide_cursor?, do: Termite.Screen.hide_cursor(terminal), else: terminal
     terminal = enable_mouse(terminal, mouse)
     terminal = Termite.Screen.clear_screen(terminal)
@@ -42,6 +45,7 @@ defmodule Breeze.InputRouter do
       reader: reader,
       server_pid: server_pid,
       halt_fun: Keyword.get(opts, :halt_fun, fn -> System.halt() end),
+      alt_screen?: alt_screen?,
       global_keybindings: Keyword.get(opts, :global_keybindings, [])
     }
 
@@ -289,7 +293,7 @@ defmodule Breeze.InputRouter do
     |> Termite.Screen.disable_mouse()
     |> Termite.Screen.clear_screen()
     |> Termite.Screen.show_cursor()
-    |> Termite.Screen.exit_alt_screen()
+    |> maybe_exit_alt_screen(state.alt_screen?)
     |> Termite.Terminal.write("\r")
 
     {:stop, :normal, state}
@@ -298,6 +302,9 @@ defmodule Breeze.InputRouter do
   defp decode_input(raw_key) do
     Breeze.Input.decode(raw_key)
   end
+
+  defp maybe_exit_alt_screen(terminal, true), do: Termite.Screen.exit_alt_screen(terminal)
+  defp maybe_exit_alt_screen(terminal, _), do: terminal
 
   defp normalize_key_event(%{"key" => _} = event), do: event
   defp normalize_key_event(key), do: %{"key" => key}

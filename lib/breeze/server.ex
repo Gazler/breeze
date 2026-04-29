@@ -55,6 +55,7 @@ defmodule Breeze.Server do
     :view_pid,
     :view,
     :start_opts,
+    :alt_screen?,
     :mouse_mode,
     :reload_opts,
     :reloader_pid,
@@ -103,6 +104,7 @@ defmodule Breeze.Server do
   @type option ::
           {:view, module()}
           | {:start_opts, keyword()}
+          | {:alt_screen, boolean()}
           | {:hide_cursor, boolean()}
           | {:mouse, boolean() | keyword()}
           | {:reload, boolean() | keyword()}
@@ -119,7 +121,8 @@ defmodule Breeze.Server do
   Valid options are:
 
     * `:view` - the view to run. This is required
-    * `:hide_cursor` - hide the cursor on start. Defaults to `false`
+    * `:alt_screen` - use the terminal alternate screen on start. Defaults to `true`
+    * `:hide_cursor` - hide the cursor on start. Defaults to `true`
     * `:mouse` - enable mouse tracking. Defaults to `false`. Pass `true` for click mode or keyword options for `Termite.Screen.enable_mouse/2`
     * `:global_keybindings` - app-wide keybindings checked before focused event handling
     * `:inspector` - opt-in inspector support. Defaults to `false`
@@ -206,6 +209,7 @@ defmodule Breeze.Server do
       view_pid: view_pid,
       view: view,
       start_opts: start_opts,
+      alt_screen?: Keyword.get(opts, :alt_screen, true),
       mouse_mode: Keyword.get(opts, :mouse, false),
       reload_opts:
         normalize_reload_opts(
@@ -1804,11 +1808,14 @@ defmodule Breeze.Server do
       |> Termite.Screen.disable_mouse()
       |> Termite.Screen.clear_screen()
       |> Termite.Screen.show_cursor()
-      |> Termite.Screen.exit_alt_screen()
+      |> maybe_exit_alt_screen(state.alt_screen?)
 
     terminal = Termite.Terminal.write(terminal, "\r")
     {:stop, :normal, %{state | terminal: terminal}}
   end
+
+  defp maybe_exit_alt_screen(terminal, true), do: Termite.Screen.exit_alt_screen(terminal)
+  defp maybe_exit_alt_screen(terminal, _), do: terminal
 
   defp crashed?(%{crash: crash}), do: not is_nil(crash)
 

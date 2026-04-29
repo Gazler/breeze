@@ -550,9 +550,12 @@ defmodule Breeze.Storybook.ViewTest do
       :sys.get_state(view_pid).assigns.current_story_id == "tabs"
     end)
 
-    wait_until(fn ->
-      Map.has_key?(:sys.get_state(pid).children, "storybook-preview")
-    end)
+    wait_until(
+      fn ->
+        Map.has_key?(:sys.get_state(pid).children, "storybook-preview")
+      end,
+      100
+    )
 
     preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
     viewport = :sys.get_state(pid).rendered_elements["storybook-preview"]
