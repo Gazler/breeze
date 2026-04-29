@@ -521,6 +521,27 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule ReloadStateView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok, term |> assign(count: Keyword.get(opts, :count, 0)) |> focus("root")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box id="root" focusable>Count: {@count}</box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "x"}, term) do
+      {:noreply, assign(term, count: term.assigns.count + 1)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule NestedReloadLeaf do
     use Breeze.View
 
@@ -1249,6 +1270,42 @@ defmodule Breeze.LiveViewTest do
     Process.exit(pid, :normal)
   end
 
+  test "refresh_server_opts can receive root metadata and preserve state on reload restart" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: ReloadStateView,
+        terminal: terminal,
+        reader: reader,
+        reload: [
+          force?: true,
+          watcher_module: FakeWatcher,
+          refresh_server_opts: {__MODULE__, :reload_state_server_opts, []}
+        ]
+      )
+
+    send(pid, {reader, {:data, "x"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      state.base_output =~ "Count: 1"
+    end)
+
+    send(pid, {:reload, :code_changed, ["examples/router.exs"]})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      state.debug_stats[:last_render_cause] == :reload and
+        state.start_opts == [count: 1] and
+        state.base_output =~ "Count: 1"
+    end)
+
+    Process.exit(pid, :normal)
+  end
+
   test "reloaded root global keybindings do not corrupt nested router child state" do
     {:ok, config_pid} =
       Agent.start_link(fn ->
@@ -1546,6 +1603,10 @@ defmodule Breeze.LiveViewTest do
 
   def reload_config_server_opts(refresh) when is_function(refresh, 0) do
     refresh.()
+  end
+
+  def reload_state_server_opts(%{metadata: %{assigns: assigns}}) do
+    [start_opts: [count: assigns.count]]
   end
 
   test "server restarts a live child when its view changes" do

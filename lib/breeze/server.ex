@@ -2062,7 +2062,9 @@ defmodule Breeze.Server do
         {:ok, state}
 
       refresh ->
-        with {:ok, refreshed_opts} <- call_refresh_server_opts(refresh),
+        context = %{metadata: safe_root_metadata(state)}
+
+        with {:ok, refreshed_opts} <- call_refresh_server_opts(refresh, context),
              {:ok, state} <- apply_refreshed_server_opts(state, refreshed_opts) do
           {:ok, state}
         else
@@ -2072,9 +2074,16 @@ defmodule Breeze.Server do
     end
   end
 
-  defp call_refresh_server_opts({module, function, args})
+  defp call_refresh_server_opts({module, function, args}, context)
        when is_atom(module) and is_atom(function) and is_list(args) do
-    case safe_call(fn -> apply(module, function, args) end) do
+    callback_args =
+      if function_exported?(module, function, length(args) + 1) do
+        args ++ [context]
+      else
+        args
+      end
+
+    case safe_call(fn -> apply(module, function, callback_args) end) do
       {:ok, opts} when is_list(opts) ->
         {:ok, opts}
 

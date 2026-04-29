@@ -122,6 +122,7 @@ defmodule Breeze.ChildServer do
        focused_implicit_id: focused_implicit_id(metadata_term, metadata_term.focused),
        focused_implicit_meta: focused_implicit_meta(metadata_term, metadata_term.focused),
        focus_meta: metadata_term.focus_meta,
+       assigns: metadata_term.assigns,
        implicit_state: metadata_term.implicit_state,
        implicit_meta: metadata_term.implicit_meta
      }, term}
