@@ -3,12 +3,16 @@ defmodule Breeze.InputRouter do
 
   use GenServer
 
+  alias Breeze.InputRouter.{IExShellProxy, SilentGroupLeader, TerminalStart}
+
   defstruct [
     :terminal,
     :reader,
     :server_pid,
     :halt_fun,
     :theme_probe,
+    :iex_shell_proxy,
+    :silent_group_leader,
     alt_screen?: true,
     enhanced_keyboard?: true,
     global_keybindings: []
@@ -18,13 +22,24 @@ defmodule Breeze.InputRouter do
     GenServer.start_link(__MODULE__, opts)
   end
 
+  def start(opts) do
+    GenServer.start(__MODULE__, opts)
+  end
+
   @impl true
   def init(opts) do
+    opts = maybe_put_iex_terminal_size_override(opts)
     alt_screen? = Keyword.get(opts, :alt_screen, true)
     hide_cursor? = Keyword.get(opts, :hide_cursor, true)
     enhanced_keyboard? = Keyword.get(opts, :enhanced_keyboard, true)
     mouse = Keyword.get(opts, :mouse, false)
-    terminal = build_terminal(opts)
+
+    %TerminalStart{
+      terminal: terminal,
+      iex_shell_proxy: iex_shell_proxy,
+      silent_group_leader: silent_group_leader
+    } = build_terminal(opts)
+
     reader = terminal.reader
     terminal = if alt_screen?, do: Termite.Screen.alt_screen(terminal), else: terminal
     terminal = if enhanced_keyboard?, do: enable_enhanced_keyboard(terminal), else: terminal
@@ -47,9 +62,11 @@ defmodule Breeze.InputRouter do
       terminal: terminal,
       reader: reader,
       server_pid: server_pid,
-      halt_fun: Keyword.get(opts, :halt_fun, fn -> System.halt() end),
+      halt_fun: Keyword.get_lazy(opts, :halt_fun, &default_halt_fun/0),
       alt_screen?: alt_screen?,
       enhanced_keyboard?: enhanced_keyboard?,
+      iex_shell_proxy: iex_shell_proxy,
+      silent_group_leader: silent_group_leader,
       global_keybindings: Keyword.get(opts, :global_keybindings, [])
     }
 
@@ -106,6 +123,8 @@ defmodule Breeze.InputRouter do
 
   @impl true
   def terminate(_reason, state) do
+    IExShellProxy.stop(state.iex_shell_proxy)
+    SilentGroupLeader.stop(state.silent_group_leader)
     state.halt_fun.()
     :ok
   end
@@ -304,16 +323,118 @@ defmodule Breeze.InputRouter do
   defp build_terminal(opts) do
     case Keyword.get(opts, :terminal) do
       %Termite.Terminal{} = terminal ->
-        terminal
+        %TerminalStart{terminal: terminal}
 
       nil ->
-        Termite.Terminal.start(Keyword.get(opts, :terminal_opts, []))
+        %TerminalStart{terminal: terminal, silent_group_leader: silent_group_leader} =
+          start_terminal(opts)
+
+        iex_shell_proxy = maybe_replace_iex_shell_reader(terminal, opts)
+        terminal = Termite.Terminal.resize(terminal)
+
+        %TerminalStart{
+          terminal: terminal,
+          iex_shell_proxy: iex_shell_proxy,
+          silent_group_leader: silent_group_leader
+        }
     end
+  end
+
+  defp start_terminal(opts) do
+    if Keyword.get(opts, :pause_iex, false) and iex_started?() do
+      start_terminal_with_silent_group_leader(Keyword.get(opts, :terminal_opts, []))
+    else
+      %TerminalStart{terminal: Termite.Terminal.start(Keyword.get(opts, :terminal_opts, []))}
+    end
+  end
+
+  defp maybe_put_iex_terminal_size_override(opts) do
+    if Keyword.get(opts, :pause_iex, false) and iex_started?() do
+      # IEx keeps the physical bottom row for prompt editing after a resize.
+      # Let Breeze render inside the rows that remain stable while IEx is paused.
+      Keyword.put_new(opts, :terminal_size_override, &reserve_iex_prompt_row/1)
+    else
+      opts
+    end
+  end
+
+  defp reserve_iex_prompt_row(%{height: height} = size) when is_integer(height) do
+    %{size | height: max(height - 1, 1)}
+  end
+
+  defp reserve_iex_prompt_row(size), do: size
+
+  defp start_terminal_with_silent_group_leader(terminal_opts) do
+    original_group_leader = Process.group_leader()
+
+    {:ok, silent_group_leader} = SilentGroupLeader.start_link()
+
+    try do
+      Process.group_leader(self(), silent_group_leader)
+
+      %TerminalStart{
+        terminal: Termite.Terminal.start(terminal_opts),
+        silent_group_leader: silent_group_leader
+      }
+    after
+      Process.group_leader(self(), original_group_leader)
+    end
+  end
+
+  defp maybe_replace_iex_shell_reader(
+         %Termite.Terminal{
+           adapter: {Termite.Terminal.Shell, %Termite.Terminal.Shell{pid: shell_pid}}
+         },
+         opts
+       ) do
+    if Keyword.get(opts, :pause_iex, false) and iex_started?() do
+      replace_shell_reader(shell_pid)
+    end
+  end
+
+  defp maybe_replace_iex_shell_reader(_terminal, _opts), do: nil
+
+  defp replace_shell_reader(shell_pid) when is_pid(shell_pid) do
+    with %{reader: reader} when is_pid(reader) <- :sys.get_state(shell_pid),
+         true <- Process.alive?(reader),
+         {:ok, iex_shell_proxy} <- IExShellProxy.start_link(shell_pid) do
+      unlink_shell_reader(shell_pid, reader)
+      Process.exit(reader, :kill)
+      iex_shell_proxy
+    else
+      _ -> nil
+    end
+  catch
+    _kind, _reason -> nil
+  end
+
+  defp unlink_shell_reader(shell_pid, reader) do
+    :sys.replace_state(shell_pid, fn state ->
+      Process.unlink(reader)
+      state
+    end)
+
+    :ok
+  catch
+    _kind, _reason -> :ok
+  end
+
+  defp default_halt_fun do
+    if iex_started?() do
+      fn -> :ok end
+    else
+      fn -> System.halt() end
+    end
+  end
+
+  defp iex_started? do
+    Code.ensure_loaded?(IEx) and function_exported?(IEx, :started?, 0) and IEx.started?()
   end
 
   defp stop(state) do
     if Process.alive?(state.server_pid) do
-      Process.exit(state.server_pid, :normal)
+      Process.unlink(state.server_pid)
+      Process.exit(state.server_pid, :shutdown)
     end
 
     state.terminal

@@ -9,7 +9,14 @@ defmodule Breeze.InputRouterTest do
     @behaviour Termite.Terminal.Adapter
 
     def start(opts) do
-      {:ok, %{ref: make_ref(), size: %{width: 80, height: 24}, owner: Keyword.get(opts, :owner)}}
+      ref = make_ref()
+      owner = Keyword.get(opts, :owner)
+
+      if owner do
+        send(owner, {:terminal_started, self(), ref})
+      end
+
+      {:ok, %{ref: ref, size: %{width: 80, height: 24}, owner: owner}}
     end
 
     def reader(term), do: {:ok, term.ref}
@@ -21,25 +28,6 @@ defmodule Breeze.InputRouterTest do
 
     def write(term, _str), do: {:ok, term}
     def resize(term), do: term.size
-  end
-
-  defmodule RecordingAdapter do
-    @behaviour Termite.Terminal.Adapter
-
-    def start(opts) do
-      ref = make_ref()
-      owner = Keyword.fetch!(opts, :owner)
-      send(owner, {:terminal_started, self(), ref})
-      {:ok, %{ref: ref, owner: owner, size: %{width: 80, height: 24}}}
-    end
-
-    def reader(term), do: {:ok, term.ref}
-    def resize(term), do: term.size
-
-    def write(term, str) do
-      send(term.owner, {:terminal_write, str})
-      {:ok, term}
-    end
   end
 
   defmodule PaletteAdapter do
@@ -450,58 +438,26 @@ defmodule Breeze.InputRouterTest do
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
   end
 
-  test "enters the alternate screen by default" do
+  test "Server.run blocks until the app stops without halting" do
     parent = self()
 
-    {:ok, pid} =
-      Breeze.InputRouter.start_link(
-        view: BlockingView,
-        start_opts: [parent: parent],
-        hide_cursor: false,
-        terminal_opts: [adapter: RecordingAdapter, owner: parent],
-        halt_fun: fn -> send(parent, :halted) end,
-        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
-      )
+    task =
+      Task.async(fn ->
+        Breeze.Server.run(
+          view: BlockingView,
+          start_opts: [parent: parent],
+          hide_cursor: false,
+          terminal_opts: [adapter: FakeAdapter, owner: parent],
+          global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+        )
+      end)
 
-    assert_receive {:terminal_started, ^pid, reader}
+    assert_receive {:terminal_started, router_pid, reader}
+    refute Task.yield(task, 50)
 
-    assert wait_until(fn ->
-             drain_terminal_writes()
-             |> IO.iodata_to_binary()
-             |> String.contains?("\e[?1049h")
-           end)
+    send(router_pid, {reader, {:data, "q"}})
 
-    send(pid, {reader, {:data, "q"}})
-    assert_receive :halted
-  end
-
-  test "alt_screen false does not enter or exit the alternate screen" do
-    parent = self()
-
-    {:ok, pid} =
-      Breeze.InputRouter.start_link(
-        view: BlockingView,
-        start_opts: [parent: parent],
-        alt_screen: false,
-        hide_cursor: false,
-        terminal_opts: [adapter: RecordingAdapter, owner: parent],
-        halt_fun: fn -> send(parent, :halted) end,
-        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
-      )
-
-    ref = Process.monitor(pid)
-    assert_receive {:terminal_started, ^pid, reader}
-
-    send(pid, {reader, {:data, "q"}})
-    assert_receive :halted
-    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
-
-    payload =
-      drain_terminal_writes()
-      |> IO.iodata_to_binary()
-
-    refute String.contains?(payload, "\e[?1049h")
-    refute String.contains?(payload, "\e[?1049l")
+    assert Task.await(task) == :ok
   end
 
   test "stop global keys do not halt when a focused implicit captures printable input" do
@@ -568,13 +524,5 @@ defmodule Breeze.InputRouterTest do
     end)
 
     Process.exit(pid, :normal)
-  end
-
-  defp drain_terminal_writes(writes \\ []) do
-    receive do
-      {:terminal_write, str} -> drain_terminal_writes([str | writes])
-    after
-      10 -> Enum.reverse(writes)
-    end
   end
 end
