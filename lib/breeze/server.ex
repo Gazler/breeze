@@ -1217,13 +1217,22 @@ defmodule Breeze.Server do
   defp build_frame_payload(prev_lines, lines, prev_overlays, overlays, screen_width) do
     changed_base_rows = changed_base_rows(prev_lines, lines)
     changed_overlay_rows = changed_overlay_rows(prev_overlays, overlays)
+
+    patch_only_overlay_rows =
+      patch_only_overlay_rows(prev_overlays, overlays, changed_overlay_rows)
+
+    repaired_overlay_rows = MapSet.difference(changed_overlay_rows, patch_only_overlay_rows)
     changed_rows = MapSet.union(changed_base_rows, changed_overlay_rows)
 
     if MapSet.size(changed_rows) == 0 do
       ""
     else
       IO.iodata_to_binary([
-        row_patch_payload(lines, changed_base_rows, screen_width),
+        row_patch_payload(
+          lines,
+          MapSet.union(changed_base_rows, repaired_overlay_rows),
+          screen_width
+        ),
         overlay_patch_payload(overlays, changed_overlay_rows)
       ])
     end
@@ -1294,6 +1303,35 @@ defmodule Breeze.Server do
 
   defp overlay_signature(overlay) do
     {Map.get(overlay, :x), Map.get(overlay, :y), Breeze.TerminalOverlay.render_overlay(overlay)}
+  end
+
+  defp patch_only_overlay_rows(prev_overlays, overlays, changed_overlay_rows) do
+    prev_map = overlay_row_map_by_row(prev_overlays)
+    next_map = overlay_row_map_by_row(overlays)
+
+    Enum.reduce(changed_overlay_rows, MapSet.new(), fn row, acc ->
+      prev_row_overlays = Map.get(prev_map, row, [])
+      next_row_overlays = Map.get(next_map, row, [])
+
+      if patch_only_overlay_row?(prev_row_overlays, next_row_overlays) do
+        MapSet.put(acc, row)
+      else
+        acc
+      end
+    end)
+  end
+
+  defp patch_only_overlay_row?(prev_overlays, next_overlays)
+       when prev_overlays != [] and next_overlays != [] do
+    Enum.all?(prev_overlays ++ next_overlays, &Map.get(&1, :patch_only, false))
+  end
+
+  defp patch_only_overlay_row?(_prev_overlays, _next_overlays), do: false
+
+  defp overlay_row_map_by_row(overlays) do
+    Enum.reduce(overlays, %{}, fn overlay, acc ->
+      Map.update(acc, Map.get(overlay, :y, 0), [overlay], &[overlay | &1])
+    end)
   end
 
   defp row_patch_payload(lines, changed_rows, screen_width) do

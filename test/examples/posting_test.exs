@@ -152,6 +152,24 @@ defmodule PostingTest do
     def resize(term), do: term.size
   end
 
+  defmodule RecordingAdapter do
+    @behaviour Termite.Terminal.Adapter
+
+    def start(opts) do
+      {:ok,
+       %{ref: make_ref(), size: %{width: 80, height: 24}, owner: Keyword.fetch!(opts, :owner)}}
+    end
+
+    def reader(term), do: {:ok, term.ref}
+
+    def write(term, str) do
+      send(term.owner, {:terminal_write, str})
+      {:ok, term}
+    end
+
+    def resize(term), do: term.size
+  end
+
   test "server input flush loop settles after a focus change" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader
@@ -381,7 +399,7 @@ defmodule PostingTest do
   end
 
   test "posting inspector dock can move to the top" do
-    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
     reader = terminal.reader
 
     {:ok, pid} =
@@ -399,6 +417,7 @@ defmodule PostingTest do
     end)
 
     assert %{panel_position: :bottom, move_key: "PageUp"} = Breeze.Server.inspector_snapshot(pid)
+    drain_terminal_writes()
 
     send(pid, {reader, {:data, "\e[5~"}})
 
@@ -407,6 +426,7 @@ defmodule PostingTest do
     end)
 
     assert %{panel_position: :top} = Breeze.Server.inspector_snapshot(pid)
+    assert_terminal_repaired_row(24 - Breeze.Inspector.panel_height())
 
     send(pid, {reader, {:data, "\e[5~"}})
 
@@ -415,6 +435,7 @@ defmodule PostingTest do
     end)
 
     assert %{panel_position: :bottom} = Breeze.Server.inspector_snapshot(pid)
+    assert_terminal_repaired_row(0)
 
     Process.exit(pid, :normal)
   end
@@ -600,5 +621,21 @@ defmodule PostingTest do
 
   defp visible(content) do
     String.replace(content, ~r/\e\[[0-9;]*m/u, "")
+  end
+
+  defp assert_terminal_repaired_row(zero_based_row) do
+    payload =
+      drain_terminal_writes()
+      |> IO.iodata_to_binary()
+
+    assert payload =~ "\e[#{zero_based_row + 1};1H"
+  end
+
+  defp drain_terminal_writes(writes \\ []) do
+    receive do
+      {:terminal_write, str} -> drain_terminal_writes([str | writes])
+    after
+      10 -> Enum.reverse(writes)
+    end
   end
 end
