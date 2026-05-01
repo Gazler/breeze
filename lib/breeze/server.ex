@@ -1215,16 +1215,16 @@ defmodule Breeze.Server do
   end
 
   defp build_frame_payload(prev_lines, lines, prev_overlays, overlays, screen_width) do
-    changed_rows =
-      changed_base_rows(prev_lines, lines)
-      |> MapSet.union(changed_overlay_rows(prev_overlays, overlays))
+    changed_base_rows = changed_base_rows(prev_lines, lines)
+    changed_overlay_rows = changed_overlay_rows(prev_overlays, overlays)
+    changed_rows = MapSet.union(changed_base_rows, changed_overlay_rows)
 
     if MapSet.size(changed_rows) == 0 do
       ""
     else
       IO.iodata_to_binary([
-        row_patch_payload(lines, changed_rows, screen_width),
-        overlay_patch_payload(overlays, changed_rows)
+        row_patch_payload(lines, changed_base_rows, screen_width),
+        overlay_patch_payload(overlays, changed_overlay_rows)
       ])
     end
   end
