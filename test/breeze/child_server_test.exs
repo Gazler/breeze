@@ -163,6 +163,9 @@ defmodule Breeze.ChildServerTest do
 
     assert %{theme: %{mode: :system16}} = Breeze.ChildServer.metadata(pid)
 
+    send(pid, {:breeze_theme_palette, {:reader, make_ref()}, :ready})
+    assert %{theme: %{mode: :system16}} = Breeze.ChildServer.metadata(pid)
+
     assert :ready =
              Theme.finish_runtime_palette_probe(terminal, %{
                1 => {170, 34, 51},

@@ -182,8 +182,8 @@ defmodule Breeze.ChildServer do
   end
 
   @impl true
-  def handle_info({:breeze_theme_palette, _key, _status}, term) do
-    if requested_system_theme?(term.theme) do
+  def handle_info({:breeze_theme_palette, key, _status}, term) do
+    if requested_system_theme?(term.theme) and palette_notification_matches?(term.terminal, key) do
       theme =
         term.theme_source
         |> Kernel.||(term.theme)
@@ -280,6 +280,12 @@ defmodule Breeze.ChildServer do
   end
 
   defp requested_system_theme?(theme), do: Breeze.Theme.requested_system?(theme)
+
+  defp palette_notification_matches?(%Termite.Terminal{reader: reader}, {:reader, reader})
+       when not is_nil(reader),
+       do: true
+
+  defp palette_notification_matches?(_terminal, _key), do: false
 
   defp sync_theme_assigns(%{theme: theme, assigns: assigns} = term) when is_map(assigns) do
     assigns =

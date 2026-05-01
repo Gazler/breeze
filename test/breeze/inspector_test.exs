@@ -8,8 +8,7 @@ defmodule Breeze.InspectorTest do
     state =
       base_state(%{
         inspector: [toggle_key: "F9", move_key: "F10"],
-        inspector_selected_id: "field",
-        inspector_hovered_id: "nested"
+        inspector_state: %{selected_id: "field", hovered_id: "nested"}
       })
 
     assert Inspector.enabled?(state)
@@ -17,23 +16,21 @@ defmodule Breeze.InspectorTest do
     assert Inspector.move_key(state) == "F10"
 
     opened = Inspector.toggle(state)
-    assert opened.inspector_visible?
-    assert opened.inspector_selected_id == "field"
-    assert opened.inspector_hovered_id == nil
+    assert opened.inspector_state.visible?
+    assert opened.inspector_state.selected_id == "field"
+    assert opened.inspector_state.hovered_id == nil
 
     closed = Inspector.toggle(opened)
-    refute closed.inspector_visible?
-    assert closed.inspector_selected_id == "field"
-    assert closed.inspector_hovered_id == nil
+    refute closed.inspector_state.visible?
+    assert closed.inspector_state.selected_id == "field"
+    assert closed.inspector_state.hovered_id == nil
   end
 
   test "snapshot falls back to the focused element when the selected id is stale" do
     state =
       base_state(%{
         inspector: true,
-        inspector_visible?: true,
-        inspector_selected_id: "missing",
-        inspector_hovered_id: "nested",
+        inspector_state: %{visible?: true, selected_id: "missing", hovered_id: "nested"},
         focused: "field"
       })
 
@@ -54,13 +51,14 @@ defmodule Breeze.InspectorTest do
     state =
       base_state(%{
         inspector: true,
-        inspector_visible?: true,
-        inspector_selected_id: nil,
+        inspector_state: %{visible?: true, selected_id: nil},
         focused: nil,
-        rendered_flags: %{
-          "__inspector__1" => [__inspector_idx__: 1],
-          "field" => [id: "field"],
-          "nested" => [id: "nested"]
+        rendered: %{
+          flags: %{
+            "__inspector__1" => [__inspector_idx__: 1],
+            "field" => [id: "field"],
+            "nested" => [id: "nested"]
+          }
         }
       })
 
@@ -74,56 +72,54 @@ defmodule Breeze.InspectorTest do
     state =
       base_state(%{
         inspector: true,
-        inspector_visible?: true,
-        inspector_selected_id: "field"
+        inspector_state: %{visible?: true, selected_id: "field"}
       })
 
     click = %{x: 4, y: 3}
 
     state = Inspector.select_at(state, click)
-    assert state.inspector_selected_id == "nested"
-    assert state.inspector_hovered_id == "nested"
+    assert state.inspector_state.selected_id == "nested"
+    assert state.inspector_state.hovered_id == "nested"
 
     state = Inspector.select_at(state, click)
-    assert state.inspector_selected_id == "field"
-    assert state.inspector_hovered_id == "field"
+    assert state.inspector_state.selected_id == "field"
+    assert state.inspector_state.hovered_id == "field"
   end
 
   test "hover_at and select_at ignore mouse events inside the inspector panel" do
     state =
       base_state(%{
         inspector: true,
-        inspector_visible?: true,
-        inspector_selected_id: "field",
-        inspector_hovered_id: "nested"
+        inspector_state: %{visible?: true, selected_id: "field", hovered_id: "nested"}
       })
 
     bottom_panel_event = %{x: 10, y: 24}
 
-    assert Inspector.hover_at(state, bottom_panel_event).inspector_hovered_id == "nested"
-    assert Inspector.select_at(state, bottom_panel_event).inspector_selected_id == "field"
+    assert Inspector.hover_at(state, bottom_panel_event).inspector_state.hovered_id == "nested"
+    assert Inspector.select_at(state, bottom_panel_event).inspector_state.selected_id == "field"
 
     top_docked =
       state
       |> Inspector.toggle_position()
-      |> Map.put(:inspector_hovered_id, "nested")
+      |> then(fn state ->
+        %{state | inspector_state: %{state.inspector_state | hovered_id: "nested"}}
+      end)
 
     top_panel_event = %{x: 10, y: 1}
 
-    assert Inspector.hover_at(top_docked, top_panel_event).inspector_hovered_id == "nested"
-    assert Inspector.select_at(top_docked, top_panel_event).inspector_selected_id == "field"
+    assert Inspector.hover_at(top_docked, top_panel_event).inspector_state.hovered_id == "nested"
+    assert Inspector.select_at(top_docked, top_panel_event).inspector_state.selected_id == "field"
   end
 
   test "overlays are empty when hidden and include markers plus panel rows when visible" do
     state =
       base_state(%{
         inspector: true,
-        inspector_visible?: true,
-        inspector_selected_id: "field",
-        inspector_hovered_id: "nested"
+        inspector_state: %{visible?: true, selected_id: "field", hovered_id: "nested"}
       })
 
-    assert Inspector.overlays(%{state | inspector_visible?: false}) == []
+    hidden = %{state | inspector_state: %{state.inspector_state | visible?: false}}
+    assert Inspector.overlays(hidden) == []
 
     overlays = Inspector.overlays(state)
     content_rows = Enum.filter(overlays, &Map.has_key?(&1, :content))
@@ -139,48 +135,54 @@ defmodule Breeze.InspectorTest do
     Map.merge(
       %{
         inspector: false,
-        inspector_visible?: false,
-        inspector_selected_id: nil,
-        inspector_hovered_id: nil,
-        inspector_panel_position: :bottom,
+        inspector_state: %{
+          visible?: false,
+          selected_id: nil,
+          hovered_id: nil,
+          panel_position: :bottom
+        },
         focused: nil,
         view: __MODULE__.ExampleView,
         theme: nil,
         terminal: %Termite.Terminal{size: %{width: 80, height: 24}},
-        rendered_mouse_targets: %{
-          "field" => %{left: 0, right: 12, top: 0, bottom: 3},
-          "nested" => %{left: 2, right: 6, top: 1, bottom: 2}
-        },
-        rendered_flags: %{
-          "field" => [id: "field", focusable: true, class: "input"],
-          "nested" => [id: "nested", class: "label"]
-        },
-        rendered_viewports: %{
-          "field" => %Viewport{
-            left: 0,
-            top: 0,
-            width: 13,
-            height: 4,
-            viewport_width: 13,
-            viewport_height: 4,
-            content_width: 13,
-            content_height: 4
+        rendered: %{
+          mouse_targets: %{
+            "field" => %{left: 0, right: 12, top: 0, bottom: 3},
+            "nested" => %{left: 2, right: 6, top: 1, bottom: 2}
           },
-          "nested" => %Viewport{
-            left: 2,
-            top: 1,
-            width: 5,
-            height: 2,
-            viewport_width: 5,
-            viewport_height: 2,
-            content_width: 5,
-            content_height: 2
-          }
+          flags: %{
+            "field" => [id: "field", focusable: true, class: "input"],
+            "nested" => [id: "nested", class: "label"]
+          },
+          viewports: %{
+            "field" => %Viewport{
+              left: 0,
+              top: 0,
+              width: 13,
+              height: 4,
+              viewport_width: 13,
+              viewport_height: 4,
+              content_width: 13,
+              content_height: 4
+            },
+            "nested" => %Viewport{
+              left: 2,
+              top: 1,
+              width: 5,
+              height: 2,
+              viewport_width: 5,
+              viewport_height: 2,
+              content_width: 5,
+              content_height: 2
+            }
+          },
+          boxes: %{},
+          focus_meta: %{"field" => %{group: :form}},
+          implicit_state: %{},
+          implicit_meta: %{}
         },
-        rendered_boxes: %{},
-        rendered_focus_meta: %{"field" => %{group: :form}},
-        rendered_implicit_state: %{},
-        rendered_implicit_meta: %{}
+        children: %{},
+        focus_memory: %{}
       },
       overrides
     )

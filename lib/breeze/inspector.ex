@@ -9,12 +9,10 @@ defmodule Breeze.Inspector do
 
   def panel_height, do: @panel_height
 
-  def enabled?(%{inspector: false}), do: false
-  def enabled?(%{inspector: nil}), do: false
-  def enabled?(_state), do: true
+  def enabled?(state), do: config_source(state) not in [false, nil]
 
   def config(state) do
-    case Map.get(state, :inspector) do
+    case config_source(state) do
       config when is_list(config) -> config
       true -> []
       _ -> []
@@ -23,22 +21,25 @@ defmodule Breeze.Inspector do
 
   def toggle_key(state), do: Keyword.get(config(state), :toggle_key, "F4")
   def move_key(state), do: Keyword.get(config(state), :move_key, "PageUp")
-  def panel_position(state), do: Map.get(state, :inspector_panel_position, :bottom)
+
+  def panel_position(state),
+    do: inspector_field(state, :panel_position, :inspector_panel_position, :bottom)
 
   def picks_mouse?(state) do
-    enabled?(state) and Map.get(state, :inspector_visible?, false)
+    enabled?(state) and inspector_field(state, :visible?, :inspector_visible?, false)
   end
 
   def toggle(state) do
-    visible? = not Map.get(state, :inspector_visible?, false)
+    visible? = not inspector_field(state, :visible?, :inspector_visible?, false)
 
     state
-    |> Map.put(:inspector_visible?, visible?)
-    |> Map.put(
+    |> put_inspector_field(:visible?, :inspector_visible?, visible?)
+    |> put_inspector_field(
+      :selected_id,
       :inspector_selected_id,
-      if(visible?, do: Map.get(state, :inspector_selected_id), else: nil)
+      if(visible?, do: inspector_field(state, :selected_id, :inspector_selected_id), else: nil)
     )
-    |> Map.put(:inspector_hovered_id, nil)
+    |> put_inspector_field(:hovered_id, :inspector_hovered_id, nil)
     |> sync_selected_id()
   end
 
@@ -49,14 +50,19 @@ defmodule Breeze.Inspector do
         _ -> :top
       end
 
-    Map.put(state, :inspector_panel_position, next_position)
+    put_inspector_field(state, :panel_position, :inspector_panel_position, next_position)
   end
 
   def hover_at(state, %{x: x, y: y}) do
     if inside_panel?(state, x, y) do
       state
     else
-      Map.put(state, :inspector_hovered_id, state |> targets_at(x, y) |> List.first())
+      put_inspector_field(
+        state,
+        :hovered_id,
+        :inspector_hovered_id,
+        state |> targets_at(x, y) |> List.first()
+      )
     end
   end
 
@@ -65,7 +71,7 @@ defmodule Breeze.Inspector do
       state
     else
       targets = targets_at(state, x, y)
-      current = Map.get(state, :inspector_selected_id)
+      current = inspector_field(state, :selected_id, :inspector_selected_id)
       hovered = List.first(targets)
 
       id =
@@ -76,15 +82,15 @@ defmodule Breeze.Inspector do
         end
 
       state
-      |> Map.put(:inspector_selected_id, id)
-      |> Map.put(:inspector_hovered_id, id)
+      |> put_inspector_field(:selected_id, :inspector_selected_id, id)
+      |> put_inspector_field(:hovered_id, :inspector_hovered_id, id)
       |> sync_selected_id()
     end
   end
 
   def sync_selected_id(state) do
     selected_id =
-      case Map.get(state, :inspector_selected_id) do
+      case inspector_field(state, :selected_id, :inspector_selected_id) do
         id when is_binary(id) ->
           if has_element?(state, id), do: id, else: fallback_selected_id(state)
 
@@ -92,19 +98,19 @@ defmodule Breeze.Inspector do
           fallback_selected_id(state)
       end
 
-    Map.put(state, :inspector_selected_id, selected_id)
+    put_inspector_field(state, :selected_id, :inspector_selected_id, selected_id)
   end
 
   def snapshot(state) do
     state = sync_selected_id(state)
     screen = Map.get(state.terminal, :size, %{width: 0, height: 0})
-    selected_id = Map.get(state, :inspector_selected_id)
-    hovered_id = Map.get(state, :inspector_hovered_id)
+    selected_id = inspector_field(state, :selected_id, :inspector_selected_id)
+    hovered_id = inspector_field(state, :hovered_id, :inspector_hovered_id)
     focusable_ids = focusable_ids(state)
 
     %{
       enabled?: enabled?(state),
-      visible?: Map.get(state, :inspector_visible?, false),
+      visible?: inspector_field(state, :visible?, :inspector_visible?, false),
       selected_id: selected_id,
       hovered_id: hovered_id,
       focused: Map.get(state, :focused),
@@ -119,9 +125,9 @@ defmodule Breeze.Inspector do
       last_render_at: Map.get(state, :last_render_at),
       last_interaction_at: Map.get(state, :last_interaction_at),
       counts: %{
-        elements: map_size(Map.get(state, :rendered_flags, %{})),
+        elements: map_size(rendered_field(state, :flags, :rendered_flags)),
         focusables: length(focusable_ids),
-        mouse_targets: map_size(Map.get(state, :rendered_mouse_targets, %{})),
+        mouse_targets: map_size(rendered_field(state, :mouse_targets, :rendered_mouse_targets)),
         children: map_size(Map.get(state, :children, %{}))
       },
       focus: %{
@@ -158,7 +164,7 @@ defmodule Breeze.Inspector do
 
   defp targets_at(state, x, y) do
     state
-    |> Map.get(:rendered_mouse_targets, %{})
+    |> rendered_field(:mouse_targets, :rendered_mouse_targets)
     |> Enum.filter(fn {_id, bounds} ->
       is_integer(bounds[:left]) and is_integer(bounds[:right]) and
         is_integer(bounds[:top]) and is_integer(bounds[:bottom]) and
@@ -205,14 +211,16 @@ defmodule Breeze.Inspector do
   defp selected_snapshot(_state, nil), do: nil
 
   defp selected_snapshot(state, id) do
-    viewport = Map.get(state.rendered_viewports, id, %Viewport{})
-    bounds = Map.get(state.rendered_mouse_targets, id, %{})
-    flags = normalize_flags(Map.get(state.rendered_flags, id, []))
+    viewport = Map.get(rendered_field(state, :viewports, :rendered_viewports), id, %Viewport{})
+    bounds = Map.get(rendered_field(state, :mouse_targets, :rendered_mouse_targets), id, %{})
+    flags = normalize_flags(Map.get(rendered_field(state, :flags, :rendered_flags), id, []))
     actual_id = Map.get(flags, :id)
-    box = Map.get(state.rendered_boxes, id)
-    focus_meta = Map.get(state.rendered_focus_meta, id, %{})
-    implicit_entry = Map.get(state.rendered_implicit_state, id)
-    implicit_meta = Map.get(state.rendered_implicit_meta, id, %{})
+    box = Map.get(rendered_field(state, :boxes, :rendered_boxes), id)
+    focus_meta = Map.get(rendered_field(state, :focus_meta, :rendered_focus_meta), id, %{})
+    implicit_entry = Map.get(rendered_field(state, :implicit_state, :rendered_implicit_state), id)
+
+    implicit_meta =
+      Map.get(rendered_field(state, :implicit_meta, :rendered_implicit_meta), id, %{})
 
     {implicit_module, implicit_state} =
       case implicit_entry do
@@ -269,8 +277,10 @@ defmodule Breeze.Inspector do
         Map.get(state, :focused)
 
       true ->
+        flags = rendered_field(state, :flags, :rendered_flags)
+
         state
-        |> Map.get(:rendered_flags, %{})
+        |> rendered_field(:flags, :rendered_flags)
         |> Enum.sort_by(fn {key, _flags} -> key end)
         |> Enum.find_value(fn {key, flags} ->
           case Map.get(Map.new(flags), :id) do
@@ -278,19 +288,19 @@ defmodule Breeze.Inspector do
             _ -> key
           end
         end) ||
-          state |> Map.get(:rendered_flags, %{}) |> Map.keys() |> Enum.sort() |> List.first()
+          flags |> Map.keys() |> Enum.sort() |> List.first()
     end
   end
 
   defp has_element?(state, id) when is_binary(id) do
-    Map.has_key?(Map.get(state, :rendered_flags, %{}), id)
+    Map.has_key?(rendered_field(state, :flags, :rendered_flags), id)
   end
 
   defp has_element?(_state, _id), do: false
 
   defp focusable_ids(state) do
     state
-    |> Map.get(:rendered_flags, %{})
+    |> rendered_field(:flags, :rendered_flags)
     |> Enum.filter(fn {_id, flags} ->
       Map.get(normalize_flags(flags), :focusable, false)
     end)
@@ -299,7 +309,7 @@ defmodule Breeze.Inspector do
   end
 
   defp active_trapped_scope_id(state, focusable_ids) do
-    focus_meta = Map.get(state, :rendered_focus_meta, %{})
+    focus_meta = rendered_field(state, :focus_meta, :rendered_focus_meta)
 
     focusable_ids
     |> Enum.flat_map(fn id ->
@@ -342,7 +352,9 @@ defmodule Breeze.Inspector do
         focus_meta
         |> Map.get(:scope_path, [])
         |> Enum.reverse()
-        |> Enum.find(&trapped_scope_id?(Map.get(state, :rendered_focus_meta, %{}), &1))
+        |> Enum.find(
+          &trapped_scope_id?(rendered_field(state, :focus_meta, :rendered_focus_meta), &1)
+        )
         |> then(&Map.get(focus_memory, &1))
     }
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
@@ -350,6 +362,44 @@ defmodule Breeze.Inspector do
   end
 
   defp remembered_focus(_state, _focus_meta), do: %{}
+
+  defp config_source(%{inspector_state: %{config: config}}), do: config
+  defp config_source(state), do: Map.get(state, :inspector)
+
+  defp inspector_field(state, field, legacy, default \\ nil)
+
+  defp inspector_field(%{inspector_state: inspector}, field, _legacy, default) do
+    Map.get(inspector, field, default)
+  end
+
+  defp inspector_field(state, _field, legacy, default) do
+    Map.get(state, legacy, default)
+  end
+
+  defp put_inspector_field(
+         %{inspector_state: %{__struct__: _struct} = inspector} = state,
+         field,
+         _legacy,
+         value
+       ) do
+    %{state | inspector_state: struct!(inspector, [{field, value}])}
+  end
+
+  defp put_inspector_field(%{inspector_state: inspector} = state, field, _legacy, value) do
+    %{state | inspector_state: Map.put(inspector, field, value)}
+  end
+
+  defp put_inspector_field(state, _field, legacy, value) do
+    Map.put(state, legacy, value)
+  end
+
+  defp rendered_field(%{rendered: rendered}, field, _legacy) do
+    Map.get(rendered, field, %{})
+  end
+
+  defp rendered_field(state, _field, legacy) do
+    Map.get(state, legacy, %{})
+  end
 
   defp content_box(viewport, %BackBreeze.Box{} = box, style) do
     style = merge_box_style(box, style)

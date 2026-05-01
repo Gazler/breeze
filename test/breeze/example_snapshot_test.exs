@@ -188,11 +188,11 @@ defmodule Breeze.ExampleSnapshotTest do
     wait_until(fn ->
       state = :sys.get_state(pid)
 
-      state.debug_stats[:last_render_cause] == :child_invalidated and
-        state.base_output =~ "GET" and state.base_output =~ "DELETE"
+      state.debug.stats[:last_render_cause] == :child_invalidated and
+        state.frame.base_output =~ "GET" and state.frame.base_output =~ "DELETE"
     end)
 
-    assert_snapshot(:sys.get_state(pid).base_output, "examples/posting/method-open.ansi",
+    assert_snapshot(:sys.get_state(pid).frame.base_output, "examples/posting/method-open.ansi",
       snapshot_dir: "../__snapshots__"
     )
   end

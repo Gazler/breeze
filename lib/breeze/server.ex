@@ -1,41 +1,3 @@
-defmodule Breeze.Term do
-  @moduledoc false
-
-  defstruct [
-    :view,
-    :server,
-    :terminal,
-    :theme,
-    :theme_source,
-    :reader,
-    last_render_at: nil,
-    last_interaction_at: nil,
-    assigns: %{},
-    external_assigns: %{},
-    global_keybindings: [],
-    local_keybindings: [],
-    focus_keybindings: %{},
-    focused: nil,
-    allow_unfocused?: false,
-    focusables: [],
-    focus_meta: %{},
-    focus_memory: %{},
-    elements: %{},
-    retained_elements: %{},
-    events: %{},
-    implicit_state: %{},
-    retained_implicit_state: %{},
-    implicit_meta: %{},
-    rendered_contents: %{},
-    rendered_boxes: %{},
-    mouse_targets: %{},
-    children: %{},
-    frame_delay_ms: 16,
-    render_timer: nil,
-    apply_theme_defaults?: false
-  ]
-end
-
 defmodule Breeze.Server do
   @moduledoc """
   Public server entrypoint for Breeze applications.
@@ -43,11 +5,10 @@ defmodule Breeze.Server do
 
   use GenServer
 
-  @render_tracking_table __MODULE__.RenderTracking
-  @flush_input_batch :flush_input_batch
-  @debug_window_size 20
-  @debug_rate_window_ms 1_000
+  alias Breeze.Server.{Debug, Dimensions, Frame, Input, Inspector, RenderTracking}
+  alias Breeze.Server.State
 
+  @flush_input_batch :flush_input_batch
   defstruct [
     :terminal,
     :reader,
@@ -63,42 +24,15 @@ defmodule Breeze.Server do
     :theme,
     :apply_theme_defaults?,
     :crash,
-    :base_output,
-    :last_frame_payload,
-    :last_frame_lines,
-    :last_overlays,
-    :pending_ref,
-    :pending_started_at,
     :last_render_at,
     :last_interaction_at,
-    queued_input: :queue.new(),
-    input_flush_scheduled?: false,
-    decorations: [],
     children: %{},
-    rendered_boxes: %{},
-    animation_timer: nil,
-    next_tick_at: nil,
     global_keybindings: [],
-    inspector: false,
-    inspector_visible?: false,
-    inspector_selected_id: nil,
-    inspector_hovered_id: nil,
-    inspector_panel_position: :bottom,
-    debug_subscribers: MapSet.new(),
-    inspector_subscribers: MapSet.new(),
-    debug_stats: %{},
-    debug_push_timer: nil,
-    debug_push_interval_ms: 250,
-    busy_delay_ms: 120,
-    frame_delay_ms: 80,
-    rendered_elements: %{},
-    rendered_viewports: %{},
-    rendered_mouse_targets: %{},
-    rendered_flags: %{},
-    rendered_focus_meta: %{},
-    rendered_implicit_state: %{},
-    rendered_implicit_meta: %{},
-    pending_sync_child_render_id: nil
+    input: %State.Input{},
+    frame: %State.Frame{},
+    debug: %State.Debug{},
+    inspector_state: %State.Inspector{},
+    rendered: %State.Rendered{}
   ]
 
   @type option ::
@@ -202,34 +136,35 @@ defmodule Breeze.Server do
         _ -> {nil, theme}
       end
 
-    state = %__MODULE__{
-      terminal: terminal,
-      reader: terminal.reader,
-      input_router: Keyword.get(opts, :input_router),
-      view_pid: view_pid,
-      view: view,
-      start_opts: start_opts,
-      alt_screen?: Keyword.get(opts, :alt_screen, true),
-      mouse_mode: Keyword.get(opts, :mouse, false),
-      reload_opts:
-        normalize_reload_opts(
-          Keyword.get(opts, :reload, Application.get_env(:breeze, :reload, false))
-        ),
-      focused: focused,
-      theme: theme,
-      apply_theme_defaults?: apply_theme_defaults?,
-      global_keybindings: Keyword.get(opts, :global_keybindings, []),
-      inspector: Keyword.get(opts, :inspector, false),
-      debug_push_interval_ms: debug_push_interval_ms,
-      busy_delay_ms: Keyword.get(opts, :busy_delay_ms, 120),
-      frame_delay_ms: frame_delay_ms,
-      base_output: "",
-      pending_started_at: nil,
-      last_render_at: System.monotonic_time(:millisecond),
-      last_interaction_at: nil,
-      last_frame_lines: nil,
-      last_overlays: []
-    }
+    state =
+      %__MODULE__{
+        terminal: terminal,
+        reader: terminal.reader,
+        input_router: Keyword.get(opts, :input_router),
+        view_pid: view_pid,
+        view: view,
+        start_opts: start_opts,
+        alt_screen?: Keyword.get(opts, :alt_screen, true),
+        mouse_mode: Keyword.get(opts, :mouse, false),
+        reload_opts:
+          normalize_reload_opts(
+            Keyword.get(opts, :reload, Application.get_env(:breeze, :reload, false))
+          ),
+        focused: focused,
+        theme: theme,
+        apply_theme_defaults?: apply_theme_defaults?,
+        global_keybindings: Keyword.get(opts, :global_keybindings, []),
+        last_render_at: System.monotonic_time(:millisecond),
+        last_interaction_at: nil,
+        input: %State.Input{},
+        frame: %State.Frame{},
+        debug: %State.Debug{
+          push_interval_ms: debug_push_interval_ms,
+          busy_delay_ms: Keyword.get(opts, :busy_delay_ms, 120),
+          frame_delay_ms: frame_delay_ms
+        },
+        inspector_state: %State.Inspector{config: Keyword.get(opts, :inspector, false)}
+      }
 
     state = maybe_start_reloader(state)
     if Breeze.Inspector.enabled?(state), do: Breeze.RemoteInspector.register_app(self())
@@ -239,7 +174,7 @@ defmodule Breeze.Server do
 
   @impl true
   def handle_call(:stats, _from, state) do
-    {:reply, debug_stats_snapshot(state), state}
+    {:reply, Debug.snapshot(state), state}
   end
 
   def handle_call(:inspector_snapshot, _from, state) do
@@ -254,13 +189,13 @@ defmodule Breeze.Server do
   def handle_cast({:subscribe_debug, subscriber}, state) do
     if is_pid(subscriber), do: Process.monitor(subscriber)
 
-    state = Map.update!(state, :debug_subscribers, &MapSet.put(&1, subscriber))
+    state = update_debug(state, subscribers: MapSet.put(state.debug.subscribers, subscriber))
 
     state =
-      if state.debug_stats == %{} do
+      if state.debug.stats == %{} do
         state
       else
-        push_debug_stats_now(state)
+        Debug.push_now(state)
       end
 
     {:noreply, state}
@@ -269,8 +204,12 @@ defmodule Breeze.Server do
   def handle_cast({:subscribe_inspector, subscriber}, state) do
     if is_pid(subscriber), do: Process.monitor(subscriber)
 
-    state = Map.update!(state, :inspector_subscribers, &MapSet.put(&1, subscriber))
-    {:noreply, push_inspector_snapshot_now(state)}
+    state =
+      update_inspector(state,
+        subscribers: MapSet.put(state.inspector_state.subscribers, subscriber)
+      )
+
+    {:noreply, Inspector.push_snapshot_now(state)}
   end
 
   @impl true
@@ -279,33 +218,34 @@ defmodule Breeze.Server do
 
     state =
       state
-      |> enqueue_input(Breeze.Input.decode(data))
-      |> put_debug_stat(:last_input_us, System.monotonic_time(:microsecond) - started_at)
+      |> Input.enqueue(Breeze.Input.decode(data))
+      |> Debug.put_stat(:last_input_us, System.monotonic_time(:microsecond) - started_at)
       |> schedule_input_flush()
 
     {:noreply, state}
   end
 
+  def handle_info({reader, {:signal, :winch}}, %{reader: reader, crash: crash} = state)
+      when not is_nil(crash) do
+    terminal = Termite.Terminal.resize(state.terminal)
+    {:noreply, render_crash(%{state | terminal: terminal})}
+  end
+
   def handle_info({reader, {:signal, :winch}}, %{reader: reader} = state) do
-    if crashed?(state) do
-      terminal = Termite.Terminal.resize(state.terminal)
-      {:noreply, render_crash(%{state | terminal: terminal})}
-    else
-      terminal = Termite.Terminal.resize(state.terminal)
-      state = %{state | terminal: terminal}
+    terminal = Termite.Terminal.resize(state.terminal)
+    state = %{state | terminal: terminal}
 
-      case safe_call(fn ->
-             Breeze.ChildServer.dispatch_info(state.view_pid, :resize, terminal)
-           end) do
-        {:ok, {:stop, _focused}} ->
-          stop(state)
+    case safe_call(fn ->
+           Breeze.ChildServer.dispatch_info(state.view_pid, :resize, terminal)
+         end) do
+      {:ok, {:stop, _focused}} ->
+        stop(state)
 
-        {:ok, {:noreply, focused}} ->
-          {:noreply, force_full_redraw(%{state | focused: focused}, :resize)}
+      {:ok, {:noreply, focused}} ->
+        {:noreply, force_full_redraw(%{state | focused: focused}, :resize)}
 
-        {:crash, crash} ->
-          {:noreply, enter_crash_state(state, crash)}
-      end
+      {:crash, crash} ->
+        {:noreply, enter_crash_state(state, crash)}
     end
   end
 
@@ -315,33 +255,34 @@ defmodule Breeze.Server do
     {:noreply, state}
   end
 
+  def handle_info(:child_invalidated, %{crash: crash} = state) when not is_nil(crash) do
+    {:noreply, state}
+  end
+
   def handle_info(:child_invalidated, state) do
-    if crashed?(state) do
-      {:noreply, state}
-    else
-      state = increment_debug_stat(state, :child_invalidated_count)
-      {:noreply, maybe_render_base(state, :child_invalidated)}
-    end
+    state = Debug.increment_stat(state, :child_invalidated_count)
+    {:noreply, maybe_render_base(state, :child_invalidated)}
+  end
+
+  def handle_info({:child_invalidated, _child_id}, %{crash: crash} = state)
+      when not is_nil(crash) do
+    {:noreply, state}
   end
 
   def handle_info({:child_invalidated, child_id}, state) do
-    if crashed?(state) do
-      {:noreply, state}
-    else
-      state =
-        if debug_child_id?(child_id) do
-          state
-        else
-          increment_debug_stat(state, :child_invalidated_count)
-        end
+    state =
+      if debug_child_id?(child_id) do
+        state
+      else
+        Debug.increment_stat(state, :child_invalidated_count)
+      end
 
-      {:noreply, maybe_render_invalidated_child(state, child_id)}
-    end
+    {:noreply, maybe_render_invalidated_child(state, child_id)}
   end
 
   def handle_info(@flush_input_batch, state) do
-    state = increment_debug_stat(state, :flush_input_batch_count)
-    state = %{state | input_flush_scheduled?: false}
+    state = Debug.increment_stat(state, :flush_input_batch_count)
+    state = update_input(state, flush_scheduled?: false)
 
     case flush_input_batch(state) do
       {:stop, state} ->
@@ -357,22 +298,21 @@ defmodule Breeze.Server do
     end
   end
 
-  def handle_info(:animation_tick, %{decorations: []} = state) do
-    state = increment_debug_stat(state, :animation_tick_count)
-    {:noreply, %{state | animation_timer: nil, next_tick_at: nil}}
+  def handle_info(:animation_tick, %{frame: %{decorations: []}} = state) do
+    state = Debug.increment_stat(state, :animation_tick_count)
+    {:noreply, %{state | frame: %{state.frame | animation_timer: nil, next_tick_at: nil}}}
   end
 
   def handle_info(:animation_tick, state) do
     started_at = System.monotonic_time(:microsecond)
-    state = increment_debug_stat(state, :animation_tick_count)
+    state = Debug.increment_stat(state, :animation_tick_count)
 
     state =
       state
-      |> Map.put(:animation_timer, nil)
-      |> Map.put(:next_tick_at, nil)
+      |> update_frame(animation_timer: nil, next_tick_at: nil)
       |> advance_decorations()
       |> render_frame()
-      |> put_debug_stat(:last_animation_us, System.monotonic_time(:microsecond) - started_at)
+      |> Debug.put_stat(:last_animation_us, System.monotonic_time(:microsecond) - started_at)
       |> schedule_animation()
 
     {:noreply, state}
@@ -381,8 +321,8 @@ defmodule Breeze.Server do
   def handle_info(:debug_push, state) do
     state =
       state
-      |> Map.put(:debug_push_timer, nil)
-      |> push_debug_stats_now()
+      |> update_debug(push_timer: nil)
+      |> Debug.push_now()
 
     {:noreply, state}
   end
@@ -396,136 +336,70 @@ defmodule Breeze.Server do
     {:noreply, enter_crash_state(state, crash_info(:error, reason, []))}
   end
 
-  def handle_info({:event_reply, ref, reply}, %{pending_ref: ref} = state) do
-    case reply do
-      {:crash, crash} ->
-        {:noreply, enter_crash_state(state, crash)}
-
-      {:stop, _focused} ->
-        stop(state)
-
-      {:stop, _focused, _consumed} ->
-        stop(state)
-
-      {:noreply, focused} ->
-        state =
-          state
-          |> Map.put(:pending_ref, nil)
-          |> Map.put(:pending_started_at, nil)
-          |> Map.put(:focused, focused)
-          |> maybe_render_base(:event_reply)
-
-        {:noreply, state}
-
-      {:noreply, focused, _consumed} ->
-        state =
-          state
-          |> Map.put(:pending_ref, nil)
-          |> Map.put(:pending_started_at, nil)
-          |> Map.put(:focused, focused)
-          |> maybe_render_base(:event_reply)
-
-        {:noreply, state}
-    end
+  def handle_info({:event_reply, ref, reply}, %{input: %{pending_ref: ref}} = state) do
+    apply_event_reply(state, reply)
   end
 
   def handle_info({:event_reply, _ref, _reply}, state), do: {:noreply, state}
 
-  def handle_info(message, state) do
-    case message do
-      {:DOWN, _, :process, pid, _reason} when pid == state.view_pid ->
-        reason = elem(message, 4)
+  def handle_info({:DOWN, _ref, :process, pid, reason}, %{view_pid: pid} = state) do
+    handle_root_view_down(reason, state)
+  end
 
-        cond do
-          crashed?(state) ->
-            {:noreply, state}
+  def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
+    {:noreply, remove_monitored_process(state, pid, ref)}
+  end
 
-          reason == :normal ->
-            stop(state)
+  def handle_info(_message, state), do: {:noreply, state}
 
-          true ->
-            {:noreply, enter_crash_state(state, crash_info(:exit, reason, []))}
-        end
+  defp handle_root_view_down(_reason, state) when not is_nil(state.crash), do: {:noreply, state}
+  defp handle_root_view_down(:normal, state), do: stop(state)
 
-      {:DOWN, ref, :process, _pid, _reason} ->
-        cond do
-          MapSet.member?(state.debug_subscribers, elem(message, 3)) ->
-            {:noreply,
-             %{
-               state
-               | debug_subscribers: MapSet.delete(state.debug_subscribers, elem(message, 3))
-             }}
+  defp handle_root_view_down(reason, state) do
+    {:noreply, enter_crash_state(state, crash_info(:exit, reason, []))}
+  end
 
-          MapSet.member?(state.inspector_subscribers, elem(message, 3)) ->
-            {:noreply,
-             %{
-               state
-               | inspector_subscribers:
-                   MapSet.delete(state.inspector_subscribers, elem(message, 3))
-             }}
+  defp remove_monitored_process(state, pid, ref) do
+    cond do
+      MapSet.member?(state.debug.subscribers, pid) ->
+        update_debug(state, subscribers: MapSet.delete(state.debug.subscribers, pid))
 
-          true ->
-            children =
-              state.children
-              |> Enum.reject(fn {_id, child} -> child.ref == ref end)
-              |> Map.new()
+      MapSet.member?(state.inspector_state.subscribers, pid) ->
+        update_inspector(state,
+          subscribers: MapSet.delete(state.inspector_state.subscribers, pid)
+        )
 
-            {:noreply, %{state | children: children}}
-        end
-
-      _ ->
-        {:noreply, state}
+      true ->
+        %{state | children: remove_child_by_ref(state.children, ref)}
     end
   end
+
+  defp remove_child_by_ref(children, ref) do
+    children
+    |> Enum.reject(fn {_id, child} -> child.ref == ref end)
+    |> Map.new()
+  end
+
+  defp update_input(state, updates), do: %{state | input: struct!(state.input, updates)}
+  defp update_frame(state, updates), do: %{state | frame: struct!(state.frame, updates)}
+  defp update_debug(state, updates), do: %{state | debug: struct!(state.debug, updates)}
+
+  defp update_inspector(state, updates),
+    do: %{state | inspector_state: struct!(state.inspector_state, updates)}
+
+  defp update_rendered(state, updates), do: %{state | rendered: struct!(state.rendered, updates)}
 
   defp flush_input_batch(state) do
-    case queue_out(state.queued_input) do
-      {:empty, _queue} ->
-        {:noreply, state}
-
-      {{:value, decoded}, queue} ->
-        state = %{state | queued_input: queue}
-
-        case process_batched_input(decoded, state) do
-          {:stop, state} ->
-            {:stop, state}
-
-          {:noreply, state} ->
-            continue_flushing_or_pause(state)
-        end
-    end
+    Input.flush_batch(state, input_handlers())
   end
 
-  defp process_batched_input({:mouse, %{button: button} = event}, state)
-       when button in [:wheel_down, :wheel_up] do
-    {event, state} = coalesce_wheel_events_from_queue(event, state, 1)
-    handle_mouse(event, state)
-  end
-
-  defp process_batched_input({:key, key}, state) do
-    if batchable_printable_input?(key, state) do
-      {key, state} = coalesce_printable_keys_from_queue(key, state)
-      handle_deferred_or_sync_input({:key, batched_printable_event(key)}, state)
-    else
-      {key, state} = coalesce_repeated_keys_from_queue(key, state)
-      handle_deferred_or_sync_input({:key, key}, state)
-    end
-  end
-
-  defp process_batched_input(decoded, state), do: handle_deferred_or_sync_input(decoded, state)
-
-  defp continue_flushing_or_pause(state) do
-    case queue_peek(state.queued_input) do
-      {:value, next} ->
-        if sync_input_message?(next, state) do
-          flush_input_batch(state)
-        else
-          {:noreply, state}
-        end
-
-      :empty ->
-        {:noreply, state}
-    end
+  defp input_handlers do
+    %{
+      batchable_printable?: &batchable_printable_input?/2,
+      sync_message?: &sync_input_message?/2,
+      handle_mouse: &handle_mouse/2,
+      handle_sync_or_deferred: &handle_deferred_or_sync_input/2
+    }
   end
 
   defp handle_deferred_or_sync_input(decoded, state) do
@@ -536,16 +410,18 @@ defmodule Breeze.Server do
     end
   end
 
+  defp handle_decoded_sync_input({:mouse, _event}, %{crash: crash} = state)
+       when not is_nil(crash) do
+    {:noreply, state}
+  end
+
   defp handle_decoded_sync_input({:mouse, event}, state) do
     cond do
-      crashed?(state) ->
-        {:noreply, state}
-
-      inspector_mouse_active?(state) ->
+      Inspector.picks_mouse?(state) ->
         {:noreply,
          state
          |> touch_interaction()
-         |> maybe_select_inspector_target(event)
+         |> Inspector.select_target(event)
          |> maybe_render_base(:inspector_select)}
 
       true ->
@@ -553,131 +429,47 @@ defmodule Breeze.Server do
     end
   end
 
-  defp handle_decoded_sync_input({:key, key}, state) do
-    if crashed?(state) do
-      {:noreply, dispatch_crash_input({:key, key}, touch_interaction(state))}
-    else
-      cond do
-        inspector_toggle_key?(key, state) ->
-          {:noreply,
-           state
-           |> touch_interaction()
-           |> Breeze.Inspector.toggle()
-           |> maybe_render_base(:inspector_toggle)}
-
-        inspector_move_key?(key, state) ->
-          {:noreply,
-           state
-           |> touch_interaction()
-           |> Breeze.Inspector.toggle_position()
-           |> maybe_render_base(:inspector_move)}
-
-        true ->
-          case key do
-            key when key in ["\t", "ShiftTab"] ->
-              state
-              |> touch_interaction()
-              |> safe_apply_tab_input_reply(fn state ->
-                Breeze.ChildServer.dispatch_input(state.view_pid, key, invalidate: false)
-              end)
-
-            key ->
-              state
-              |> touch_interaction()
-              |> safe_apply_hierarchy_input_reply(fn state ->
-                dispatch_input_hierarchy(state, key)
-              end)
-          end
-      end
-    end
+  defp handle_decoded_sync_input({:key, key}, %{crash: crash} = state) when not is_nil(crash) do
+    {:noreply, dispatch_crash_input({:key, key}, touch_interaction(state))}
   end
 
-  defp handle_deferred_input({:key, _key}, %{pending_ref: ref} = state) when not is_nil(ref) do
+  defp handle_decoded_sync_input({:key, key}, state) do
+    state
+    |> touch_interaction()
+    |> handle_sync_key_action(sync_key_action(key, state), key)
+  end
+
+  defp handle_deferred_input({:key, _key}, %{input: %{pending_ref: ref}} = state)
+       when not is_nil(ref) do
     {:noreply, state}
   end
 
+  defp handle_deferred_input({:key, key}, %{crash: crash} = state) when not is_nil(crash) do
+    {:noreply, dispatch_crash_input({:key, key}, touch_interaction(state))}
+  end
+
   defp handle_deferred_input({:key, key}, state) do
-    if crashed?(state) do
-      {:noreply, dispatch_crash_input({:key, key}, touch_interaction(state))}
-    else
-      {:noreply, start_async_dispatch(touch_interaction(state), key)}
-    end
+    {:noreply, start_async_dispatch(touch_interaction(state), key)}
   end
 
   defp handle_deferred_input(_decoded, state), do: {:noreply, state}
 
-  defp sync_input_message?({:mouse, _event}, %{pending_ref: nil}), do: true
+  defp sync_input_message?({:mouse, _event}, %{input: %{pending_ref: nil}}), do: true
   defp sync_input_message?({:mouse, _event}, _state), do: false
 
   defp sync_input_message?({:key, _key}, %{crash: crash}) when not is_nil(crash), do: true
 
   defp sync_input_message?({:key, key}, state) do
-    input_key = key_name(key)
+    input_key = Input.key_name(key)
 
-    inspector_toggle_key?(input_key, state) or
-      inspector_move_key?(input_key, state) or
+    Inspector.toggle_key?(input_key, state) or
+      Inspector.move_key?(input_key, state) or
       stop_global_key?(key, state) or
-      (is_nil(state.pending_ref) and
+      (is_nil(state.input.pending_ref) and
          (input_key in ["\t", "ShiftTab"] or sync_input?(state, input_key)))
   end
 
   defp sync_input_message?(_, _state), do: false
-
-  defp coalesce_wheel_events_from_queue(event, state, repeat) do
-    case queue_out(state.queued_input) do
-      {{:value, {:mouse, %{button: button} = next_event}}, queue} ->
-        if button == event.button and wheel_match?(event, next_event) do
-          coalesce_wheel_events_from_queue(event, %{state | queued_input: queue}, repeat + 1)
-        else
-          {Map.put(event, :repeat, repeat), state}
-        end
-
-      {{:value, _next}, _queue} ->
-        {Map.put(event, :repeat, repeat), state}
-
-      {:empty, _queue} ->
-        {Map.put(event, :repeat, repeat), state}
-    end
-  end
-
-  defp coalesce_printable_keys_from_queue(key, state) do
-    case queue_out(state.queued_input) do
-      {{:value, {:key, next_key}}, queue} ->
-        if batchable_printable_input?(next_key, state) do
-          coalesce_printable_keys_from_queue(key <> next_key, %{state | queued_input: queue})
-        else
-          {key, state}
-        end
-
-      {{:value, _next}, _queue} ->
-        {key, state}
-
-      {:empty, _queue} ->
-        {key, state}
-    end
-  end
-
-  defp coalesce_repeated_keys_from_queue(key, state) do
-    case queue_out(state.queued_input) do
-      {{:value, {:key, next_key}}, queue} ->
-        if next_key == key and not batchable_printable_input?(next_key, state) do
-          coalesce_repeated_keys_from_queue(key, %{state | queued_input: queue})
-        else
-          {key, state}
-        end
-
-      {{:value, _next}, _queue} ->
-        {key, state}
-
-      {:empty, _queue} ->
-        {key, state}
-    end
-  end
-
-  defp wheel_match?(left, right) do
-    left.action == right.action and left.x == right.x and left.y == right.y and
-      left.modifiers == right.modifiers
-  end
 
   defp apply_input_reply(state, reply) do
     case reply do
@@ -705,31 +497,65 @@ defmodule Breeze.Server do
     end
   end
 
+  defp apply_event_reply(state, {:crash, crash}) do
+    {:noreply, enter_crash_state(state, crash)}
+  end
+
+  defp apply_event_reply(state, {:stop, _focused}), do: stop(state)
+  defp apply_event_reply(state, {:stop, _focused, _consumed}), do: stop(state)
+
+  defp apply_event_reply(state, {:noreply, focused}) do
+    {:noreply, finish_event_reply(state, focused)}
+  end
+
+  defp apply_event_reply(state, {:noreply, focused, _consumed}) do
+    {:noreply, finish_event_reply(state, focused)}
+  end
+
+  defp finish_event_reply(state, focused) do
+    state
+    |> update_input(pending_ref: nil, pending_started_at: nil)
+    |> Map.put(:focused, focused)
+    |> maybe_render_base(:event_reply)
+  end
+
+  defp sync_key_action(key, state) do
+    cond do
+      Inspector.toggle_key?(key, state) -> :inspector_toggle
+      Inspector.move_key?(key, state) -> :inspector_move
+      key in ["\t", "ShiftTab"] -> :tab
+      true -> :hierarchy
+    end
+  end
+
+  defp handle_sync_key_action(state, :inspector_toggle, _key) do
+    {:noreply,
+     state
+     |> Breeze.Inspector.toggle()
+     |> maybe_render_base(:inspector_toggle)}
+  end
+
+  defp handle_sync_key_action(state, :inspector_move, _key) do
+    {:noreply,
+     state
+     |> Breeze.Inspector.toggle_position()
+     |> maybe_render_base(:inspector_move)}
+  end
+
+  defp handle_sync_key_action(state, :tab, key) do
+    safe_apply_tab_input_reply(state, fn state ->
+      Breeze.ChildServer.dispatch_input(state.view_pid, key, invalidate: false)
+    end)
+  end
+
+  defp handle_sync_key_action(state, :hierarchy, key) do
+    safe_apply_hierarchy_input_reply(state, fn state ->
+      dispatch_input_hierarchy(state, key)
+    end)
+  end
+
   defp touch_interaction(state) do
     %{state | last_interaction_at: System.monotonic_time(:millisecond)}
-  end
-
-  defp inspector_mouse_active?(state) do
-    Breeze.Inspector.picks_mouse?(state)
-  end
-
-  defp maybe_select_inspector_target(state, %{button: :left, action: :press} = event) do
-    Breeze.Inspector.select_at(state, event)
-  end
-
-  defp maybe_select_inspector_target(state, %{action: :move} = event) do
-    Breeze.Inspector.hover_at(state, event)
-  end
-
-  defp maybe_select_inspector_target(state, _event), do: state
-
-  defp inspector_toggle_key?(key, state) do
-    Breeze.Inspector.enabled?(state) and key == Breeze.Inspector.toggle_key(state)
-  end
-
-  defp inspector_move_key?(key, state) do
-    Breeze.Inspector.enabled?(state) and state.inspector_visible? and
-      key == Breeze.Inspector.move_key(state)
   end
 
   defp sync_input?(state, key) do
@@ -737,7 +563,7 @@ defmodule Breeze.Server do
   end
 
   defp batchable_printable_input?(key, state) do
-    raw_printable_key?(key) and focused_implicit_captures_printable_key?(state, key)
+    Input.raw_printable_key?(key) and focused_implicit_captures_printable_key?(state, key)
   end
 
   defp stop_global_key?(key, state) do
@@ -757,7 +583,7 @@ defmodule Breeze.Server do
   end
 
   defp focused_implicit_captures_printable_key?(state, key) when is_binary(key) do
-    raw_printable_key?(key) and
+    Input.raw_printable_key?(key) and
       match?(%{captures_printable_keys: true}, focused_implicit_meta(state))
   end
 
@@ -789,104 +615,126 @@ defmodule Breeze.Server do
 
   defp render_base(state, cause \\ :unknown, attempts \\ 1)
 
+  defp render_base(%{crash: crash} = state, _cause, _attempts) when not is_nil(crash),
+    do: state
+
   defp render_base(state, cause, attempts) do
-    if crashed?(state) do
-      state
-    else
-      try do
-        tracking_ref = begin_render_tracking()
-        started_at = System.monotonic_time(:microsecond)
-        profile_scope = make_ref()
-        Breeze.DebugProfiler.reset(profile_scope)
-        root_started_at = System.monotonic_time(:microsecond)
+    try do
+      tracking_ref = RenderTracking.begin()
+      started_at = System.monotonic_time(:microsecond)
+      profile_scope = make_ref()
+      Breeze.DebugProfiler.reset(profile_scope)
+      root_started_at = System.monotonic_time(:microsecond)
 
-        {acc, box, decorations} =
-          case safe_render_snapshot(state, tracking_ref, profile_scope) do
-            {:ok, acc, box, decorations} ->
-              {acc, box, decorations}
+      {acc, box, decorations} =
+        case safe_render_snapshot(state, tracking_ref, profile_scope) do
+          {:ok, acc, box, decorations} ->
+            {acc, box, decorations}
 
-            :stopped ->
-              throw({:stopped, state})
-          end
-
-        root_snapshot_us = System.monotonic_time(:microsecond) - root_started_at
-
-        {metadata_focused, metadata_theme} = safe_focused_metadata(state)
-        focused = metadata_focused || state.focused
-
-        %{
-          missing: missing,
-          decorations: child_decorations,
-          child_timings: child_timings
-        } = finish_render_tracking(tracking_ref)
-
-        profile_entries = Breeze.DebugProfiler.snapshot(profile_scope)
-        {state, started?} = ensure_children(state, missing)
-
-        if started? do
-          render_base(state, cause, attempts)
-        else
-          cond do
-            attempts > 0 and focused != state.focused ->
-              render_base(%{state | focused: focused}, cause, attempts - 1)
-
-            true ->
-              decorations = dedupe_decorations(decorations ++ child_decorations)
-              state = %{state | focused: focused, theme: metadata_theme}
-              prep_started_at = System.monotonic_time(:microsecond)
-              {base_output, decorations} = prepare_decorations(box.content, decorations, state)
-              prepare_decorations_us = System.monotonic_time(:microsecond) - prep_started_at
-              render_base_us = System.monotonic_time(:microsecond) - started_at
-
-              debug_live_child_us = debug_live_child_us(child_timings)
-              app_live_children = non_debug_child_timings(child_timings)
-
-              state
-              |> increment_debug_stat(:render_base_count)
-              |> Map.put(:base_output, base_output)
-              |> Map.put(:rendered_elements, viewports_from_acc(acc))
-              |> Map.put(:rendered_boxes, acc.boxes)
-              |> merge_inspector_render_data(acc)
-              |> Map.put(:decorations, decorations)
-              |> Map.put(:focused, focused)
-              |> Map.put(:last_render_at, System.monotonic_time(:millisecond))
-              |> put_debug_stat(:last_render_cause, cause)
-              |> put_debug_stat(:last_root_snapshot_us, root_snapshot_us)
-              |> put_debug_stat(
-                :last_root_snapshot_app_us,
-                max(root_snapshot_us - debug_live_child_us, 0)
-              )
-              |> put_debug_stat(:last_live_children_us, sum_timing_us(child_timings))
-              |> put_debug_stat(:last_live_children_app_us, sum_timing_us(app_live_children))
-              |> put_debug_stat(:last_live_children, normalize_child_timings(app_live_children))
-              |> put_debug_stat(:last_render_profile, summarize_profile(profile_entries))
-              |> put_debug_stat(:last_reconcile_passes, 0)
-              |> put_debug_stat(:last_reconcile_changed_ids, nil)
-              |> put_debug_stat(:last_prepare_decorations_us, prepare_decorations_us)
-              |> put_debug_stat(:last_render_base_us, render_base_us)
-              |> put_debug_stat(
-                :last_render_base_app_us,
-                max(render_base_us - debug_live_child_us, 0)
-              )
-              |> render_frame()
-              |> schedule_animation()
-          end
+          :stopped ->
+            throw({:stopped, state})
         end
-      catch
-        {:stopped, state} -> state
-        {:crash_state, crash_state} -> crash_state
-      end
+
+      root_snapshot_us = System.monotonic_time(:microsecond) - root_started_at
+
+      {metadata_focused, metadata_theme} = safe_focused_metadata(state)
+      focused = metadata_focused || state.focused
+
+      %{
+        missing: missing,
+        decorations: child_decorations,
+        child_timings: child_timings
+      } = RenderTracking.finish(tracking_ref)
+
+      profile_entries = Breeze.DebugProfiler.snapshot(profile_scope)
+      {state, started?} = ensure_children(state, missing)
+
+      continue_base_render(state, %{
+        started?: started?,
+        cause: cause,
+        attempts: attempts,
+        focused: focused,
+        metadata_theme: metadata_theme,
+        acc: acc,
+        box: box,
+        decorations: decorations,
+        child_decorations: child_decorations,
+        child_timings: child_timings,
+        profile_entries: profile_entries,
+        root_snapshot_us: root_snapshot_us,
+        started_at: started_at
+      })
+    catch
+      {:stopped, state} -> state
+      {:crash_state, crash_state} -> crash_state
     end
   end
+
+  defp continue_base_render(state, %{started?: true, cause: cause, attempts: attempts}) do
+    render_base(state, cause, attempts)
+  end
+
+  defp continue_base_render(
+         %{focused: previous_focused} = state,
+         %{attempts: attempts, focused: focused, cause: cause}
+       )
+       when attempts > 0 and focused != previous_focused do
+    render_base(%{state | focused: focused}, cause, attempts - 1)
+  end
+
+  defp continue_base_render(state, result) do
+    finish_base_render(state, result)
+  end
+
+  defp finish_base_render(state, result) do
+    decorations =
+      RenderTracking.dedupe_decorations(result.decorations ++ result.child_decorations)
+
+    state = %{state | focused: result.focused, theme: result.metadata_theme}
+    prep_started_at = System.monotonic_time(:microsecond)
+    {base_output, decorations} = prepare_decorations(result.box.content, decorations, state)
+    prepare_decorations_us = System.monotonic_time(:microsecond) - prep_started_at
+    render_base_us = System.monotonic_time(:microsecond) - result.started_at
+
+    debug_live_child_us = Debug.debug_live_child_us(result.child_timings)
+    app_live_children = Debug.non_debug_child_timings(result.child_timings)
+
+    state
+    |> Debug.increment_stat(:render_base_count)
+    |> update_frame(base_output: base_output)
+    |> update_rendered(elements: viewports_from_acc(result.acc), boxes: result.acc.boxes)
+    |> Inspector.merge_render_data(result.acc, safe_root_metadata(state))
+    |> update_frame(decorations: decorations)
+    |> Map.put(:focused, result.focused)
+    |> Map.put(:last_render_at, System.monotonic_time(:millisecond))
+    |> Debug.put_stat(:last_render_cause, result.cause)
+    |> Debug.put_stat(:last_root_snapshot_us, result.root_snapshot_us)
+    |> Debug.put_stat(
+      :last_root_snapshot_app_us,
+      max(result.root_snapshot_us - debug_live_child_us, 0)
+    )
+    |> Debug.put_stat(:last_live_children_us, Debug.sum_timing_us(result.child_timings))
+    |> Debug.put_stat(:last_live_children_app_us, Debug.sum_timing_us(app_live_children))
+    |> Debug.put_stat(:last_live_children, Debug.normalize_child_timings(app_live_children))
+    |> Debug.put_stat(:last_render_profile, Debug.summarize_profile(result.profile_entries))
+    |> Debug.put_stat(:last_reconcile_passes, 0)
+    |> Debug.put_stat(:last_reconcile_changed_ids, nil)
+    |> Debug.put_stat(:last_prepare_decorations_us, prepare_decorations_us)
+    |> Debug.put_stat(:last_render_base_us, render_base_us)
+    |> Debug.put_stat(
+      :last_render_base_app_us,
+      max(render_base_us - debug_live_child_us, 0)
+    )
+    |> render_frame()
+    |> schedule_animation()
+  end
+
+  defp maybe_render_base(%{crash: crash} = state, _cause) when not is_nil(crash), do: state
 
   defp maybe_render_base(%{view_pid: pid} = state, cause) do
     state = prune_dead_children(state)
 
-    if crashed?(state) do
-      state
-    else
-      if Process.alive?(pid), do: render_base(state, cause), else: state
-    end
+    if Process.alive?(pid), do: render_base(state, cause), else: state
   end
 
   defp maybe_render_invalidated_child(state, child_id) do
@@ -928,12 +776,13 @@ defmodule Breeze.Server do
     :exit, _reason -> {nil, state.theme}
   end
 
-  defp maybe_render_after_input(%{pending_ref: ref} = state) when not is_nil(ref), do: state
+  defp maybe_render_after_input(%{input: %{pending_ref: ref}} = state) when not is_nil(ref),
+    do: state
 
-  defp maybe_render_after_input(%{pending_sync_child_render_id: child_id} = state)
+  defp maybe_render_after_input(%{input: %{pending_sync_child_render_id: child_id}} = state)
        when is_binary(child_id) do
     state
-    |> Map.put(:pending_sync_child_render_id, nil)
+    |> update_input(pending_sync_child_render_id: nil)
     |> maybe_render_invalidated_child(child_id)
   end
 
@@ -941,236 +790,277 @@ defmodule Breeze.Server do
 
   defp force_full_redraw(state, cause) do
     state
-    |> Map.put(:last_frame_payload, nil)
-    |> Map.put(:last_frame_lines, nil)
-    |> Map.put(:last_overlays, [])
+    |> update_frame(last_payload: nil, last_lines: nil, last_overlays: [])
     |> maybe_render_base(cause)
   end
 
   defp render_live_child(attrs, opts, state, profile_scope, tracking_ref) do
+    ctx = live_child_context(attrs, opts, state)
+
+    case Map.get(state.children, ctx.full_id) do
+      nil ->
+        missing_live_child(ctx, tracking_ref)
+
+      child ->
+        render_live_child_instance(child, ctx, state, profile_scope, tracking_ref)
+    end
+  end
+
+  defp live_child_context(attrs, opts, state) do
     id = fetch_live_attr!(attrs, :id)
     full_id = live_id(Keyword.get(opts, :live_prefix), id)
-    preload_only = fetch_live_attr(attrs, :preload_only, false)
     expected_view = fetch_live_attr!(attrs, :view)
-    expected_assigns = fetch_live_attr(attrs, :assigns, %{}) |> Map.new()
 
-    expected_start_opts =
-      child_start_opts(fetch_live_attr(attrs, :start_opts, []), expected_view, state)
+    %{
+      id: id,
+      full_id: full_id,
+      attrs: attrs,
+      preload_only?: fetch_live_attr(attrs, :preload_only, false),
+      expected_view: expected_view,
+      expected_start_opts:
+        child_start_opts(fetch_live_attr(attrs, :start_opts, []), expected_view, state),
+      expected_assigns: fetch_live_attr(attrs, :assigns, %{}) |> Map.new(),
+      terminal: Keyword.get(opts, :live_terminal, state.terminal),
+      viewport: Keyword.get(opts, :live_viewport)
+    }
+  end
 
-    child_terminal = Keyword.get(opts, :live_terminal, state.terminal)
-    viewport = Keyword.get(opts, :live_viewport)
+  defp render_live_child_instance(child, ctx, state, profile_scope, tracking_ref) do
+    cond do
+      stale_live_child?(child, ctx) ->
+        missing_live_child(ctx, tracking_ref)
 
-    case Map.get(state.children, full_id) do
-      nil ->
-        track_missing_live_child(tracking_ref, {full_id, attrs})
-        if preload_only, do: :preloaded, else: :missing
+      ctx.preload_only? ->
+        :preloaded
 
-      %{pid: pid, view: view, start_opts: start_opts, assigns: assigns} ->
-        cond do
-          not Process.alive?(pid) ->
-            track_missing_live_child(tracking_ref, {full_id, attrs})
-            if preload_only, do: :preloaded, else: :missing
-
-          view != expected_view or start_opts != expected_start_opts ->
-            track_missing_live_child(tracking_ref, {full_id, attrs})
-            if preload_only, do: :preloaded, else: :missing
-
-          assigns != expected_assigns ->
-            track_missing_live_child(tracking_ref, {full_id, attrs})
-            if preload_only, do: :preloaded, else: :missing
-
-          preload_only ->
-            :preloaded
-
-          true ->
-            local_focused = strip_live_prefix(state.focused, full_id)
-            child_started_at = System.monotonic_time(:microsecond)
-
-            case safe_call(fn ->
-                   Breeze.ChildServer.render_snapshot(pid,
-                     focused: local_focused,
-                     implicit_state: %{},
-                     terminal: child_terminal,
-                     theme: state.theme,
-                     live_prefix: full_id,
-                     render_tracking_ref: tracking_ref,
-                     profile_scope: profile_scope,
-                     profile_label: "#{full_id} #{inspect(state.children[full_id].view)}",
-                     live_view: fn child_attrs, child_opts ->
-                       render_live_child(
-                         child_attrs,
-                         child_opts,
-                         state,
-                         profile_scope,
-                         tracking_ref
-                       )
-                     end
-                   )
-                 end) do
-              {:ok, {:ok, child_acc, child_box, child_decorations}} ->
-                track_child_timing(tracking_ref, %{
-                  id: full_id,
-                  view: state.children[full_id].view,
-                  us: System.monotonic_time(:microsecond) - child_started_at
-                })
-
-                Enum.each(child_decorations, fn decoration ->
-                  track_render_decoration(
-                    tracking_ref,
-                    namespace_decoration(decoration, full_id, viewport)
-                  )
-                end)
-
-                child_dimensions =
-                  case safe_call(fn -> Breeze.ChildServer.layout_snapshot(pid) end) do
-                    {:ok, snapshot} ->
-                      translate_live_dimensions(snapshot.elements, viewport, full_id, child_box)
-
-                    _ ->
-                      %{}
-                  end
-
-                {:rendered, id, child_acc, child_box, child_dimensions}
-
-              {:crash, %{reason: {:noproc, _}}} ->
-                track_missing_live_child(tracking_ref, {full_id, attrs})
-                if preload_only, do: :preloaded, else: :missing
-
-              {:crash, crash} ->
-                throw({:crash_state, enter_crash_state(state, crash)})
-            end
-        end
+      true ->
+        render_current_live_child(child, ctx, state, profile_scope, tracking_ref)
     end
+  end
+
+  defp stale_live_child?(%{pid: pid}, _ctx) when not is_pid(pid), do: true
+
+  defp stale_live_child?(child, ctx) do
+    not Process.alive?(child.pid) or child.view != ctx.expected_view or
+      child.start_opts != ctx.expected_start_opts or child.assigns != ctx.expected_assigns
+  end
+
+  defp missing_live_child(ctx, tracking_ref) do
+    RenderTracking.track_missing_live_child(tracking_ref, {ctx.full_id, ctx.attrs})
+    if ctx.preload_only?, do: :preloaded, else: :missing
+  end
+
+  defp render_current_live_child(child, ctx, state, profile_scope, tracking_ref) do
+    child_started_at = System.monotonic_time(:microsecond)
+
+    case safe_call(fn ->
+           Breeze.ChildServer.render_snapshot(child.pid,
+             focused: strip_live_prefix(state.focused, ctx.full_id),
+             implicit_state: %{},
+             terminal: ctx.terminal,
+             theme: state.theme,
+             live_prefix: ctx.full_id,
+             render_tracking_ref: tracking_ref,
+             profile_scope: profile_scope,
+             profile_label: "#{ctx.full_id} #{inspect(child.view)}",
+             live_view: fn child_attrs, child_opts ->
+               render_live_child(
+                 child_attrs,
+                 child_opts,
+                 state,
+                 profile_scope,
+                 tracking_ref
+               )
+             end
+           )
+         end) do
+      {:ok, {:ok, child_acc, child_box, child_decorations}} ->
+        finish_live_child_render(
+          child,
+          ctx,
+          tracking_ref,
+          child_started_at,
+          child_acc,
+          child_box,
+          child_decorations
+        )
+
+      {:crash, %{reason: {:noproc, _}}} ->
+        missing_live_child(ctx, tracking_ref)
+
+      {:crash, crash} ->
+        throw({:crash_state, enter_crash_state(state, crash)})
+    end
+  end
+
+  defp finish_live_child_render(
+         child,
+         ctx,
+         tracking_ref,
+         child_started_at,
+         child_acc,
+         child_box,
+         child_decorations
+       ) do
+    RenderTracking.track_child_timing(tracking_ref, %{
+      id: ctx.full_id,
+      view: child.view,
+      us: System.monotonic_time(:microsecond) - child_started_at
+    })
+
+    Enum.each(child_decorations, fn decoration ->
+      RenderTracking.track_decoration(
+        tracking_ref,
+        namespace_decoration(decoration, ctx.full_id, ctx.viewport)
+      )
+    end)
+
+    child_dimensions =
+      case safe_call(fn -> Breeze.ChildServer.layout_snapshot(child.pid) end) do
+        {:ok, snapshot} ->
+          Dimensions.translate_live(snapshot.elements, ctx.viewport, ctx.full_id, child_box)
+
+        _ ->
+          %{}
+      end
+
+    {:rendered, ctx.id, child_acc, child_box, child_dimensions}
   end
 
   defp render_invalidated_child(state, child_id) do
     try do
-      with true <- patchable_live_child?(child_id),
-           %{pid: pid, view: view} = child <- Map.get(state.children, child_id),
-           %Breeze.Viewport{} = viewport <- Map.get(state.rendered_elements, child_id) do
-        child_terminal = live_child_terminal(state.terminal, viewport)
-        tracking_ref = begin_render_tracking()
-        profile_scope = make_ref()
-        Breeze.DebugProfiler.reset(profile_scope)
-        started_at = System.monotonic_time(:microsecond)
-
-        {:ok, _child_acc, child_box, child_decorations} =
-          case safe_call(fn ->
-                 Breeze.ChildServer.render_snapshot(pid,
-                   focused: strip_live_prefix(state.focused, child_id),
-                   implicit_state: %{},
-                   terminal: child_terminal,
-                   theme: state.theme,
-                   live_prefix: child_id,
-                   render_tracking_ref: tracking_ref,
-                   profile_scope: profile_scope,
-                   profile_label: "#{child_id} #{inspect(view)}",
-                   live_view: fn child_attrs, child_opts ->
-                     render_live_child(
-                       child_attrs,
-                       child_opts,
-                       state,
-                       profile_scope,
-                       tracking_ref
-                     )
-                   end
-                 )
-               end) do
-            {:ok, result} -> result
-            {:crash, crash} -> throw({:crash_state, enter_crash_state(state, crash)})
-          end
-
-        child_render_us = System.monotonic_time(:microsecond) - started_at
-
-        %{missing: missing, decorations: tracked_decorations, child_timings: _child_timings} =
-          finish_render_tracking(tracking_ref)
-
-        cond do
-          missing != [] ->
-            {:error, {:missing_live_children, missing}}
-
-          child_decorations != [] or tracked_decorations != [] ->
-            {:error,
-             {:decorations_present, %{child: child_decorations, tracked: tracked_decorations}}}
-
-          true ->
-            fragment =
-              child_box
-              |> wrap_child_fragment(
-                viewport,
-                live_placeholder_style(child, state, child_terminal)
-              )
-              |> BackBreeze.Box.render(terminal: child_terminal)
-              |> Map.fetch!(:content)
-
-            composed_at = System.monotonic_time(:microsecond)
-            payload = child_patch_payload(fragment, viewport)
-            terminal = Termite.Terminal.write(state.terminal, payload)
-            written_at = System.monotonic_time(:microsecond)
-            total_us = written_at - started_at
-            write_us = written_at - composed_at
-            profile_entries = Breeze.DebugProfiler.snapshot(profile_scope)
-
-            next_state =
-              state
-              |> Map.put(:terminal, terminal)
-              |> Map.put(:last_frame_payload, nil)
-              |> Map.update(:last_frame_lines, nil, &invalidate_patched_rows(&1, viewport))
-
-            next_state =
-              if debug_child_id?(child_id) do
-                next_state
-              else
-                next_state
-                |> put_debug_stat(:last_render_cause, :child_patch)
-                |> put_debug_stat(:last_root_snapshot_us, 0)
-                |> put_debug_stat(:last_root_snapshot_app_us, 0)
-                |> put_debug_stat(:last_live_children_us, child_render_us)
-                |> put_debug_stat(:last_live_children_app_us, child_render_us)
-                |> put_debug_stat(
-                  :last_live_children,
-                  normalize_child_timings([%{id: child_id, view: view, us: child_render_us}])
-                )
-                |> put_debug_stat(:last_render_profile, summarize_profile(profile_entries))
-                |> put_debug_stat(:last_reconcile_passes, 1)
-                |> put_debug_stat(:last_reconcile_changed_ids, [child_id])
-                |> put_debug_stat(:last_prepare_decorations_us, 0)
-                |> put_debug_stat(:last_render_base_us, total_us)
-                |> put_debug_stat(:last_render_base_app_us, total_us)
-                |> put_debug_stat(:last_frame_compose_us, composed_at - started_at)
-                |> put_debug_stat(:last_terminal_write_us, write_us)
-                |> put_debug_stat(:last_frame_us, total_us)
-                |> put_debug_stat(:last_frame_bytes, byte_size(fragment))
-                |> put_debug_stat(:overlay_count, 0)
-              end
-
-            {:ok, next_state}
-        end
-      else
-        false -> {:error, :not_patchable}
-        nil -> {:error, :missing_child}
-        _ -> {:error, :missing_viewport}
+      with {:ok, ctx} <- invalidated_child_context(state, child_id),
+           {:ok, ctx} <- render_invalidated_child_snapshot(ctx),
+           :ok <- validate_child_patch_render(ctx) do
+        {:ok, write_invalidated_child_patch(ctx)}
       end
     catch
       {:crash_state, crash_state} -> {:crash, crash_state}
     end
   end
 
+  defp invalidated_child_context(state, child_id) do
+    with true <- patchable_live_child?(child_id),
+         %{view: view} = child <- Map.get(state.children, child_id),
+         %Breeze.Viewport{} = viewport <- Map.get(state.rendered.elements, child_id) do
+      terminal = Dimensions.live_child_terminal(state.terminal, viewport)
+      profile_scope = make_ref()
+      Breeze.DebugProfiler.reset(profile_scope)
+
+      {:ok,
+       %{
+         state: state,
+         child_id: child_id,
+         child: child,
+         view: view,
+         viewport: viewport,
+         terminal: terminal,
+         tracking_ref: RenderTracking.begin(),
+         profile_scope: profile_scope,
+         started_at: System.monotonic_time(:microsecond)
+       }}
+    else
+      false -> {:error, :not_patchable}
+      nil -> {:error, :missing_child}
+      _ -> {:error, :missing_viewport}
+    end
+  end
+
+  defp render_invalidated_child_snapshot(ctx) do
+    case safe_call(fn ->
+           Breeze.ChildServer.render_snapshot(ctx.child.pid,
+             focused: strip_live_prefix(ctx.state.focused, ctx.child_id),
+             implicit_state: %{},
+             terminal: ctx.terminal,
+             theme: ctx.state.theme,
+             live_prefix: ctx.child_id,
+             render_tracking_ref: ctx.tracking_ref,
+             profile_scope: ctx.profile_scope,
+             profile_label: "#{ctx.child_id} #{inspect(ctx.view)}",
+             live_view: fn child_attrs, child_opts ->
+               render_live_child(
+                 child_attrs,
+                 child_opts,
+                 ctx.state,
+                 ctx.profile_scope,
+                 ctx.tracking_ref
+               )
+             end
+           )
+         end) do
+      {:ok, {:ok, _child_acc, child_box, child_decorations}} ->
+        tracking = RenderTracking.finish(ctx.tracking_ref)
+
+        {:ok,
+         ctx
+         |> Map.put(:child_box, child_box)
+         |> Map.put(:child_decorations, child_decorations)
+         |> Map.put(:tracking, tracking)
+         |> Map.put(:child_render_us, System.monotonic_time(:microsecond) - ctx.started_at)}
+
+      {:crash, crash} ->
+        throw({:crash_state, enter_crash_state(ctx.state, crash)})
+    end
+  end
+
+  defp validate_child_patch_render(%{tracking: %{missing: missing}}) when missing != [] do
+    {:error, {:missing_live_children, missing}}
+  end
+
+  defp validate_child_patch_render(%{
+         child_decorations: child_decorations,
+         tracking: %{decorations: tracked_decorations}
+       })
+       when child_decorations != [] or tracked_decorations != [] do
+    {:error, {:decorations_present, %{child: child_decorations, tracked: tracked_decorations}}}
+  end
+
+  defp validate_child_patch_render(_ctx), do: :ok
+
+  defp write_invalidated_child_patch(ctx) do
+    fragment = invalidated_child_fragment(ctx)
+    composed_at = System.monotonic_time(:microsecond)
+    payload = Frame.child_patch_payload(fragment, ctx.viewport)
+    terminal = Termite.Terminal.write(ctx.state.terminal, payload)
+    written_at = System.monotonic_time(:microsecond)
+
+    ctx.state
+    |> Map.put(:terminal, terminal)
+    |> update_frame(
+      last_payload: nil,
+      last_lines: Frame.invalidate_patched_rows(ctx.state.frame.last_lines, ctx.viewport)
+    )
+    |> Debug.put_child_patch_stats(ctx, fragment, composed_at, written_at)
+  end
+
+  defp invalidated_child_fragment(ctx) do
+    ctx.child_box
+    |> wrap_child_fragment(
+      ctx.viewport,
+      live_placeholder_style(ctx.child, ctx.state, ctx.terminal)
+    )
+    |> BackBreeze.Box.render(terminal: ctx.terminal)
+    |> Map.fetch!(:content)
+  end
+
   defp render_frame(state) do
     started_at = System.monotonic_time(:microsecond)
-    {output, decorations} = apply_decorations(state.base_output, state.decorations, state)
+
+    {output, decorations} =
+      apply_decorations(state.frame.base_output, state.frame.decorations, state)
+
     output = strip_private_use_chars(output)
     overlays = terminal_overlays(decorations, state)
 
     lines =
       output
-      |> normalize_frame_lines(state.terminal.size.height)
+      |> Frame.normalize_lines(state.terminal.size.height)
 
     frame_payload =
-      build_frame_payload(
-        state.last_frame_lines,
+      Frame.build_payload(
+        state.frame.last_lines,
         lines,
-        state.last_overlays || [],
+        state.frame.last_overlays || [],
         overlays,
         state.terminal.size.width
       )
@@ -1178,7 +1068,7 @@ defmodule Breeze.Server do
     composed_at = System.monotonic_time(:microsecond)
 
     {terminal, write_duration} =
-      if frame_payload == state.last_frame_payload do
+      if frame_payload == state.frame.last_payload do
         {state.terminal, 0}
       else
         terminal = Termite.Terminal.write(state.terminal, frame_payload)
@@ -1188,195 +1078,18 @@ defmodule Breeze.Server do
 
     state
     |> Map.put(:terminal, terminal)
-    |> Map.put(:decorations, decorations)
-    |> Map.put(:last_frame_payload, frame_payload)
-    |> Map.put(:last_frame_lines, lines)
-    |> Map.put(:last_overlays, overlays)
-    |> put_debug_stat(:last_frame_compose_us, composed_at - started_at)
-    |> put_debug_stat(:last_terminal_write_us, write_duration)
-    |> put_debug_stat(:last_frame_us, System.monotonic_time(:microsecond) - started_at)
-    |> put_debug_stat(:last_frame_bytes, byte_size(frame_payload))
-    |> put_debug_stat(:overlay_count, length(overlays))
-    |> push_inspector_snapshot_now()
-  end
-
-  defp normalize_frame_lines(output, screen_height) do
-    output
-    |> :binary.split("\n", [:global])
-    |> then(fn lines ->
-      lines = if lines == [], do: [""], else: lines
-      lines ++ List.duplicate("", max(screen_height - length(lines), 0))
-    end)
-    |> Enum.take(screen_height)
-  end
-
-  defp build_frame_payload(nil, lines, _prev_overlays, overlays, screen_width) do
-    full_redraw_payload(lines, overlays, screen_width)
-  end
-
-  defp build_frame_payload(prev_lines, lines, prev_overlays, overlays, screen_width) do
-    changed_base_rows = changed_base_rows(prev_lines, lines)
-    changed_overlay_rows = changed_overlay_rows(prev_overlays, overlays)
-
-    patch_only_overlay_rows =
-      patch_only_overlay_rows(prev_overlays, overlays, changed_overlay_rows)
-
-    repaired_overlay_rows = MapSet.difference(changed_overlay_rows, patch_only_overlay_rows)
-    changed_rows = MapSet.union(changed_base_rows, changed_overlay_rows)
-
-    if MapSet.size(changed_rows) == 0 do
-      ""
-    else
-      IO.iodata_to_binary([
-        row_patch_payload(
-          lines,
-          MapSet.union(changed_base_rows, repaired_overlay_rows),
-          screen_width
-        ),
-        overlay_patch_payload(overlays, changed_overlay_rows)
-      ])
-    end
-  end
-
-  defp full_redraw_payload(lines, overlays, screen_width) do
-    output =
-      lines
-      |> Enum.with_index()
-      |> Enum.map(fn {line, row} ->
-        write_row_payload(row, line, screen_width)
-      end)
-      |> IO.iodata_to_binary()
-
-    overlay_output = Breeze.TerminalOverlay.render_overlays(overlays)
-    IO.iodata_to_binary(["\e[2J\e[H", output, overlay_output])
-  end
-
-  defp changed_base_rows(prev_lines, lines) do
-    lines
-    |> Enum.zip(prev_lines)
-    |> Enum.with_index()
-    |> Enum.reduce(MapSet.new(), fn
-      {{line, line}, _row}, acc -> acc
-      {_pair, row}, acc -> MapSet.put(acc, row)
-    end)
-  end
-
-  defp invalidate_patched_rows(nil, _viewport), do: nil
-
-  defp invalidate_patched_rows(lines, %{top: top, height: height})
-       when is_list(lines) and is_integer(top) and is_integer(height) and height > 0 do
-    last_row = top + height - 1
-
-    lines
-    |> Enum.with_index()
-    |> Enum.map(fn
-      {_line, row} when row >= top and row <= last_row -> nil
-      {line, _row} -> line
-    end)
-  end
-
-  defp invalidate_patched_rows(lines, _viewport), do: lines
-
-  defp changed_overlay_rows(prev_overlays, overlays) do
-    prev_map = overlay_row_map(prev_overlays)
-    next_map = overlay_row_map(overlays)
-
-    Map.keys(prev_map)
-    |> Kernel.++(Map.keys(next_map))
-    |> MapSet.new()
-    |> Enum.reduce(MapSet.new(), fn row, acc ->
-      if Map.get(prev_map, row, MapSet.new()) == Map.get(next_map, row, MapSet.new()) do
-        acc
-      else
-        MapSet.put(acc, row)
-      end
-    end)
-  end
-
-  defp overlay_row_map(overlays) do
-    Enum.reduce(overlays, %{}, fn overlay, acc ->
-      row = Map.get(overlay, :y, 0)
-      sig = overlay_signature(overlay)
-      Map.update(acc, row, MapSet.new([sig]), &MapSet.put(&1, sig))
-    end)
-  end
-
-  defp overlay_signature(overlay) do
-    {Map.get(overlay, :x), Map.get(overlay, :y), Breeze.TerminalOverlay.render_overlay(overlay)}
-  end
-
-  defp patch_only_overlay_rows(prev_overlays, overlays, changed_overlay_rows) do
-    prev_map = overlay_row_map_by_row(prev_overlays)
-    next_map = overlay_row_map_by_row(overlays)
-
-    Enum.reduce(changed_overlay_rows, MapSet.new(), fn row, acc ->
-      prev_row_overlays = Map.get(prev_map, row, [])
-      next_row_overlays = Map.get(next_map, row, [])
-
-      if patch_only_overlay_row?(prev_row_overlays, next_row_overlays) do
-        MapSet.put(acc, row)
-      else
-        acc
-      end
-    end)
-  end
-
-  defp patch_only_overlay_row?(prev_overlays, next_overlays)
-       when prev_overlays != [] and next_overlays != [] do
-    Enum.all?(prev_overlays ++ next_overlays, &Map.get(&1, :patch_only, false))
-  end
-
-  defp patch_only_overlay_row?(_prev_overlays, _next_overlays), do: false
-
-  defp overlay_row_map_by_row(overlays) do
-    Enum.reduce(overlays, %{}, fn overlay, acc ->
-      Map.update(acc, Map.get(overlay, :y, 0), [overlay], &[overlay | &1])
-    end)
-  end
-
-  defp row_patch_payload(lines, changed_rows, screen_width) do
-    changed_rows
-    |> Enum.sort()
-    |> Enum.map(fn row ->
-      line = Enum.at(lines, row, "")
-      write_row_payload(row, line, screen_width)
-    end)
-    |> IO.iodata_to_binary()
-  end
-
-  defp write_row_payload(row, line, screen_width) do
-    visible_width = visible_width(line)
-
-    if visible_width >= screen_width do
-      [
-        "\e[",
-        Integer.to_string(row + 1),
-        ";1H",
-        line
-      ]
-    else
-      [
-        "\e[",
-        Integer.to_string(row + 1),
-        ";1H",
-        line,
-        "\e[",
-        Integer.to_string(row + 1),
-        ";",
-        Integer.to_string(visible_width + 1),
-        "H\e[K"
-      ]
-    end
-  end
-
-  defp visible_width(line) when is_binary(line) do
-    BackBreeze.Utils.string_length(line)
-  end
-
-  defp overlay_patch_payload(overlays, changed_rows) do
-    overlays
-    |> Enum.filter(&MapSet.member?(changed_rows, Map.get(&1, :y, 0)))
-    |> Breeze.TerminalOverlay.render_overlays()
+    |> update_frame(
+      decorations: decorations,
+      last_payload: frame_payload,
+      last_lines: lines,
+      last_overlays: overlays
+    )
+    |> Debug.put_stat(:last_frame_compose_us, composed_at - started_at)
+    |> Debug.put_stat(:last_terminal_write_us, write_duration)
+    |> Debug.put_stat(:last_frame_us, System.monotonic_time(:microsecond) - started_at)
+    |> Debug.put_stat(:last_frame_bytes, byte_size(frame_payload))
+    |> Debug.put_stat(:overlay_count, length(overlays))
+    |> Inspector.push_snapshot_now()
   end
 
   defp initialize_decorations(decorations) do
@@ -1409,15 +1122,16 @@ defmodule Breeze.Server do
   end
 
   defp advance_decorations(state) do
-    Map.update!(state, :decorations, fn decorations ->
-      Enum.map(decorations, fn decoration ->
+    decorations =
+      Enum.map(state.frame.decorations, fn decoration ->
         if decoration_active?(decoration, state) do
           Map.update(decoration, :frame_index, 1, &(&1 + 1))
         else
           decoration
         end
       end)
-    end)
+
+    update_frame(state, decorations: decorations)
   end
 
   defp apply_decorations(output, decorations, state) do
@@ -1486,20 +1200,23 @@ defmodule Breeze.Server do
     |> Map.get(:content)
   end
 
-  defp schedule_animation(%{decorations: []} = state), do: state
+  defp schedule_animation(%{frame: %{decorations: []}} = state), do: state
 
-  defp schedule_animation(%{animation_timer: nil} = state) do
+  defp schedule_animation(%{frame: %{animation_timer: nil}} = state) do
     case next_tick_delay(state) do
       nil ->
-        %{state | next_tick_at: nil}
+        update_frame(state, next_tick_at: nil)
 
       delay ->
         timer = Process.send_after(self(), :animation_tick, delay)
 
         %{
           state
-          | animation_timer: timer,
-            next_tick_at: System.monotonic_time(:millisecond) + delay
+          | frame: %{
+              state.frame
+              | animation_timer: timer,
+                next_tick_at: System.monotonic_time(:millisecond) + delay
+            }
         }
     end
   end
@@ -1507,7 +1224,7 @@ defmodule Breeze.Server do
   defp schedule_animation(state), do: state
 
   defp next_tick_delay(state) do
-    state.decorations
+    state.frame.decorations
     |> Enum.map(&decoration_delay(&1, state))
     |> Enum.reject(&is_nil/1)
     |> Enum.min(fn -> nil end)
@@ -1526,130 +1243,6 @@ defmodule Breeze.Server do
 
   defp translate_decoration_layout(layout, _viewport), do: layout
 
-  defp translate_live_dimensions(elements, %{left: left, top: top} = viewport, prefix, child_box)
-       when is_map(elements) do
-    translated_elements =
-      Map.new(elements, fn {id, viewport} ->
-        translated_id =
-          case id do
-            value when is_binary(value) ->
-              if String.starts_with?(value, prefix <> "::"),
-                do: value,
-                else: prefix <> "::" <> value
-          end
-
-        {translated_id,
-         %{
-           left: left + Map.get(viewport, :left, 0),
-           top: top + Map.get(viewport, :top, 0),
-           width: Map.get(viewport, :width, 0),
-           height: Map.get(viewport, :height, 0),
-           viewport_width: Map.get(viewport, :viewport_width, 0),
-           viewport_height: Map.get(viewport, :viewport_height, 0),
-           content_width: Map.get(viewport, :content_width, 0),
-           content_height: Map.get(viewport, :content_height, 0)
-         }}
-      end)
-
-    Map.put(
-      translated_elements,
-      prefix,
-      live_root_dimensions(translated_elements, viewport, child_box)
-    )
-  end
-
-  defp translate_live_dimensions(_elements, _viewport, _prefix, _child_box), do: %{}
-
-  defp live_root_dimensions(translated_elements, viewport, child_box) do
-    width = Map.get(viewport, :width, 0)
-    height = Map.get(viewport, :height, 0)
-
-    if width > 0 and height > 0 do
-      %{
-        left: Map.get(viewport, :left, 0),
-        top: Map.get(viewport, :top, 0),
-        width: width,
-        height: height,
-        viewport_width: Map.get(viewport, :viewport_width, width),
-        viewport_height: Map.get(viewport, :viewport_height, height),
-        content_width: Map.get(viewport, :content_width, width),
-        content_height: Map.get(viewport, :content_height, height)
-      }
-    else
-      case child_root_dimensions(viewport, child_box) do
-        nil ->
-          translated_elements
-          |> Map.values()
-          |> Enum.reduce(nil, fn dims, acc ->
-            left = Map.get(dims, :left, 0)
-            top = Map.get(dims, :top, 0)
-            right = left + max(Map.get(dims, :width, 0) - 1, 0)
-            bottom = top + max(Map.get(dims, :height, 0) - 1, 0)
-
-            case acc do
-              nil ->
-                %{left: left, top: top, right: right, bottom: bottom}
-
-              acc ->
-                %{
-                  left: min(acc.left, left),
-                  top: min(acc.top, top),
-                  right: max(acc.right, right),
-                  bottom: max(acc.bottom, bottom)
-                }
-            end
-          end)
-          |> case do
-            nil ->
-              %{
-                left: Map.get(viewport, :left, 0),
-                top: Map.get(viewport, :top, 0),
-                width: 0,
-                height: 0,
-                viewport_width: 0,
-                viewport_height: 0,
-                content_width: 0,
-                content_height: 0
-              }
-
-            bounds ->
-              width = max(bounds.right - bounds.left + 1, 0)
-              height = max(bounds.bottom - bounds.top + 1, 0)
-
-              %{
-                left: bounds.left,
-                top: bounds.top,
-                width: width,
-                height: height,
-                viewport_width: width,
-                viewport_height: height,
-                content_width: width,
-                content_height: height
-              }
-          end
-
-        root_dims ->
-          root_dims
-      end
-    end
-  end
-
-  defp child_root_dimensions(%{left: left, top: top}, %{width: width, height: height})
-       when is_integer(width) and width > 0 and is_integer(height) and height > 0 do
-    %{
-      left: left,
-      top: top,
-      width: width,
-      height: height,
-      viewport_width: width,
-      viewport_height: height,
-      content_width: width,
-      content_height: height
-    }
-  end
-
-  defp child_root_dimensions(_viewport, _child_box), do: nil
-
   defp namespace_live_id(nil, _full_id), do: nil
   defp namespace_live_id(id, full_id), do: full_id <> "::" <> id
 
@@ -1666,9 +1259,12 @@ defmodule Breeze.Server do
     end
   end
 
-  defp pending_active?(%{pending_ref: nil}), do: false
+  defp pending_active?(%{input: %{pending_ref: nil}}), do: false
 
-  defp pending_active?(%{pending_started_at: started_at, busy_delay_ms: delay})
+  defp pending_active?(%{
+         input: %{pending_started_at: started_at},
+         debug: %{busy_delay_ms: delay}
+       })
        when is_integer(started_at) do
     System.monotonic_time(:millisecond) - started_at >= delay
   end
@@ -1677,24 +1273,27 @@ defmodule Breeze.Server do
 
   defp decoration_delay(decoration, state) do
     cond do
-      decoration[:active_when_pending] && is_nil(state.pending_ref) ->
+      decoration[:active_when_pending] && is_nil(state.input.pending_ref) ->
         nil
 
       decoration[:active_when_pending] && pending_active?(state) ->
-        Map.get(decoration, :every_ms, state.frame_delay_ms)
+        Map.get(decoration, :every_ms, state.debug.frame_delay_ms)
 
       decoration[:active_when_pending] ->
         remaining_busy_delay(state)
 
       decoration_active?(decoration, state) ->
-        Map.get(decoration, :every_ms, state.frame_delay_ms)
+        Map.get(decoration, :every_ms, state.debug.frame_delay_ms)
 
       true ->
         nil
     end
   end
 
-  defp remaining_busy_delay(%{pending_started_at: started_at, busy_delay_ms: delay})
+  defp remaining_busy_delay(%{
+         input: %{pending_started_at: started_at},
+         debug: %{busy_delay_ms: delay}
+       })
        when is_integer(started_at) do
     max(delay - (System.monotonic_time(:millisecond) - started_at), 0)
   end
@@ -1750,39 +1349,6 @@ defmodule Breeze.Server do
     )
   end
 
-  defp child_patch_payload(fragment, viewport) do
-    fragment
-    |> child_patch_lines(viewport.height)
-    |> Enum.with_index()
-    |> Enum.map(fn {line, row_offset} ->
-      row = Integer.to_string(viewport.top + row_offset + 1)
-      col = Integer.to_string(viewport.left + 1)
-
-      [
-        "\e[",
-        row,
-        ";",
-        col,
-        "H",
-        line
-      ]
-    end)
-    |> IO.iodata_to_binary()
-  end
-
-  # Child patches must repaint the full live viewport height so stale rows from a
-  # larger prior child frame do not bleed through after the child shrinks.
-  defp child_patch_lines(fragment, height) when is_integer(height) and height > 0 do
-    lines =
-      fragment
-      |> :binary.split("\n", [:global])
-      |> Enum.take(height)
-
-    lines ++ List.duplicate("", max(height - length(lines), 0))
-  end
-
-  defp child_patch_lines(fragment, _height), do: :binary.split(fragment, "\n", [:global])
-
   defp live_placeholder_style(%{attrs: attrs}, state, terminal)
        when is_list(attrs) or is_map(attrs) do
     style_state =
@@ -1805,37 +1371,6 @@ defmodule Breeze.Server do
 
   defp live_placeholder_style(_child, _state, _terminal), do: %{}
 
-  defp live_child_terminal(terminal, %{width: width, height: height} = viewport) do
-    width = live_child_terminal_dimension(width, Map.get(viewport, :viewport_width))
-    height = live_child_terminal_dimension(height, Map.get(viewport, :viewport_height))
-
-    if is_integer(width) and width > 0 and is_integer(height) and height > 0 do
-      resize_virtual_terminal(terminal, width, height)
-    else
-      terminal
-    end
-  end
-
-  defp live_child_terminal(terminal, _viewport), do: terminal
-
-  defp live_child_terminal_dimension(primary, _secondary)
-       when is_integer(primary) and primary > 0,
-       do: primary
-
-  defp live_child_terminal_dimension(_primary, secondary)
-       when is_integer(secondary) and secondary > 0,
-       do: secondary
-
-  defp live_child_terminal_dimension(_primary, _secondary), do: nil
-
-  defp resize_virtual_terminal(%Termite.Terminal{} = terminal, width, height) do
-    %{terminal | size: %{width: width, height: height}}
-  end
-
-  defp resize_virtual_terminal(nil, width, height) do
-    %Termite.Terminal{size: %{width: width, height: height}}
-  end
-
   defp stop(state) do
     if Process.alive?(state.view_pid) do
       Process.exit(state.view_pid, :normal)
@@ -1854,8 +1389,6 @@ defmodule Breeze.Server do
 
   defp maybe_exit_alt_screen(terminal, true), do: Termite.Screen.exit_alt_screen(terminal)
   defp maybe_exit_alt_screen(terminal, _), do: terminal
-
-  defp crashed?(%{crash: crash}), do: not is_nil(crash)
 
   defp safe_apply_input_reply(state, fun) do
     case safe_call(fn -> fun.(state) end) do
@@ -1907,7 +1440,7 @@ defmodule Breeze.Server do
     case live_child_id_for_focus(state, focused) ||
            live_child_id_for_focus(state, previous_focused) do
       nil -> state
-      child_id -> Map.put(state, :pending_sync_child_render_id, child_id)
+      child_id -> update_input(state, pending_sync_child_render_id: child_id)
     end
   end
 
@@ -1949,21 +1482,21 @@ defmodule Breeze.Server do
   end
 
   defp enter_crash_state(state, crash) do
-    cancel_timer(state.animation_timer)
+    cancel_timer(state.frame.animation_timer)
     terminal = apply_mouse_mode(state.terminal, false)
     crash = Breeze.ErrorView.prepare_crash(state.view, crash, terminal.size)
 
     state
     |> Map.put(:terminal, terminal)
     |> Map.put(:crash, crash)
-    |> Map.put(:pending_ref, nil)
-    |> Map.put(:pending_started_at, nil)
-    |> Map.put(:input_flush_scheduled?, false)
-    |> Map.put(:queued_input, :queue.new())
-    |> Map.put(:animation_timer, nil)
-    |> Map.put(:next_tick_at, nil)
-    |> Map.put(:decorations, [])
-    |> put_debug_stat(:last_render_cause, :crash)
+    |> update_input(
+      pending_ref: nil,
+      pending_started_at: nil,
+      flush_scheduled?: false,
+      queued_input: :queue.new()
+    )
+    |> update_frame(animation_timer: nil, next_tick_at: nil, decorations: [])
+    |> Debug.put_stat(:last_render_cause, :crash)
     |> render_crash()
   end
 
@@ -1985,10 +1518,7 @@ defmodule Breeze.Server do
 
     state
     |> Map.put(:crash, crash)
-    |> Map.put(:base_output, content)
-    |> Map.put(:last_frame_payload, nil)
-    |> Map.put(:last_frame_lines, nil)
-    |> Map.put(:last_overlays, [])
+    |> update_frame(base_output: content, last_payload: nil, last_lines: nil, last_overlays: [])
     |> render_frame()
   end
 
@@ -2029,15 +1559,19 @@ defmodule Breeze.Server do
         |> Map.put(:theme, theme)
         |> Map.put(:crash, nil)
         |> Map.put(:children, %{})
-        |> Map.put(:decorations, [])
-        |> Map.put(:base_output, "")
-        |> Map.put(:last_frame_payload, nil)
-        |> Map.put(:last_frame_lines, nil)
-        |> Map.put(:last_overlays, [])
-        |> Map.put(:pending_ref, nil)
-        |> Map.put(:pending_started_at, nil)
-        |> Map.put(:queued_input, :queue.new())
-        |> Map.put(:input_flush_scheduled?, false)
+        |> update_frame(
+          decorations: [],
+          base_output: "",
+          last_payload: nil,
+          last_lines: nil,
+          last_overlays: []
+        )
+        |> update_input(
+          pending_ref: nil,
+          pending_started_at: nil,
+          queued_input: :queue.new(),
+          flush_scheduled?: false
+        )
         |> maybe_render_base(cause)
 
       {:error, crash} ->
@@ -2298,125 +1832,10 @@ defmodule Breeze.Server do
     end)
 
     state
-    |> Map.put(:pending_ref, ref)
-    |> Map.put(:pending_started_at, System.monotonic_time(:millisecond))
-    |> put_debug_stat(:last_async_key, key)
+    |> update_input(pending_ref: ref, pending_started_at: System.monotonic_time(:millisecond))
+    |> Debug.put_stat(:last_async_key, key)
     |> schedule_animation()
   end
-
-  defp key_name(%{"key" => key}) when is_binary(key), do: key
-  defp key_name(key) when is_binary(key), do: key
-  defp key_name(_), do: nil
-
-  defp put_debug_stat(state, key, value) do
-    state
-    |> Map.update(:debug_stats, %{key => value}, &Map.put(&1, key, value))
-    |> maybe_record_debug_sample(key, value)
-    |> schedule_debug_push()
-  end
-
-  defp increment_debug_stat(state, key) do
-    now = System.monotonic_time(:millisecond)
-
-    state
-    |> Map.update(:debug_stats, %{key => 1}, &Map.update(&1, key, 1, fn value -> value + 1 end))
-    |> update_debug_rate(key, now)
-    |> schedule_debug_push()
-  end
-
-  defp maybe_record_debug_sample(state, key, value) when is_integer(value) do
-    if tracked_timing_key?(key) do
-      state
-      |> update_debug_history(key, value)
-      |> update_debug_summary(key)
-    else
-      state
-    end
-  end
-
-  defp maybe_record_debug_sample(state, _key, _value), do: state
-
-  defp tracked_timing_key?(key) do
-    key in [
-      :last_root_snapshot_app_us,
-      :last_live_children_app_us,
-      :last_render_base_app_us,
-      :last_prepare_decorations_us,
-      :last_frame_compose_us,
-      :last_terminal_write_us,
-      :last_frame_us,
-      :last_animation_us
-    ]
-  end
-
-  defp update_debug_history(state, key, value) do
-    history_key = {:history, key}
-
-    Map.update(state, :debug_stats, %{history_key => [value]}, fn stats ->
-      history =
-        stats
-        |> Map.get(history_key, [])
-        |> Kernel.++([value])
-        |> Enum.take(-@debug_window_size)
-
-      Map.put(stats, history_key, history)
-    end)
-  end
-
-  defp update_debug_summary(state, key) do
-    history_key = {:history, key}
-    avg_key = {:avg, key}
-    max_key = {:max, key}
-
-    Map.update!(state, :debug_stats, fn stats ->
-      history = Map.get(stats, history_key, [])
-
-      if history == [] do
-        stats
-      else
-        avg = div(Enum.sum(history), length(history))
-        max_value = Enum.max(history)
-
-        stats
-        |> Map.put(avg_key, avg)
-        |> Map.put(max_key, max_value)
-      end
-    end)
-  end
-
-  defp update_debug_rate(state, key, now) do
-    rate_key = {:rate, key}
-
-    Map.update(state, :debug_stats, %{rate_key => 1}, fn stats ->
-      timestamps =
-        stats
-        |> Map.get({:rate_window, key}, [])
-        |> Kernel.++([now])
-        |> Enum.filter(fn timestamp -> now - timestamp <= @debug_rate_window_ms end)
-
-      stats
-      |> Map.put({:rate_window, key}, timestamps)
-      |> Map.put(rate_key, length(timestamps))
-    end)
-  end
-
-  defp push_debug_stats_now(state) do
-    stats = debug_stats_snapshot(state)
-
-    Enum.each(state.debug_subscribers, fn subscriber ->
-      if is_pid(subscriber) and Process.alive?(subscriber) do
-        send(subscriber, {:debug_stats, stats})
-      end
-    end)
-
-    state
-  end
-
-  defp schedule_debug_push(%{debug_push_timer: nil, debug_push_interval_ms: interval} = state) do
-    %{state | debug_push_timer: Process.send_after(self(), :debug_push, interval)}
-  end
-
-  defp schedule_debug_push(state), do: state
 
   defp start_child!(attrs, terminal, theme, state) do
     view = fetch_live_attr!(attrs, :view)
@@ -2452,34 +1871,10 @@ defmodule Breeze.Server do
   end
 
   defp child_start_opts(start_opts, Breeze.Debug, state) do
-    Keyword.put_new(start_opts, :stats, debug_stats_snapshot(state))
+    Keyword.put_new(start_opts, :stats, Debug.snapshot(state))
   end
 
   defp child_start_opts(start_opts, _view, _state), do: start_opts
-
-  defp merge_inspector_render_data(%{inspector: false} = state, _acc), do: state
-
-  defp merge_inspector_render_data(state, acc) do
-    metadata = safe_root_metadata(state)
-    %{viewports: viewports, bounds: bounds, flags: flags, boxes: boxes} = inspector_nodes(acc)
-
-    state
-    |> Map.put(:rendered_viewports, viewports)
-    |> Map.put(:rendered_mouse_targets, bounds)
-    |> Map.put(:rendered_flags, flags)
-    |> Map.update(:rendered_boxes, boxes, &Map.merge(&1, boxes))
-    |> Map.put(:rendered_focus_meta, Map.get(metadata, :focus_meta, %{}))
-    |> Map.put(:rendered_implicit_state, Map.get(metadata, :implicit_state, %{}))
-    |> Map.put(:rendered_implicit_meta, Map.get(metadata, :implicit_meta, %{}))
-    |> Breeze.Inspector.sync_selected_id()
-  end
-
-  defp debug_stats_snapshot(state) do
-    state.debug_stats
-    |> Map.put(:focused, state.focused)
-    |> Map.put(:pending?, not is_nil(state.pending_ref))
-    |> Map.put(:screen, state.terminal.size)
-  end
 
   defp safe_root_metadata(state) do
     case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
@@ -2488,212 +1883,8 @@ defmodule Breeze.Server do
     end
   end
 
-  defp inspector_nodes(acc) do
-    source_boxes = Map.get(acc, :boxes, %{})
-
-    acc.elements
-    |> Enum.sort()
-    |> Enum.zip(acc.dimensions)
-    |> Enum.reduce(%{viewports: %{}, bounds: %{}, flags: %{}, boxes: %{}}, fn {{idx, flags}, dims},
-                                                                              node_acc ->
-      key = inspector_node_key(idx, flags)
-      viewport = Breeze.Viewport.from_dimensions(dims)
-
-      width = max((viewport.width || 0) - 1, 0)
-      height = max(viewport.height - 1, 0)
-      normalized_flags = Keyword.put(flags, :__inspector_idx__, idx)
-
-      bounds = %{
-        left: viewport.left,
-        top: viewport.top,
-        right: viewport.left + width,
-        bottom: viewport.top + height
-      }
-
-      %{
-        viewports: Map.put(node_acc.viewports, key, viewport),
-        bounds: Map.put(node_acc.bounds, key, bounds),
-        flags: Map.put(node_acc.flags, key, normalized_flags),
-        boxes:
-          case Map.get(node_acc.boxes, key) do
-            nil ->
-              case Map.get(source_boxes, idx) || Map.get(source_boxes, Keyword.get(flags, :id)) do
-                nil -> node_acc.boxes
-                box -> Map.put(node_acc.boxes, key, box)
-              end
-
-            _box ->
-              node_acc.boxes
-          end
-      }
-    end)
-  end
-
-  defp inspector_node_key(idx, flags) do
-    case Keyword.get(flags, :id) do
-      id when is_binary(id) -> id
-      _ -> "__inspector__" <> Integer.to_string(idx)
-    end
-  end
-
-  defp push_inspector_snapshot_now(%{inspector: false} = state), do: state
-
-  defp push_inspector_snapshot_now(%{inspector_subscribers: subscribers} = state) do
-    snapshot = Breeze.Inspector.snapshot(state)
-    Breeze.RemoteInspector.publish(snapshot)
-
-    if MapSet.size(subscribers) > 0 do
-      Enum.each(subscribers, fn subscriber ->
-        if is_pid(subscriber), do: send(subscriber, {:inspector_snapshot, snapshot})
-      end)
-    end
-
-    state
-  end
-
-  defp begin_render_tracking do
-    ensure_render_tracking_table!()
-    make_ref()
-  end
-
-  defp finish_render_tracking(ref) do
-    ensure_render_tracking_table!()
-
-    entries = :ets.take(@render_tracking_table, ref)
-
-    Enum.reduce(entries, %{missing: [], decorations: [], child_timings: []}, fn
-      {^ref, :missing, item}, tracking ->
-        %{tracking | missing: [item | tracking.missing]}
-
-      {^ref, :decoration, decoration}, tracking ->
-        %{tracking | decorations: [decoration | tracking.decorations]}
-
-      {^ref, :child_timing, child_timing}, tracking ->
-        %{tracking | child_timings: [child_timing | tracking.child_timings]}
-    end)
-    |> then(fn tracking ->
-      %{
-        missing: Enum.reverse(tracking.missing),
-        decorations: dedupe_decorations(tracking.decorations),
-        child_timings: Enum.reverse(tracking.child_timings)
-      }
-    end)
-  end
-
-  defp dedupe_decorations(decorations) do
-    decorations
-    |> Enum.reverse()
-    |> Enum.uniq_by(&tracked_decoration_identity/1)
-    |> Enum.reverse()
-  end
-
-  defp tracked_decoration_identity(decoration) do
-    {
-      Map.get(decoration, :id),
-      Map.get(decoration, :owner_id),
-      Map.get(decoration, :mod)
-    }
-  end
-
-  defp track_missing_live_child(ref, item) do
-    ensure_render_tracking_table!()
-    true = :ets.insert(@render_tracking_table, {ref, :missing, item})
-    :ok
-  end
-
-  defp track_render_decoration(ref, decoration) do
-    ensure_render_tracking_table!()
-    true = :ets.insert(@render_tracking_table, {ref, :decoration, decoration})
-    :ok
-  end
-
-  defp track_child_timing(ref, child_timing) do
-    ensure_render_tracking_table!()
-    true = :ets.insert(@render_tracking_table, {ref, :child_timing, child_timing})
-    :ok
-  end
-
-  defp ensure_render_tracking_table! do
-    case :ets.whereis(@render_tracking_table) do
-      :undefined ->
-        try do
-          :ets.new(@render_tracking_table, [:named_table, :public, :bag])
-        rescue
-          ArgumentError -> :ok
-        end
-
-      _tid ->
-        :ok
-    end
-  end
-
-  defp enqueue_input(state, decoded), do: update_in(state.queued_input, &:queue.in(decoded, &1))
-
-  defp schedule_input_flush(%{input_flush_scheduled?: true} = state), do: state
-
-  defp schedule_input_flush(%{queued_input: {[], []}} = state), do: state
-
   defp schedule_input_flush(state) do
-    send(self(), @flush_input_batch)
-    %{state | input_flush_scheduled?: true}
-  end
-
-  defp sum_timing_us(child_timings) do
-    Enum.reduce(child_timings, 0, fn %{us: us}, acc -> acc + us end)
-  end
-
-  defp debug_live_child_us(child_timings) do
-    child_timings
-    |> Enum.filter(&debug_child_timing?/1)
-    |> sum_timing_us()
-  end
-
-  defp non_debug_child_timings(child_timings) do
-    Enum.reject(child_timings, &debug_child_timing?/1)
-  end
-
-  defp debug_child_timing?(%{id: "debug"}), do: true
-  defp debug_child_timing?(_timing), do: false
-
-  defp normalize_child_timings(child_timings) do
-    child_timings
-    |> Enum.sort_by(& &1.us, :desc)
-    |> Enum.take(5)
-    |> Enum.map(fn timing ->
-      timing
-      |> Map.update!(:view, &inspect/1)
-    end)
-  end
-
-  defp summarize_profile(entries) do
-    entries
-    |> Enum.filter(fn entry ->
-      entry.metric in [
-        :view_render_us,
-        :template_tree_us,
-        :build_tree_us,
-        :layout_us,
-        :render_with_dimensions_us,
-        :item_render_us,
-        :compose_us,
-        :render_children_us,
-        :container_render_self_us,
-        :container_layer_map_us,
-        :layer_maps_to_content_us
-      ]
-    end)
-    |> Enum.take(6)
-    |> Enum.map(fn %{label: label, metric: metric, value: value} ->
-      %{label: shorten_label(label), metric: metric, value: value}
-    end)
-  end
-
-  defp shorten_label(label) when is_binary(label) do
-    if String.length(label) > 28 do
-      String.slice(label, 0, 28)
-    else
-      label
-    end
+    Input.schedule_flush(state, @flush_input_batch)
   end
 
   defp root_view_module(%{children: _} = state) do
@@ -2739,24 +1930,6 @@ defmodule Breeze.Server do
         reply
     end
   end
-
-  defp queue_out(queue), do: :queue.out(queue)
-
-  defp queue_peek(queue) do
-    case :queue.peek(queue) do
-      :empty -> :empty
-      value -> {:value, value}
-    end
-  end
-
-  defp raw_printable_key?(key) when is_binary(key) do
-    String.length(key) == 1 and key not in ["\n", "\r", "\t", "\v", "\f"] and
-      String.printable?(key) and not String.match?(key, ~r/[\x00-\x1F\x7F]/u)
-  end
-
-  defp raw_printable_key?(_key), do: false
-
-  defp batched_printable_event(key), do: %{"key" => key, "__batched_printable__" => true}
 
   defp focused_child_chain(%{focused: nil}), do: []
 

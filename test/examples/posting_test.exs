@@ -185,13 +185,13 @@ defmodule PostingTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      not state.input_flush_scheduled? and :queue.is_empty(state.queued_input)
+      not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input)
     end)
 
     state = :sys.get_state(pid)
 
-    refute state.input_flush_scheduled?
-    assert :queue.is_empty(state.queued_input)
+    refute state.input.flush_scheduled?
+    assert :queue.is_empty(state.input.queued_input)
 
     Process.exit(pid, :normal)
   end
@@ -213,14 +213,14 @@ defmodule PostingTest do
       state = :sys.get_state(pid)
       term = :sys.get_state(state.view_pid)
 
-      not state.input_flush_scheduled? and :queue.is_empty(state.queued_input) and
+      not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input) and
         String.ends_with?(term.assigns.url, String.duplicate("x", 100))
     end)
 
     state = :sys.get_state(pid)
     term = :sys.get_state(state.view_pid)
 
-    assert :queue.is_empty(state.queued_input)
+    assert :queue.is_empty(state.input.queued_input)
     assert String.ends_with?(term.assigns.url, String.duplicate("x", 100))
 
     Process.exit(pid, :normal)
@@ -265,7 +265,7 @@ defmodule PostingTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      not state.input_flush_scheduled? and :queue.is_empty(state.queued_input)
+      not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input)
     end)
 
     assert %{enabled?: false, visible?: false, selected_id: nil} =
@@ -298,7 +298,7 @@ defmodule PostingTest do
     assert snapshot.visible?
     assert snapshot.selected_id == "url"
 
-    bounds = :sys.get_state(pid).rendered_mouse_targets["method"]
+    bounds = :sys.get_state(pid).rendered.mouse_targets["method"]
     x = div(bounds.left + bounds.right, 2) + 1
     y = div(bounds.top + bounds.bottom, 2) + 1
 
@@ -338,11 +338,11 @@ defmodule PostingTest do
     state = :sys.get_state(pid)
 
     {selected_id, bounds} =
-      state.rendered_flags
+      state.rendered.flags
       |> Enum.filter(fn {key, flags} ->
         String.starts_with?(key, "__inspector__") and Keyword.get(flags, :id) == nil
       end)
-      |> Enum.map(fn {key, _flags} -> {key, state.rendered_mouse_targets[key]} end)
+      |> Enum.map(fn {key, _flags} -> {key, state.rendered.mouse_targets[key]} end)
       |> Enum.reject(fn {_key, bounds} -> is_nil(bounds) end)
       |> Enum.min_by(fn {_key, bounds} ->
         (bounds.right - bounds.left + 1) * (bounds.bottom - bounds.top + 1)
@@ -379,7 +379,7 @@ defmodule PostingTest do
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
-    bounds = :sys.get_state(pid).rendered_mouse_targets["url"]
+    bounds = :sys.get_state(pid).rendered.mouse_targets["url"]
     x = div(bounds.left + bounds.right, 2) + 1
     y = div(bounds.top + bounds.bottom, 2) + 1
 
@@ -388,8 +388,8 @@ defmodule PostingTest do
     wait_until(fn ->
       state = :sys.get_state(pid)
 
-      Process.alive?(pid) and not state.input_flush_scheduled? and
-        :queue.is_empty(state.queued_input)
+      Process.alive?(pid) and not state.input.flush_scheduled? and
+        :queue.is_empty(state.input.queued_input)
     end)
 
     assert Process.alive?(pid)
@@ -461,7 +461,7 @@ defmodule PostingTest do
     initial = Breeze.Server.inspector_snapshot(pid)
     assert initial.selected_id == "url"
 
-    bounds = :sys.get_state(pid).rendered_mouse_targets["method"]
+    bounds = :sys.get_state(pid).rendered.mouse_targets["method"]
     x = div(bounds.left + bounds.right, 2) + 1
     y = div(bounds.top + bounds.bottom, 2) + 1
 
@@ -497,7 +497,7 @@ defmodule PostingTest do
       Breeze.Server.inspector_snapshot(pid).visible?
     end)
 
-    bounds = :sys.get_state(pid).rendered_mouse_targets["method"]
+    bounds = :sys.get_state(pid).rendered.mouse_targets["method"]
     x = div(bounds.left + bounds.right, 2) + 1
     y = div(bounds.top + bounds.bottom, 2) + 1
 
@@ -540,12 +540,12 @@ defmodule PostingTest do
     end)
 
     state = :sys.get_state(pid)
-    bounds = state.rendered_mouse_targets["method"]
+    bounds = state.rendered.mouse_targets["method"]
     x = div(bounds.left + bounds.right, 2) + 1
     y = div(bounds.top + bounds.bottom, 2) + 1
 
     candidates =
-      state.rendered_mouse_targets
+      state.rendered.mouse_targets
       |> Enum.filter(fn {_id, hit_bounds} ->
         x - 1 >= hit_bounds.left and x - 1 <= hit_bounds.right and y - 1 >= hit_bounds.top and
           y - 1 <= hit_bounds.bottom
@@ -602,7 +602,7 @@ defmodule PostingTest do
       Breeze.Server.inspector_snapshot(pid).visible?
     end)
 
-    bounds = :sys.get_state(pid).rendered_mouse_targets["url"]
+    bounds = :sys.get_state(pid).rendered.mouse_targets["url"]
     x = div(bounds.left + bounds.right, 2) + 1
     y = div(bounds.top + bounds.bottom, 2) + 1
 

@@ -420,7 +420,7 @@ defmodule Breeze.Storybook.ViewTest do
     send(pid, {:child_invalidated, "storybook-preview"})
 
     wait_until(fn ->
-      length(:sys.get_state(pid).last_overlays) == 1
+      length(:sys.get_state(pid).frame.last_overlays) == 1
     end)
 
     assert {:noreply, "storybook-nav", true} =
@@ -431,7 +431,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     wait_until(fn ->
       :sys.get_state(pid).focused == "storybook-nav" and
-        :sys.get_state(pid).last_overlays == []
+        :sys.get_state(pid).frame.last_overlays == []
     end)
   end
 
@@ -506,7 +506,7 @@ defmodule Breeze.Storybook.ViewTest do
     end)
 
     preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
-    viewport = :sys.get_state(pid).rendered_elements["storybook-preview"]
+    viewport = :sys.get_state(pid).rendered.elements["storybook-preview"]
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)
 
@@ -558,7 +558,7 @@ defmodule Breeze.Storybook.ViewTest do
     )
 
     preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
-    viewport = :sys.get_state(pid).rendered_elements["storybook-preview"]
+    viewport = :sys.get_state(pid).rendered.elements["storybook-preview"]
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)
 
@@ -605,7 +605,7 @@ defmodule Breeze.Storybook.ViewTest do
     end)
 
     preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
-    viewport = :sys.get_state(pid).rendered_elements["storybook-preview"]
+    viewport = :sys.get_state(pid).rendered.elements["storybook-preview"]
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)
 
@@ -651,7 +651,7 @@ defmodule Breeze.Storybook.ViewTest do
     end)
 
     preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
-    viewport = :sys.get_state(pid).rendered_elements["storybook-preview"]
+    viewport = :sys.get_state(pid).rendered.elements["storybook-preview"]
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)
 
@@ -697,7 +697,7 @@ defmodule Breeze.Storybook.ViewTest do
     end)
 
     preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
-    viewport = :sys.get_state(pid).rendered_elements["storybook-preview"]
+    viewport = :sys.get_state(pid).rendered.elements["storybook-preview"]
     reader = terminal.reader
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)

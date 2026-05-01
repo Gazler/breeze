@@ -842,12 +842,12 @@ defmodule Breeze.LiveViewTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      Map.has_key?(state.children, "debug") and state.base_output =~ "Count: 1"
+      Map.has_key?(state.children, "debug") and state.frame.base_output =~ "Count: 1"
     end)
 
     state = :sys.get_state(pid)
     assert Map.has_key?(state.children, "debug")
-    assert state.base_output =~ "Count: 1"
+    assert state.frame.base_output =~ "Count: 1"
 
     Process.exit(pid, :normal)
   end
@@ -865,7 +865,7 @@ defmodule Breeze.LiveViewTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      state.base_output =~ "muted"
+      state.frame.base_output =~ "muted"
     end)
 
     child_before = :sys.get_state(pid).children["preview"]
@@ -875,7 +875,7 @@ defmodule Breeze.LiveViewTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      state.base_output =~ "accent"
+      state.frame.base_output =~ "accent"
     end)
 
     child_after = :sys.get_state(pid).children["preview"]
@@ -899,7 +899,7 @@ defmodule Breeze.LiveViewTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      not state.input_flush_scheduled? and :queue.is_empty(state.queued_input)
+      not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input)
     end)
 
     %{view_pid: view_pid} = :sys.get_state(pid)
@@ -930,21 +930,21 @@ defmodule Breeze.LiveViewTest do
         state = :sys.get_state(pid)
 
         state.crash &&
-          state.base_output =~ "Breeze Error" &&
-          state.base_output =~ "CrashingView" &&
-          state.base_output =~ "RuntimeError"
+          state.frame.base_output =~ "Breeze Error" &&
+          state.frame.base_output =~ "CrashingView" &&
+          state.frame.base_output =~ "RuntimeError"
       end)
 
       state = :sys.get_state(pid)
 
       assert state.crash
-      assert state.base_output =~ "Breeze Error"
-      assert state.base_output =~ "CrashingView"
-      assert state.base_output =~ "RuntimeError"
-      assert state.base_output =~ "Crash Details"
-      assert state.base_output =~ "Selected Frame"
-      assert state.base_output =~ "Stacktrace"
-      assert state.base_output =~ "boom"
+      assert state.frame.base_output =~ "Breeze Error"
+      assert state.frame.base_output =~ "CrashingView"
+      assert state.frame.base_output =~ "RuntimeError"
+      assert state.frame.base_output =~ "Crash Details"
+      assert state.frame.base_output =~ "Selected Frame"
+      assert state.frame.base_output =~ "Stacktrace"
+      assert state.frame.base_output =~ "boom"
 
       Process.exit(pid, :normal)
     end)
@@ -1014,14 +1014,14 @@ defmodule Breeze.LiveViewTest do
       wait_until(fn ->
         state = :sys.get_state(pid)
 
-        is_nil(state.crash) and state.base_output =~ "ready" and
-          not String.contains?(state.base_output, "Breeze Error")
+        is_nil(state.crash) and state.frame.base_output =~ "ready" and
+          not String.contains?(state.frame.base_output, "Breeze Error")
       end)
 
       restarted_state = :sys.get_state(pid)
       refute restarted_state.crash
-      assert restarted_state.base_output =~ "ready"
-      refute restarted_state.base_output =~ "Breeze Error"
+      assert restarted_state.frame.base_output =~ "ready"
+      refute restarted_state.frame.base_output =~ "Breeze Error"
 
       Process.exit(pid, :normal)
     end)
@@ -1048,7 +1048,7 @@ defmodule Breeze.LiveViewTest do
     end)
 
     state = :sys.get_state(pid)
-    initial_render_count = state.debug_stats[:render_base_count]
+    initial_render_count = state.debug.stats[:render_base_count]
     assert Map.has_key?(state.children, "debug")
 
     drain_terminal_writes()
@@ -1064,7 +1064,7 @@ defmodule Breeze.LiveViewTest do
 
     next_state = :sys.get_state(pid)
 
-    assert next_state.debug_stats[:render_base_count] == initial_render_count
+    assert next_state.debug.stats[:render_base_count] == initial_render_count
     assert Enum.any?(writes, &String.contains?(&1, "Count: 2"))
 
     Process.exit(pid, :normal)
@@ -1107,7 +1107,7 @@ defmodule Breeze.LiveViewTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      state.debug_stats[:last_render_cause] == :reload and state.base_output =~ "ready"
+      state.debug.stats[:last_render_cause] == :reload and state.frame.base_output =~ "ready"
     end)
 
     Process.exit(pid, :normal)
@@ -1179,13 +1179,13 @@ defmodule Breeze.LiveViewTest do
 
       wait_until(fn ->
         state = :sys.get_state(pid)
-        state.crash && state.base_output =~ "reload failed"
+        state.crash && state.frame.base_output =~ "reload failed"
       end)
 
       state = :sys.get_state(pid)
       assert state.crash
-      assert state.base_output =~ "Breeze Error"
-      assert state.base_output =~ "reload failed"
+      assert state.frame.base_output =~ "Breeze Error"
+      assert state.frame.base_output =~ "reload failed"
 
       Process.exit(pid, :normal)
     end)
@@ -1229,7 +1229,7 @@ defmodule Breeze.LiveViewTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      state.base_output =~ "Count: 1"
+      state.frame.base_output =~ "Count: 1"
     end)
 
     Agent.update(config_pid, fn _opts ->
@@ -1248,7 +1248,7 @@ defmodule Breeze.LiveViewTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      state.debug_stats[:last_render_cause] == :reload and state.base_output =~ "Count: 1"
+      state.debug.stats[:last_render_cause] == :reload and state.frame.base_output =~ "Count: 1"
     end)
 
     wait_until(fn ->
@@ -1264,7 +1264,7 @@ defmodule Breeze.LiveViewTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      state.base_output =~ "Count: 2"
+      state.frame.base_output =~ "Count: 2"
     end)
 
     Process.exit(pid, :normal)
@@ -1290,7 +1290,7 @@ defmodule Breeze.LiveViewTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      state.base_output =~ "Count: 1"
+      state.frame.base_output =~ "Count: 1"
     end)
 
     send(pid, {:reload, :code_changed, ["examples/router.exs"]})
@@ -1298,9 +1298,9 @@ defmodule Breeze.LiveViewTest do
     wait_until(fn ->
       state = :sys.get_state(pid)
 
-      state.debug_stats[:last_render_cause] == :reload and
+      state.debug.stats[:last_render_cause] == :reload and
         state.start_opts == [count: 1] and
-        state.base_output =~ "Count: 1"
+        state.frame.base_output =~ "Count: 1"
     end)
 
     Process.exit(pid, :normal)
@@ -1361,14 +1361,14 @@ defmodule Breeze.LiveViewTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      state.debug_stats[:last_render_cause] == :reload
+      state.debug.stats[:last_render_cause] == :reload
     end)
 
     send(pid, {reader, {:data, "4"}})
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      state.base_output =~ "Count: 1"
+      state.frame.base_output =~ "Count: 1"
     end)
 
     nested = :sys.get_state(pid).children["nested"]
@@ -1403,11 +1403,11 @@ defmodule Breeze.LiveViewTest do
     Process.sleep(40)
     drain_terminal_writes()
 
-    invalidations_before = :sys.get_state(pid).debug_stats[:child_invalidated_count] || 0
+    invalidations_before = :sys.get_state(pid).debug.stats[:child_invalidated_count] || 0
 
     Process.sleep(40)
     writes = drain_terminal_writes()
-    invalidations_after = :sys.get_state(pid).debug_stats[:child_invalidated_count] || 0
+    invalidations_after = :sys.get_state(pid).debug.stats[:child_invalidated_count] || 0
 
     assert writes == []
     assert invalidations_after == invalidations_before
@@ -1431,7 +1431,7 @@ defmodule Breeze.LiveViewTest do
     end)
 
     state = :sys.get_state(pid)
-    initial_render_count = state.debug_stats[:render_base_count]
+    initial_render_count = state.debug.stats[:render_base_count]
     child = state.children["debug"]
 
     drain_terminal_writes()
@@ -1440,13 +1440,13 @@ defmodule Breeze.LiveViewTest do
 
     wait_until(fn ->
       next_state = :sys.get_state(pid)
-      next_state.debug_stats[:render_base_count] > initial_render_count
+      next_state.debug.stats[:render_base_count] > initial_render_count
     end)
 
     next_state = :sys.get_state(pid)
 
-    assert next_state.debug_stats[:render_base_count] > initial_render_count
-    assert next_state.debug_stats[:last_render_cause] == :child_invalidated
+    assert next_state.debug.stats[:render_base_count] > initial_render_count
+    assert next_state.debug.stats[:last_render_cause] == :child_invalidated
 
     Process.exit(pid, :normal)
   end
@@ -1473,7 +1473,7 @@ defmodule Breeze.LiveViewTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      state.debug_stats[:last_render_cause] == :child_patch
+      state.debug.stats[:last_render_cause] == :child_patch
     end)
 
     writes =
@@ -1527,23 +1527,23 @@ defmodule Breeze.LiveViewTest do
       )
 
     drain_terminal_writes()
-    initial_render_count = :sys.get_state(pid).debug_stats[:render_base_count] || 0
+    initial_render_count = :sys.get_state(pid).debug.stats[:render_base_count] || 0
 
     send(pid, {reader, {:data, "+"}})
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      (state.debug_stats[:render_base_count] || 0) > initial_render_count
+      (state.debug.stats[:render_base_count] || 0) > initial_render_count
     end)
 
     Process.sleep(40)
     drain_terminal_writes()
 
-    invalidations_before = :sys.get_state(pid).debug_stats[:child_invalidated_count] || 0
+    invalidations_before = :sys.get_state(pid).debug.stats[:child_invalidated_count] || 0
 
     Process.sleep(40)
     writes = drain_terminal_writes()
-    invalidations_after = :sys.get_state(pid).debug_stats[:child_invalidated_count] || 0
+    invalidations_after = :sys.get_state(pid).debug.stats[:child_invalidated_count] || 0
 
     assert writes == []
     assert invalidations_after == invalidations_before

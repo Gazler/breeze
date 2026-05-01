@@ -281,7 +281,7 @@ defmodule Breeze.InputRouterTest do
     refute_receive :halted, 50
 
     wait_until(fn ->
-      :sys.get_state(server_pid).base_output =~ "helloq"
+      :sys.get_state(server_pid).frame.base_output =~ "helloq"
     end)
 
     Process.exit(pid, :normal)
@@ -313,7 +313,7 @@ defmodule Breeze.InputRouterTest do
     end)
 
     wait_until(fn ->
-      :sys.get_state(server_pid).base_output =~ "mode=system status=ready"
+      :sys.get_state(server_pid).frame.base_output =~ "mode=system status=ready"
     end)
 
     Process.exit(pid, :normal)
