@@ -17,13 +17,17 @@ defmodule Breeze.Server do
     :view,
     :start_opts,
     :alt_screen?,
+    :alt_screen_active?,
+    :hide_cursor?,
     :mouse_mode,
     :reload_opts,
     :reloader_pid,
     :focused,
     :theme,
     :apply_theme_defaults?,
+    :clipboard_opts,
     :crash,
+    :crash_scrollback?,
     :last_render_at,
     :last_interaction_at,
     children: %{},
@@ -43,6 +47,7 @@ defmodule Breeze.Server do
           | {:mouse, boolean() | keyword()}
           | {:reload, boolean() | keyword()}
           | {:theme, Breeze.Theme.t() | map() | keyword() | atom()}
+          | {:clipboard, keyword()}
           | {:global_keybindings, list()}
           | {:inspector, boolean() | keyword()}
           | {:debug_push_interval_ms, pos_integer()}
@@ -145,6 +150,8 @@ defmodule Breeze.Server do
         view: view,
         start_opts: start_opts,
         alt_screen?: Keyword.get(opts, :alt_screen, true),
+        alt_screen_active?: Keyword.get(opts, :alt_screen, true),
+        hide_cursor?: Keyword.get(opts, :hide_cursor, true),
         mouse_mode: Keyword.get(opts, :mouse, false),
         reload_opts:
           normalize_reload_opts(
@@ -153,6 +160,7 @@ defmodule Breeze.Server do
         focused: focused,
         theme: theme,
         apply_theme_defaults?: apply_theme_defaults?,
+        clipboard_opts: Keyword.get(opts, :clipboard, []),
         global_keybindings: Keyword.get(opts, :global_keybindings, []),
         last_render_at: System.monotonic_time(:millisecond),
         last_interaction_at: nil,
@@ -228,7 +236,7 @@ defmodule Breeze.Server do
   def handle_info({reader, {:signal, :winch}}, %{reader: reader, crash: crash} = state)
       when not is_nil(crash) do
     terminal = Termite.Terminal.resize(state.terminal)
-    {:noreply, render_crash(%{state | terminal: terminal})}
+    {:noreply, render_crash(%{state | terminal: terminal}, force_full_redraw?: true)}
   end
 
   def handle_info({reader, {:signal, :winch}}, %{reader: reader} = state) do
@@ -254,6 +262,13 @@ defmodule Breeze.Server do
     send(pid, {:ensure_runtime_palette, :system})
     {:noreply, state}
   end
+
+  def handle_info({:clear_crash_notice, ref}, %{crash: %{notice_ref: ref} = crash} = state) do
+    crash = Map.drop(crash, [:notice, :notice_ref])
+    {:noreply, state |> Map.put(:crash, crash) |> render_crash()}
+  end
+
+  def handle_info({:clear_crash_notice, _ref}, state), do: {:noreply, state}
 
   def handle_info(:child_invalidated, %{crash: crash} = state) when not is_nil(crash) do
     {:noreply, state}
@@ -430,7 +445,7 @@ defmodule Breeze.Server do
   end
 
   defp handle_decoded_sync_input({:key, key}, %{crash: crash} = state) when not is_nil(crash) do
-    {:noreply, dispatch_crash_input({:key, key}, touch_interaction(state))}
+    handle_crash_input({:key, key}, touch_interaction(state))
   end
 
   defp handle_decoded_sync_input({:key, key}, state) do
@@ -445,7 +460,7 @@ defmodule Breeze.Server do
   end
 
   defp handle_deferred_input({:key, key}, %{crash: crash} = state) when not is_nil(crash) do
-    {:noreply, dispatch_crash_input({:key, key}, touch_interaction(state))}
+    handle_crash_input({:key, key}, touch_interaction(state))
   end
 
   defp handle_deferred_input({:key, key}, state) do
@@ -1381,7 +1396,7 @@ defmodule Breeze.Server do
       |> Termite.Screen.disable_mouse()
       |> Termite.Screen.clear_screen()
       |> Termite.Screen.show_cursor()
-      |> maybe_exit_alt_screen(state.alt_screen?)
+      |> maybe_exit_alt_screen(state.alt_screen_active?)
 
     terminal = Termite.Terminal.write(terminal, "\r")
     {:stop, :normal, %{state | terminal: terminal}}
@@ -1471,6 +1486,8 @@ defmodule Breeze.Server do
   end
 
   defp crash_info(kind, reason, stacktrace) do
+    {kind, reason, stacktrace} = normalize_crash_info(kind, reason, stacktrace)
+
     %{
       kind: kind,
       reason: reason,
@@ -1480,6 +1497,28 @@ defmodule Breeze.Server do
       implicit_state: %{}
     }
   end
+
+  defp normalize_crash_info(:exit, {{%_exception{} = exception, stacktrace}, _call}, _stacktrace)
+       when is_list(stacktrace) do
+    {:error, exception, stacktrace}
+  end
+
+  defp normalize_crash_info(:exit, {%_exception{} = exception, stacktrace}, _stacktrace)
+       when is_list(stacktrace) do
+    {:error, exception, stacktrace}
+  end
+
+  defp normalize_crash_info(:exit, {{{kind, reason, stacktrace}, _location}, _call}, _stacktrace)
+       when is_list(stacktrace) do
+    {kind, reason, stacktrace}
+  end
+
+  defp normalize_crash_info(:exit, {kind, reason, stacktrace}, _stacktrace)
+       when is_list(stacktrace) do
+    {kind, reason, stacktrace}
+  end
+
+  defp normalize_crash_info(kind, reason, stacktrace), do: {kind, reason, stacktrace}
 
   defp enter_crash_state(state, crash) do
     cancel_timer(state.frame.animation_timer)
@@ -1497,13 +1536,13 @@ defmodule Breeze.Server do
     )
     |> update_frame(animation_timer: nil, next_tick_at: nil, decorations: [])
     |> Debug.put_stat(:last_render_cause, :crash)
-    |> render_crash()
+    |> render_crash(force_full_redraw?: true)
   end
 
   defp cancel_timer(nil), do: :ok
   defp cancel_timer(timer), do: Process.cancel_timer(timer)
 
-  defp render_crash(state) do
+  defp render_crash(state, opts \\ []) do
     crash = Breeze.ErrorView.prepare_crash(state.view, state.crash, state.terminal.size)
 
     content =
@@ -1516,21 +1555,95 @@ defmodule Breeze.Server do
         )
       )
 
+    state = Map.put(state, :crash, crash)
+
+    frame_opts =
+      if Keyword.get(opts, :force_full_redraw?, false) do
+        [base_output: content, last_payload: nil, last_lines: nil, last_overlays: []]
+      else
+        [base_output: content]
+      end
+
     state
-    |> Map.put(:crash, crash)
-    |> update_frame(base_output: content, last_payload: nil, last_lines: nil, last_overlays: [])
+    |> update_frame(frame_opts)
     |> render_frame()
   end
 
-  defp dispatch_crash_input(input, %{crash: crash} = state) do
+  defp handle_crash_input(input, %{crash: crash} = state) do
     case Breeze.ErrorView.handle_input(state.view, crash, input, state.terminal.size) do
       :restart ->
-        restart_root(state, :restart)
+        {:noreply, restart_root(state, :restart)}
+
+      {:copy_details, crash} ->
+        copy_or_print_crash_details(state, crash)
 
       {:update, updated_crash} ->
-        state |> Map.put(:crash, updated_crash) |> render_crash()
+        {:noreply, state |> Map.put(:crash, updated_crash) |> render_crash()}
     end
   end
+
+  defp copy_or_print_crash_details(state, crash) do
+    details = Breeze.ErrorView.details_text(state.view, crash)
+
+    case Breeze.ErrorView.Clipboard.copy(details, state.clipboard_opts || []) do
+      {:ok, command} ->
+        {:noreply,
+         show_temporary_crash_notice(state, crash, "Copied crash details to #{command}.")}
+
+      {:error, :unavailable} ->
+        print_crash_details_to_scrollback(state, details)
+
+      {:error, reason} ->
+        details = details <> "\n\nClipboard copy failed: #{inspect(reason)}"
+        print_crash_details_to_scrollback(state, details)
+    end
+  end
+
+  defp show_temporary_crash_notice(state, crash, notice) do
+    ref = make_ref()
+    Process.send_after(self(), {:clear_crash_notice, ref}, 1_000)
+
+    crash =
+      crash
+      |> Map.put(:notice, notice)
+      |> Map.put(:notice_ref, ref)
+
+    state
+    |> Map.put(:crash, crash)
+    |> render_crash()
+  end
+
+  defp print_crash_details_to_scrollback(state, details) do
+    terminal =
+      state.terminal
+      |> Termite.Screen.disable_mouse()
+      |> Termite.Screen.show_cursor()
+      |> maybe_exit_alt_screen(state.alt_screen_active?)
+      |> Termite.Terminal.write("\r\n" <> details <> "\r\n\nPress q to quit, r to restart.\r\n")
+
+    {:noreply, %{state | terminal: terminal, alt_screen_active?: false, crash_scrollback?: true}}
+  end
+
+  defp restore_terminal_after_crash_scrollback(%{crash_scrollback?: true} = state) do
+    terminal =
+      state.terminal
+      |> maybe_enter_alt_screen(state.alt_screen?, state.alt_screen_active?)
+      |> maybe_hide_cursor(state.hide_cursor?)
+      |> Termite.Screen.clear_screen()
+
+    state
+    |> Map.put(:terminal, terminal)
+    |> Map.put(:alt_screen_active?, state.alt_screen?)
+    |> update_frame(last_payload: nil, last_lines: nil, last_overlays: [])
+  end
+
+  defp restore_terminal_after_crash_scrollback(state), do: state
+
+  defp maybe_enter_alt_screen(terminal, true, false), do: Termite.Screen.alt_screen(terminal)
+  defp maybe_enter_alt_screen(terminal, _configured?, _active?), do: terminal
+
+  defp maybe_hide_cursor(terminal, true), do: Termite.Screen.hide_cursor(terminal)
+  defp maybe_hide_cursor(terminal, _), do: terminal
 
   defp reload_after_code_change(state) do
     state = prune_dead_children(state)
@@ -1548,7 +1661,11 @@ defmodule Breeze.Server do
   end
 
   defp restart_root(state, cause) do
-    state = %{state | terminal: apply_mouse_mode(state.terminal, state.mouse_mode)}
+    state =
+      state
+      |> restore_terminal_after_crash_scrollback()
+      |> then(&%{&1 | terminal: apply_mouse_mode(&1.terminal, &1.mouse_mode)})
+
     shutdown_root_view(state.view_pid)
 
     case start_root_view(state) do
@@ -1558,6 +1675,7 @@ defmodule Breeze.Server do
         |> Map.put(:focused, focused)
         |> Map.put(:theme, theme)
         |> Map.put(:crash, nil)
+        |> Map.put(:crash_scrollback?, false)
         |> Map.put(:children, %{})
         |> update_frame(
           decorations: [],
