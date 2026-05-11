@@ -3,6 +3,8 @@ defmodule Breeze.KeyDecoder do
 
   def decode("\e"), do: "Escape"
   def decode("\r"), do: "Enter"
+  def decode("\b"), do: %{"ctrlKey" => true, "key" => "Backspace"}
+  def decode("\x17"), do: %{"ctrlKey" => true, "key" => "w"}
 
   def decode(raw_key) do
     cond do
@@ -52,8 +54,8 @@ defmodule Breeze.KeyDecoder do
   defp convert_csi("4~"), do: "End"
   defp convert_csi("5~"), do: "PageUp"
   defp convert_csi("6~"), do: "PageDown"
-  defp convert_csi("8;5u"), do: "\x17"
-  defp convert_csi("127;5u"), do: "\x17"
+  defp convert_csi("8;5u"), do: %{"ctrlKey" => true, "key" => "Backspace"}
+  defp convert_csi("127;5u"), do: %{"ctrlKey" => true, "key" => "w"}
 
   defp convert_csi(sequence) do
     case decode_modified_csi(sequence) do
@@ -76,7 +78,14 @@ defmodule Breeze.KeyDecoder do
             |> with_modifiers(String.to_integer(modifier))
 
           _ ->
-            nil
+            case Regex.run(~r/^27;(\d+);(\d+)~$/, sequence) do
+              [_, modifier, codepoint] ->
+                decode_csi_u_key(String.to_integer(codepoint))
+                |> with_modifiers(String.to_integer(modifier))
+
+              _ ->
+                nil
+            end
         end
     end
   end
@@ -87,6 +96,8 @@ defmodule Breeze.KeyDecoder do
   defp modified_cursor_key("D"), do: "ArrowLeft"
   defp modified_cursor_key("H"), do: "Home"
   defp modified_cursor_key("F"), do: "End"
+
+  defp decode_csi_u_key(13), do: "Enter"
 
   defp decode_csi_u_key(codepoint) when codepoint in 32..0x10FFFF do
     codepoint |> List.wrap() |> List.to_string()

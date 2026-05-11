@@ -397,6 +397,12 @@ defmodule Breeze.Style do
       {put_scrollbar_color(style, Theme.resolve_color(theme, color)),
        Map.put(attrs, :scrollbar_color_explicit, true)}
 
+  defp apply_style("border-none", {style, attrs}, _theme),
+    do: {%{style | border: BackBreeze.Border.none()}, attrs}
+
+  defp apply_style("border-invisible", {style, attrs}, _theme),
+    do: {%{style | border: BackBreeze.Border.invisible()}, attrs}
+
   defp apply_style("border-rounded", {style, attrs}, _theme),
     do: {BackBreeze.Style.border(style, :rounded), attrs}
 
@@ -639,6 +645,7 @@ defmodule Breeze.Style do
   end
 
   defp normalize_border(:line), do: BackBreeze.Border.line()
+  defp normalize_border(:invisible), do: BackBreeze.Border.invisible()
   defp normalize_border(:rounded), do: BackBreeze.Border.rounded()
   defp normalize_border(value), do: value
 

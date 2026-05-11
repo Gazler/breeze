@@ -2,6 +2,7 @@ defmodule Breeze.Implicit.Input do
   @moduledoc false
 
   alias BackBreeze.Ucwidth
+  alias Breeze.Implicit.TextEditor
   alias Breeze.Theme
 
   @type state :: %{
@@ -21,7 +22,7 @@ defmodule Breeze.Implicit.Input do
           if Map.get(last_state, :value) == value and is_integer(Map.get(last_state, :cursor)) do
             Map.get(last_state, :cursor)
           else
-            max_cursor(value)
+            TextEditor.max_cursor(value)
           end
 
         {:ok, raw_cursor} ->
@@ -31,7 +32,7 @@ defmodule Breeze.Implicit.Input do
           if Map.get(last_state, :value) == value and is_integer(Map.get(last_state, :cursor)) do
             Map.get(last_state, :cursor)
           else
-            max_cursor(value)
+            TextEditor.max_cursor(value)
           end
       end
 
@@ -42,7 +43,7 @@ defmodule Breeze.Implicit.Input do
     }
 
     state = Map.merge(last_state, attrs_state)
-    state = normalize_state(state)
+    state = TextEditor.normalize_state(state)
 
     {:ok, state,
      rerender_every: 500,
@@ -52,77 +53,45 @@ defmodule Breeze.Implicit.Input do
   end
 
   @spec handle_event(term(), map(), state()) :: {:noreply, state()} | {{:change, map()}, state()}
-  def handle_event(_, %{"key" => "\x7f"}, %{cursor: 0} = state), do: {:noreply, state}
-
-  def handle_event(_, %{"key" => "\x7f"}, %{cursor: cursor} = state) when cursor > 0 do
-    {before, rest} = split_value(state.value, cursor)
-    value = drop_trailing_grapheme(before) <> rest
-    change(%{state | value: value, cursor: cursor - 1} |> normalize_state())
-  end
+  def handle_event(_, %{"key" => "\x7f"}, state), do: TextEditor.backspace(state)
 
   def handle_event(_, %{"key" => key}, %{cursor: cursor} = state)
       when key in ["\x08", "\x17"] and cursor > 0 do
-    {before, rest} = split_value(state.value, cursor)
-
-    kept_before =
-      before
-      |> trim_trailing_whitespace()
-      |> drop_previous_word()
-      |> trim_trailing_whitespace()
-
-    value = kept_before <> rest
-    change(%{state | value: value, cursor: String.length(kept_before)} |> normalize_state())
+    TextEditor.delete_previous_word(state)
   end
 
   def handle_event(_, %{"key" => key}, state) when key in ["\x08", "\x17"], do: {:noreply, state}
 
-  def handle_event(_, %{"key" => "Delete"}, state) do
-    {before, rest} = split_value(state.value, state.cursor)
+  def handle_event(_, %{"ctrlKey" => true, "key" => key}, %{cursor: cursor} = state)
+      when key in ["Backspace", "w"] and cursor > 0 do
+    TextEditor.delete_previous_word(state)
+  end
 
-    if rest != "" do
-      change(%{state | value: before <> drop_leading_grapheme(rest)} |> normalize_state())
-    else
-      {:noreply, state}
-    end
+  def handle_event(_, %{"ctrlKey" => true, "key" => key}, state)
+      when key in ["Backspace", "w"],
+      do: {:noreply, state}
+
+  def handle_event(_, %{"key" => "Delete"}, state) do
+    TextEditor.delete_forward(state)
   end
 
   def handle_event(_, %{"key" => "ArrowLeft"}, %{cursor: cursor} = state) when cursor > 0 do
-    change(%{state | cursor: cursor - 1} |> normalize_state())
+    TextEditor.move_left(state)
   end
 
   def handle_event(_, %{"key" => "ArrowRight"}, state) do
-    if state.cursor < max_cursor(state.value) do
-      change(%{state | cursor: state.cursor + 1} |> normalize_state())
-    else
-      {:noreply, state}
-    end
+    TextEditor.move_right(state)
   end
 
-  def handle_event(_, %{"key" => "Home"}, %{cursor: 0} = state), do: {:noreply, state}
-
   def handle_event(_, %{"key" => "Home"}, state),
-    do: change(%{state | cursor: 0} |> normalize_state())
+    do: TextEditor.move_to_start(state)
 
   def handle_event(_, %{"key" => "End"}, state) do
-    end_cursor = max_cursor(state.value)
-
-    if state.cursor == end_cursor,
-      do: {:noreply, state},
-      else: change(%{state | cursor: end_cursor} |> normalize_state())
+    TextEditor.move_to_end(state)
   end
 
   def handle_event(_, %{"key" => key} = event, state) do
-    if insertable_key?(key, event) do
-      {before, rest} = split_value(state.value, state.cursor)
-      value = before <> key <> rest
-
-      change(
-        %{state | value: value, cursor: state.cursor + String.length(key)}
-        |> normalize_state()
-      )
-    else
-      {:noreply, state}
-    end
+    TextEditor.insert_key(key, event, state)
   end
 
   def handle_event(_, _, state), do: {:noreply, state}
@@ -190,52 +159,6 @@ defmodule Breeze.Implicit.Input do
   def animate(:root, box, _flags, _state, _ctx), do: box
 
   def animate(:child, box, _flags, _state, _ctx), do: box
-
-  defp change(state) do
-    {{:change, %{value: state.value, cursor: state.cursor}}, state}
-  end
-
-  defp normalize_state(%{value: value, cursor: cursor} = state) do
-    %{state | cursor: clamp_cursor(cursor, value)}
-  end
-
-  defp clamp_cursor(cursor, value) when is_integer(cursor) do
-    cursor
-    |> max(0)
-    |> min(max_cursor(value))
-  end
-
-  defp clamp_cursor(_cursor, value), do: max_cursor(value)
-
-  defp max_cursor(value), do: String.length(value)
-
-  defp split_value(value, cursor) do
-    String.split_at(value, clamp_cursor(cursor, value))
-  end
-
-  defp drop_trailing_grapheme(""), do: ""
-
-  defp drop_trailing_grapheme(value) do
-    graphemes = String.graphemes(value)
-    graphemes |> Enum.drop(-1) |> Enum.join()
-  end
-
-  defp drop_leading_grapheme(""), do: ""
-
-  defp drop_leading_grapheme(value) do
-    value
-    |> String.graphemes()
-    |> tl()
-    |> Enum.join()
-  end
-
-  defp trim_trailing_whitespace(value) do
-    Regex.replace(~r/\s+$/u, value, "")
-  end
-
-  defp drop_previous_word(value) do
-    Regex.replace(~r/\S+$/u, value, "")
-  end
 
   defp display_cursor_index(content, %{value: value, cursor: cursor}) when is_binary(content) do
     clamped_cursor = min(max(cursor, 0), String.length(value))
@@ -429,27 +352,6 @@ defmodule Breeze.Implicit.Input do
     |> Ucwidth.width()
     |> max(0)
   end
-
-  defp insertable_key?(key, %{"__batched_printable__" => true}) when is_binary(key) do
-    key != "" and
-      String.printable?(key) and
-      Enum.all?(String.graphemes(key), fn grapheme ->
-        not control_character?(grapheme) and grapheme not in ["\n", "\r", "\t", "\v", "\f"]
-      end)
-  end
-
-  defp insertable_key?(key, _event) when is_binary(key) do
-    String.length(key) == 1 and
-      not control_character?(key) and
-      String.printable?(key) and
-      key not in ["\n", "\r", "\t", "\v", "\f"]
-  end
-
-  defp insertable_key?(_key, _event), do: false
-
-  defp control_character?(<<codepoint::utf8>>) when codepoint < 32, do: true
-  defp control_character?(<<"\x7f">>), do: true
-  defp control_character?(_key), do: false
 
   defp border_left_offset(%{style: %{border: border}}), do: if(border.left, do: 1, else: 0)
   defp border_top_offset(%{style: %{border: border}}), do: if(border.top, do: 1, else: 0)

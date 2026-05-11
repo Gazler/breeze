@@ -8,11 +8,17 @@ defmodule Breeze.InputRouterTest do
   defmodule FakeAdapter do
     @behaviour Termite.Terminal.Adapter
 
-    def start(_opts) do
-      {:ok, %{ref: make_ref(), size: %{width: 80, height: 24}}}
+    def start(opts) do
+      {:ok, %{ref: make_ref(), size: %{width: 80, height: 24}, owner: Keyword.get(opts, :owner)}}
     end
 
     def reader(term), do: {:ok, term.ref}
+
+    def write(%{owner: owner} = term, str) when is_pid(owner) do
+      send(owner, {:terminal_write, str})
+      {:ok, term}
+    end
+
     def write(term, _str), do: {:ok, term}
     def resize(term), do: term.size
   end
@@ -172,6 +178,101 @@ defmodule Breeze.InputRouterTest do
     send(pid, {reader, {:data, "q"}})
     assert_receive :halted
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+  end
+
+  test "alt_screen false skips alternate screen enter and exit while preserving input" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: BlockingView,
+        start_opts: [parent: parent],
+        alt_screen: false,
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter, owner: parent],
+        halt_fun: fn -> send(parent, :halted) end,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    state = :sys.get_state(pid)
+    reader = state.reader
+
+    refute_received {:terminal_write, "\e[?1049h"}
+
+    send(pid, {reader, {:data, "r"}})
+    assert_receive :started
+
+    send(pid, {reader, {:data, "q"}})
+    assert_receive :halted
+
+    refute_received {:terminal_write, "\e[?1049l"}
+  end
+
+  test "alt screen is enabled by default" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: BlockingView,
+        start_opts: [parent: parent],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter, owner: parent],
+        halt_fun: fn -> send(parent, :halted) end,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    assert_receive {:terminal_write, "\e[?1049h"}
+
+    state = :sys.get_state(pid)
+    send(pid, {state.reader, {:data, "q"}})
+
+    assert_receive :halted
+    assert_receive {:terminal_write, "\e[?1049l"}
+  end
+
+  test "enhanced keyboard mode is enabled by default and reset on stop" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: BlockingView,
+        start_opts: [parent: parent],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter, owner: parent],
+        halt_fun: fn -> send(parent, :halted) end,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    assert_receive {:terminal_write, "\e[>1u\e[>4;2m"}
+
+    state = :sys.get_state(pid)
+    send(pid, {state.reader, {:data, "q"}})
+
+    assert_receive :halted
+    assert_receive {:terminal_write, "\e[<u\e[>4;0m"}
+  end
+
+  test "enhanced keyboard mode can be disabled" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: BlockingView,
+        start_opts: [parent: parent],
+        enhanced_keyboard: false,
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter, owner: parent],
+        halt_fun: fn -> send(parent, :halted) end,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    refute_received {:terminal_write, "\e[>1u\e[>4;2m"}
+
+    state = :sys.get_state(pid)
+    send(pid, {state.reader, {:data, "q"}})
+
+    assert_receive :halted
+    refute_received {:terminal_write, "\e[<u\e[>4;0m"}
   end
 
   test "injected terminals use terminal.reader without an explicit reader option" do

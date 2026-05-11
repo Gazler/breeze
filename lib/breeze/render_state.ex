@@ -67,9 +67,12 @@ defmodule Breeze.RenderState do
 
         id = Keyword.get(elem, :id)
         change = Keyword.get(elem, :"br-change")
+        submit = Keyword.get(elem, :"br-submit")
 
         next_events =
-          if change, do: Map.put(events, id, %{change: change}), else: events
+          events
+          |> maybe_put_event(id, :change, change)
+          |> maybe_put_event(id, :submit, submit)
 
         {next_implicit_state, next_events}
       end)
@@ -137,6 +140,12 @@ defmodule Breeze.RenderState do
   end
 
   defp initial_implicit_build_state, do: {%{}, %{}, [], nil, nil, %{}}
+
+  defp maybe_put_event(events, _id, _type, nil), do: events
+
+  defp maybe_put_event(events, id, type, event) do
+    Map.update(events, id, %{type => event}, &Map.put(&1, type, event))
+  end
 
   defp finalize_implicit_build_state(
          {implicit_acc, implicit_meta, current, mod, last_id, root_attrs},
@@ -236,6 +245,17 @@ defmodule Breeze.RenderState do
                   case get_in(term.events, [id, :change]) do
                     nil -> {:noreply, term}
                     change -> route_change_fun.(term, id, change, event)
+                  end
+
+                {view_state, true, term}
+
+              {{:submit, event}, val} ->
+                term = put_implicit_state(term, id, mod, val)
+
+                {view_state, term} =
+                  case get_in(term.events, [id, :submit]) do
+                    nil -> {:noreply, term}
+                    submit -> route_change_fun.(term, id, submit, event)
                   end
 
                 {view_state, true, term}

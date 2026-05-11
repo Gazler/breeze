@@ -37,7 +37,7 @@ defmodule Breeze.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:termite, "~> 0.4.2 or ~> 0.5"},
+      {:termite, github: "gazler/termite", branch: "feat/enhanced-keyboard", override: true},
       {:back_breeze, "~> 0.4"},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
       {:telemetry, "~> 1.0"},

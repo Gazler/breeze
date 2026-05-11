@@ -9,7 +9,8 @@ defmodule Breeze.InputRouter do
     :server_pid,
     :halt_fun,
     :theme_probe,
-    :alt_screen?,
+    alt_screen?: true,
+    enhanced_keyboard?: true,
     global_keybindings: []
   ]
 
@@ -21,10 +22,12 @@ defmodule Breeze.InputRouter do
   def init(opts) do
     alt_screen? = Keyword.get(opts, :alt_screen, true)
     hide_cursor? = Keyword.get(opts, :hide_cursor, true)
+    enhanced_keyboard? = Keyword.get(opts, :enhanced_keyboard, true)
     mouse = Keyword.get(opts, :mouse, false)
     terminal = build_terminal(opts)
     reader = terminal.reader
     terminal = if alt_screen?, do: Termite.Screen.alt_screen(terminal), else: terminal
+    terminal = if enhanced_keyboard?, do: enable_enhanced_keyboard(terminal), else: terminal
     terminal = if hide_cursor?, do: Termite.Screen.hide_cursor(terminal), else: terminal
     terminal = enable_mouse(terminal, mouse)
     terminal = Termite.Screen.clear_screen(terminal)
@@ -46,6 +49,7 @@ defmodule Breeze.InputRouter do
       server_pid: server_pid,
       halt_fun: Keyword.get(opts, :halt_fun, fn -> System.halt() end),
       alt_screen?: alt_screen?,
+      enhanced_keyboard?: enhanced_keyboard?,
       global_keybindings: Keyword.get(opts, :global_keybindings, [])
     }
 
@@ -290,21 +294,34 @@ defmodule Breeze.InputRouter do
     end
 
     state.terminal
+    |> maybe_disable_enhanced_keyboard(state)
     |> Termite.Screen.disable_mouse()
     |> Termite.Screen.clear_screen()
     |> Termite.Screen.show_cursor()
-    |> maybe_exit_alt_screen(state.alt_screen?)
+    |> maybe_exit_alt_screen(state)
     |> Termite.Terminal.write("\r")
 
     {:stop, :normal, state}
   end
 
+  defp maybe_exit_alt_screen(terminal, %{alt_screen?: true}),
+    do: Termite.Screen.exit_alt_screen(terminal)
+
+  defp maybe_exit_alt_screen(terminal, _state), do: terminal
+
+  defp enable_enhanced_keyboard(terminal) do
+    Termite.Screen.enable_enhanced_keyboard(terminal)
+  end
+
+  defp maybe_disable_enhanced_keyboard(terminal, %{enhanced_keyboard?: true}) do
+    Termite.Screen.disable_enhanced_keyboard(terminal)
+  end
+
+  defp maybe_disable_enhanced_keyboard(terminal, _state), do: terminal
+
   defp decode_input(raw_key) do
     Breeze.Input.decode(raw_key)
   end
-
-  defp maybe_exit_alt_screen(terminal, true), do: Termite.Screen.exit_alt_screen(terminal)
-  defp maybe_exit_alt_screen(terminal, _), do: terminal
 
   defp normalize_key_event(%{"key" => _} = event), do: event
   defp normalize_key_event(key), do: %{"key" => key}

@@ -187,6 +187,13 @@ defmodule Breeze.Implicit.InputTest do
     assert {:noreply, ^state} = Input.handle_event(nil, %{"key" => "ArrowRight"}, state)
   end
 
+  test "ctrl-backspace deletes the previous word for structured key events" do
+    state = %{value: "hello world", cursor: 11, placeholder: nil}
+
+    assert {{:change, %{value: "hello", cursor: 5}}, %{value: "hello", cursor: 5}} =
+             Input.handle_event(nil, %{"ctrlKey" => true, "key" => "Backspace"}, state)
+  end
+
   test "init prefers input attrs over previous implicit state" do
     assert {:ok, %{value: "", cursor: 0, placeholder: nil}, meta} =
              Input.init([], %{:"input-value" => "", :"input-cursor" => 0}, %{

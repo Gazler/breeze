@@ -17,9 +17,9 @@ defmodule Breeze.KeyDecoderTest do
     assert Breeze.KeyDecoder.decode("\r") == "Enter"
   end
 
-  test "normalizes common ctrl-backspace sequences to word-delete" do
-    assert Breeze.KeyDecoder.decode("\e[8;5u") == "\x17"
-    assert Breeze.KeyDecoder.decode("\e[127;5u") == "\x17"
+  test "decodes common ctrl-backspace sequences as structured key events" do
+    assert Breeze.KeyDecoder.decode("\e[8;5u") == %{"ctrlKey" => true, "key" => "Backspace"}
+    assert Breeze.KeyDecoder.decode("\e[127;5u") == %{"ctrlKey" => true, "key" => "w"}
   end
 
   test "decodes ctrl-j and ctrl-k CSI-u sequences as structured key events" do
@@ -27,8 +27,16 @@ defmodule Breeze.KeyDecoderTest do
     assert Breeze.KeyDecoder.decode("\e[107;5u") == %{"ctrlKey" => true, "key" => "k"}
   end
 
-  test "keeps raw ctrl-h for input word-delete compatibility and decodes raw ctrl-l" do
-    assert Breeze.KeyDecoder.decode("\b") == "\b"
+  test "decodes shift-enter CSI-u sequence as a structured key event" do
+    assert Breeze.KeyDecoder.decode("\e[13;2u") == %{"shiftKey" => true, "key" => "Enter"}
+  end
+
+  test "decodes xterm modifyOtherKeys enter sequence as a structured key event" do
+    assert Breeze.KeyDecoder.decode("\e[27;2;13~") == %{"shiftKey" => true, "key" => "Enter"}
+  end
+
+  test "decodes raw ctrl-h and ctrl-l as structured key events" do
+    assert Breeze.KeyDecoder.decode("\b") == %{"ctrlKey" => true, "key" => "Backspace"}
     assert Breeze.KeyDecoder.decode("\f") == %{"ctrlKey" => true, "key" => "l"}
   end
 

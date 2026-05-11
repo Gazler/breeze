@@ -61,6 +61,26 @@ defmodule Breeze.StyleTest do
     assert element.style.overflow == :hidden
   end
 
+  test "supports border-invisible class" do
+    element =
+      Style.empty()
+      |> Style.put_class("border-invisible")
+      |> Style.to_element([])
+
+    assert element.style.border == BackBreeze.Border.invisible()
+    assert element.style.border.left == " "
+    assert element.style.border.top == " "
+  end
+
+  test "supports border-none class" do
+    element =
+      Style.empty()
+      |> Style.put_class("border border-none")
+      |> Style.to_element([])
+
+    assert element.style.border == BackBreeze.Border.none()
+  end
+
   test "resolve_dimensions reads width and height from classes" do
     assert Style.resolve_dimensions("width-12 height-4", nil) == %{width: 12, height: 4}
   end

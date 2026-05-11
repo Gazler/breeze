@@ -1416,7 +1416,7 @@ defmodule Breeze.Server do
   end
 
   defp maybe_exit_alt_screen(terminal, true), do: Termite.Screen.exit_alt_screen(terminal)
-  defp maybe_exit_alt_screen(terminal, _), do: terminal
+  defp maybe_exit_alt_screen(terminal, _active?), do: terminal
 
   defp safe_apply_input_reply(state, fun) do
     case safe_call(fn -> fun.(state) end) do
