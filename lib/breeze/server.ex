@@ -1122,7 +1122,10 @@ defmodule Breeze.Server do
       {_animated_box, current_content, current_overlays} = render_decoration(decoration, state)
 
       {
-        String.replace(acc, rendered_fragment(decoration.box, state), current_content,
+        String.replace(
+          acc,
+          rendered_fragment(decoration.box, state, decoration[:layout]),
+          current_content,
           global: false
         ),
         [
@@ -1184,7 +1187,8 @@ defmodule Breeze.Server do
         {decoration.box, %{}}
       end
 
-    {animated_box, rendered_fragment(animated_box, state), Map.get(animate_opts, :overlays, [])}
+    {animated_box, rendered_fragment(animated_box, state, decoration[:layout]),
+     Map.get(animate_opts, :overlays, [])}
   end
 
   defp decoration_ctx(decoration, state, now) do
@@ -1209,11 +1213,20 @@ defmodule Breeze.Server do
     |> List.to_string()
   end
 
-  defp rendered_fragment(box, state) do
+  defp rendered_fragment(box, state, layout) do
+    terminal = render_fragment_terminal(state.terminal, layout)
+
     box
-    |> BackBreeze.Box.render(terminal: state.terminal)
+    |> BackBreeze.Box.render(terminal: terminal)
     |> Map.get(:content)
   end
+
+  defp render_fragment_terminal(%Termite.Terminal{} = terminal, %{width: width, height: height})
+       when is_integer(width) and width > 0 and is_integer(height) and height > 0 do
+    %{terminal | size: %{width: width, height: height}}
+  end
+
+  defp render_fragment_terminal(terminal, _layout), do: terminal
 
   defp schedule_animation(%{frame: %{decorations: []}} = state), do: state
 
