@@ -8,6 +8,8 @@ defmodule Breeze.ErrorView do
   @focus_order [@stacktrace_id, @history_id]
 
   def render_assigns(view, crash, %{width: width, height: height} = size) do
+    crash = prepare_crash(view, crash, size)
+
     outer_width = max(width, 40)
     outer_height = max(height, 12)
     inner_width = max(outer_width - 2, 1)
@@ -15,20 +17,12 @@ defmodule Breeze.ErrorView do
     header_height = min(5, inner_height)
     body_height = max(inner_height - header_height - 1, 1)
     footer_height = max(inner_height - header_height - body_height, 0)
-    pane_gap = 1
-    pane_outer_width = max(div(max(inner_width - pane_gap, 1), 2), 24)
-    right_outer_width = max(inner_width - pane_outer_width - pane_gap, 24)
-    left_inner_width = max(pane_outer_width - 2, 1)
-    right_inner_width = max(right_outer_width - 2, 1)
-    pane_inner_height = max(body_height - 2, 1)
-    stacktrace_list_height = max(pane_inner_height - 2, 1)
-    history_scroll_height = max(pane_inner_height - 2, 1)
+    layout = pane_layout(inner_width, body_height, crash.focused)
 
-    crash = prepare_crash(view, crash, size)
     entries = frame_entries(crash)
     selected_index = selected_index(crash, entries)
-    message_lines = message_lines(view, crash, entries, selected_index)
-    message_content_width = message_content_width(message_lines, right_inner_width)
+    message_lines = message_lines(view, crash, entries, selected_index, layout.right_inner_width)
+    message_content_width = message_content_width(message_lines, layout.right_inner_width)
 
     %{
       crash: crash,
@@ -37,32 +31,32 @@ defmodule Breeze.ErrorView do
       header_height: header_height,
       body_height: body_height,
       footer_height: footer_height,
-      pane_gap: pane_gap,
-      left_pane_width: pane_outer_width,
-      right_pane_width: right_outer_width,
-      pane_inner_height: pane_inner_height,
+      pane_gap: layout.pane_gap,
+      left_pane_width: layout.left_outer_width,
+      right_pane_width: layout.right_outer_width,
+      pane_inner_height: layout.pane_inner_height,
       selected_index: selected_index,
       entry_count: length(entries),
       stacktrace_pane_style:
-        pane_style(crash.focused == @stacktrace_id, pane_outer_width, body_height),
+        pane_style(crash.focused == @stacktrace_id, layout.left_outer_width, body_height),
       history_pane_style:
-        pane_style(crash.focused == @history_id, right_outer_width, body_height),
-      stacktrace_title_style: pane_title_style(left_inner_width),
-      history_title_style: pane_title_style(right_inner_width),
+        pane_style(crash.focused == @history_id, layout.right_outer_width, body_height),
+      stacktrace_title_style: pane_title_style(layout.left_inner_width),
+      history_title_style: pane_title_style(layout.right_inner_width),
       header_lines: header_lines(view, crash, inner_width, header_height),
-      footer_lines: footer_lines(inner_width, footer_height),
+      footer_lines: footer_lines(inner_width, footer_height, crash),
       stacktrace_items:
         Enum.with_index(entries)
         |> Enum.map(fn {entry, index} ->
-          %{index: index, label: pad_line(entry.summary, left_inner_width)}
+          %{index: index, label: pad_line(entry.summary, layout.left_inner_width)}
         end),
       history_lines: message_lines,
       history_content_height: length(message_lines),
       history_content_width: message_content_width,
-      stacktrace_list_width: left_inner_width,
-      stacktrace_list_height: stacktrace_list_height,
-      history_scroll_width: right_inner_width,
-      history_scroll_height: history_scroll_height
+      stacktrace_list_width: layout.left_inner_width,
+      stacktrace_list_height: layout.stacktrace_list_height,
+      history_scroll_width: layout.right_inner_width,
+      history_scroll_height: layout.history_scroll_height
     }
   end
 
@@ -91,8 +85,11 @@ defmodule Breeze.ErrorView do
     entries = frame_entries(crash)
 
     case input do
-      {:key, "r"} ->
+      {:key, key} when key in ["r", "R"] ->
         :restart
+
+      {:key, key} when key in ["y", "Y", "c", "C"] ->
+        {:copy_details, crash}
 
       {:key, key} when key in ["\t", "ArrowRight", "l"] ->
         {:update, %{crash | focused: rotate_focus(crash.focused, 1)}}
@@ -158,6 +155,21 @@ defmodule Breeze.ErrorView do
   def handle_event(_, _, term), do: {:noreply, term}
   def handle_info(_, term), do: {:noreply, term}
 
+  def details_text(view, crash) do
+    entries = frame_entries(crash)
+    selected_index = selected_index(crash, entries)
+
+    [
+      "Breeze Error",
+      "View #{inspect(view)}",
+      "",
+      "Crash Details",
+      ""
+      | message_lines(view, crash, entries, selected_index, 100)
+    ]
+    |> Enum.join("\n")
+  end
+
   defp dispatch_focused_key(crash, entries, assigns, key) do
     case crash.focused do
       @stacktrace_id ->
@@ -222,21 +234,44 @@ defmodule Breeze.ErrorView do
     |> Map.put(:selected_index, selected_index || 0)
   end
 
-  defp base_assigns(_view, _crash, %{width: width, height: height}) do
+  defp base_assigns(_view, crash, %{width: width, height: height}) do
     outer_width = max(width, 40)
     outer_height = max(height, 12)
     inner_width = max(outer_width - 2, 1)
     inner_height = max(outer_height - 2, 1)
     header_height = min(5, inner_height)
     body_height = max(inner_height - header_height - 1, 1)
+    layout = pane_layout(inner_width, body_height, normalize_focus(crash[:focused]))
+
+    %{
+      left_inner_width: layout.left_inner_width,
+      right_inner_width: layout.right_inner_width,
+      pane_inner_height: layout.pane_inner_height,
+      stacktrace_list_height: layout.stacktrace_list_height,
+      history_scroll_height: layout.history_scroll_height
+    }
+  end
+
+  defp pane_layout(inner_width, body_height, focused) do
     pane_gap = 1
-    pane_outer_width = max(div(max(inner_width - pane_gap, 1), 2), 24)
-    right_outer_width = max(inner_width - pane_outer_width - pane_gap, 24)
-    left_inner_width = max(pane_outer_width - 2, 1)
+
+    {left_outer_width, right_outer_width} =
+      if focused == @history_id and inner_width >= 40 do
+        left_outer_width = 12
+        {left_outer_width, max(inner_width - left_outer_width - pane_gap, 1)}
+      else
+        left_outer_width = max(div(max(inner_width - pane_gap, 1), 2), 24)
+        {left_outer_width, max(inner_width - left_outer_width - pane_gap, 24)}
+      end
+
+    left_inner_width = max(left_outer_width - 2, 1)
     right_inner_width = max(right_outer_width - 2, 1)
     pane_inner_height = max(body_height - 2, 1)
 
     %{
+      pane_gap: pane_gap,
+      left_outer_width: left_outer_width,
+      right_outer_width: right_outer_width,
       left_inner_width: left_inner_width,
       right_inner_width: right_inner_width,
       pane_inner_height: pane_inner_height,
@@ -367,28 +402,36 @@ defmodule Breeze.ErrorView do
     |> pad_lines(width, height)
   end
 
-  defp footer_lines(_width, 0), do: []
+  defp footer_lines(_width, 0, _crash), do: []
 
-  defp footer_lines(width, height) do
+  defp footer_lines(width, height, crash) do
+    default =
+      "Tab switches panes. Arrows or j/k move and scroll. y copies details. r restarts. q quits."
+
     [
-      "Tab switches panes. Arrow keys or j/k move and scroll. Press r to restart. Press q to quit."
+      crash[:notice] || default
     ]
     |> pad_lines(width, height)
   end
 
-  defp message_lines(view, _crash, [], _selected_index) do
+  defp message_lines(view, _crash, [], _selected_index, width) do
     ["Selected Frame", "", "View #{inspect(view)}", "", "No stacktrace frames captured"]
+    |> wrap_lines(width)
   end
 
-  defp message_lines(view, crash, entries, selected_index) do
+  defp message_lines(view, crash, entries, selected_index, width) do
     selected = Enum.at(entries, selected_index)
 
-    [
-      "Selected Frame",
-      "",
-      "View #{inspect(view)}"
-      | selected.detail_lines
-    ] ++ ["", "Crash Message", ""] ++ wrap_lines(crash_message_lines(crash), 80)
+    selected_lines =
+      [
+        "Selected Frame",
+        "",
+        "View #{inspect(view)}"
+        | selected.detail_lines
+      ]
+      |> wrap_lines(width)
+
+    selected_lines ++ ["", "Crash Message", ""] ++ wrap_lines(crash_message_lines(crash), width)
   end
 
   defp crash_message_lines(crash) do
@@ -522,7 +565,8 @@ defmodule Breeze.ErrorView do
   end
 
   defp truncate_line(line, width) when byte_size(line) <= width, do: line
-  defp truncate_line(line, width) when width > 1, do: String.slice(line, 0, width - 1) <> "..."
+  defp truncate_line(line, width) when width > 3, do: String.slice(line, 0, width - 3) <> "..."
+  defp truncate_line(_line, width) when width > 0, do: String.duplicate(".", width)
   defp truncate_line(line, width), do: String.slice(line, 0, width)
 
   defp message_content_width(lines, min_width) do

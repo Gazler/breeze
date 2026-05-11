@@ -20,7 +20,7 @@ defmodule CrashHandlerExample do
       <box style="height-1 bold">Crash Handler Demo</box>
       <box style="height-1">
       </box>
-      <box style="grid grid-cols-1 grid-rows-2 height-full">
+      <box>
         <box id="boom" focusable style="border-rounded width-32 height-5 focus:border-4">
           <box>Press c to raise</box>
           <box>Counter {@counter}</box>
@@ -42,7 +42,7 @@ defmodule CrashHandlerExample do
   end
 
   def handle_event(_, %{"key" => "c"}, _term) do
-    raise "crash demo"
+    run_request_preview!("POST", "/api/demo", %{counter: :not_an_integer})
   end
 
   def handle_event(_, %{"key" => "Enter"}, term) do
@@ -57,6 +57,48 @@ defmodule CrashHandlerExample do
   end
 
   def handle_info(_, term), do: {:noreply, term}
+
+  defp run_request_preview!(method, path, params) do
+    result =
+      %{method: method, path: path, params: params}
+      |> load_fixture_request!()
+
+    {:ok, result}
+  end
+
+  defp load_fixture_request!(request) do
+    request = Map.put(request, :fixture, "examples/crash_handler/request.json")
+    result = authorize_preview!(request)
+    Map.put(result, :fixture_loaded?, true)
+  end
+
+  defp authorize_preview!(request) do
+    request = Map.put(request, :principal, %{id: 42, role: :developer})
+    result = decode_preview_payload!(request)
+    Map.put(result, :authorized?, true)
+  end
+
+  defp decode_preview_payload!(%{params: params} = request) do
+    request = Map.put(request, :counter, Map.fetch!(params, :counter))
+    result = render_preview_response!(request)
+    Map.put(result, :decoded?, true)
+  end
+
+  defp render_preview_response!(request) do
+    if is_integer(request.counter) do
+      %{status: 200, body: "counter=#{request.counter}"}
+    else
+      raise """
+      crash demo could not render request preview
+
+      method=#{request.method}
+      path=#{request.path}
+      fixture=#{request.fixture}
+      principal=#{inspect(request.principal)}
+      counter=#{inspect(request[:counter])}
+      """
+    end
+  end
 end
 
 Breeze.Example.run(
