@@ -11,6 +11,7 @@ defmodule FormsDemo do
 
   @website "https://jsonplaceholder.typicode.com/posts/123/comments?include=author,history"
   @path "/Users/demo/projects/breeze_routing/lib/breeze/implicit/input.ex"
+  @message "This is a multiline field.\nUse it for longer notes."
 
   def mount(_opts, term) do
     {screen_width, _screen_height} = BackBreeze.screen_dimensions(term.terminal)
@@ -28,7 +29,9 @@ defmodule FormsDemo do
        website: @website,
        website_cursor: String.length(@website),
        path: @path,
-       path_cursor: String.length(@path)
+       path_cursor: String.length(@path),
+       message: @message,
+       message_cursor: String.length(@message)
      )}
   end
 
@@ -50,7 +53,8 @@ defmodule FormsDemo do
               row_style: row_style(id),
               display: input_preview(value, cursor, width)
             }
-          end)
+          end),
+        message_height: message_height(assigns.message)
       )
 
     ~H"""
@@ -58,6 +62,7 @@ defmodule FormsDemo do
       <box style="bold">Forms Demo</box>
       <box style="text-24">Focused example for horizontal input overflow.</box>
       <box style="text-24">Tab between fields. The website field is fixed to 24 cells.</box>
+      <box style="text-24">The message field uses the new textarea block.</box>
       <box style="height-1">
       </box>
       <box style="border-rounded width-72">
@@ -76,6 +81,20 @@ defmodule FormsDemo do
             {field.display}
           </.input>
           <box style="text-24">width={field.width} cursor={field.cursor} value={field.value}</box>
+        </box>
+        <box style="height-8">
+          <box style="text-4 bold">Message</box>
+          <.textarea
+            id="message"
+            textarea-value={@message}
+            textarea-cursor={@message_cursor}
+            textarea-placeholder="Add some context"
+            br-change="message_changed"
+            style={"width-#{@field_width} height-#{@message_height} focus:inverse"}
+          />
+          <box style="text-24">
+            height={@message_height} cursor={@message_cursor} value={inspect(@message)}
+          </box>
         </box>
       </box>
     </box>
@@ -115,6 +134,15 @@ defmodule FormsDemo do
 
   defp row_style("path"), do: "height-4"
   defp row_style(_id), do: "height-5"
+
+  defp message_height(value) do
+    value
+    |> String.split("\n", trim: false)
+    |> length()
+    |> Kernel.+(2)
+    |> min(8)
+    |> max(4)
+  end
 
   defp input_preview(value, cursor, width) do
     source = " " <> value

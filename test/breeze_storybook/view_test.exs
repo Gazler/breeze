@@ -199,6 +199,86 @@ defmodule Breeze.Storybook.ViewTest do
     assert plain_content =~ "dev@example.com!"
   end
 
+  test "textarea story placeholder cursor layout stays aligned with the rendered placeholder row" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    {:ok, pid} =
+      Breeze.ChildServer.start(
+        view: Breeze.Storybook.View,
+        terminal: terminal,
+        start_opts: [directory: "storybook", file: "textarea.story.exs"]
+      )
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    child = :sys.get_state(pid).children["storybook-preview"].pid
+
+    assert {:noreply, "storybook-textarea-placeholder", true} =
+             Breeze.ChildServer.set_focus(child, "storybook-textarea-placeholder")
+
+    assert {:ok, _acc, box, decorations} =
+             Breeze.ChildServer.render_snapshot(child, terminal: terminal)
+
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+
+    rendered_row =
+      plain_content
+      |> String.split("\n")
+      |> Enum.find_index(&String.contains?(&1, "Ask anything"))
+
+    textarea_decoration = Enum.find(decorations, &(&1.id == "storybook-textarea-placeholder"))
+
+    assert rendered_row == textarea_decoration.layout.top + 1
+  end
+
+  test "textarea story grows after inserting a newline" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    {:ok, pid} =
+      Breeze.ChildServer.start(
+        view: Breeze.Storybook.View,
+        terminal: terminal,
+        start_opts: [directory: "storybook", file: "textarea.story.exs"]
+      )
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert {:noreply, "storybook-preview::storybook-textarea-active", true} =
+             Breeze.ChildServer.set_focus(pid, "storybook-preview::storybook-textarea-active")
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    child = :sys.get_state(pid).children["storybook-preview"].pid
+
+    initial_height =
+      child
+      |> :sys.get_state()
+      |> Map.get(:assigns)
+      |> Map.get(:message)
+      |> String.split("\n", trim: false)
+      |> length()
+
+    assert {:noreply, "storybook-preview::storybook-textarea-active", true} =
+             Breeze.ChildServer.dispatch_input(pid, "Enter")
+
+    assert {:noreply, "storybook-preview::storybook-textarea-active", true} =
+             Breeze.ChildServer.dispatch_input(pid, "N")
+
+    updated_child_state = :sys.get_state(child)
+
+    updated_height =
+      updated_child_state.assigns.message |> String.split("\n", trim: false) |> length()
+
+    assert updated_height == initial_height + 1
+    assert updated_child_state.assigns.message =~ "\nN"
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    assert plain_content =~ "Keep migration notes short."
+    assert plain_content =~ "N"
+  end
+
   test "modal story opens the real modal from its trigger" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
