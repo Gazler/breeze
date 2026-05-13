@@ -481,7 +481,7 @@ defmodule Breeze.Server do
       Inspector.move_key?(input_key, state) or
       stop_global_key?(key, state) or
       (is_nil(state.input.pending_ref) and
-         (input_key in ["\t", "ShiftTab"] or sync_input?(state, input_key)))
+         (tab_input?(key) or sync_input?(state, input_key)))
   end
 
   defp sync_input_message?(_, _state), do: false
@@ -538,7 +538,7 @@ defmodule Breeze.Server do
     cond do
       Inspector.toggle_key?(key, state) -> :inspector_toggle
       Inspector.move_key?(key, state) -> :inspector_move
-      key in ["\t", "ShiftTab"] -> :tab
+      tab_input?(key) -> :tab
       true -> :hierarchy
     end
   end
@@ -559,7 +559,9 @@ defmodule Breeze.Server do
 
   defp handle_sync_key_action(state, :tab, key) do
     safe_apply_tab_input_reply(state, fn state ->
-      Breeze.ChildServer.dispatch_input(state.view_pid, key, invalidate: false)
+      Breeze.ChildServer.dispatch_input(state.view_pid, normalize_tab_input(key),
+        invalidate: false
+      )
     end)
   end
 
@@ -576,6 +578,19 @@ defmodule Breeze.Server do
   defp sync_input?(state, key) do
     key in ["\t", "ShiftTab"] or focused_implicit?(state)
   end
+
+  defp tab_input?(key), do: normalize_tab_input(key) in ["\t", "ShiftTab"]
+
+  defp normalize_tab_input(%{"key" => key} = event) when key in ["\t", "Tab"] do
+    if truthy_input_modifier?(Map.get(event, "shiftKey")) do
+      "ShiftTab"
+    else
+      "\t"
+    end
+  end
+
+  defp normalize_tab_input(key), do: key
+  defp truthy_input_modifier?(value), do: value in [true, "true"]
 
   defp batchable_printable_input?(key, state) do
     Input.raw_printable_key?(key) and focused_implicit_captures_printable_key?(state, key)

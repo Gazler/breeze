@@ -126,6 +126,25 @@ defmodule Breeze.InputRouterTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule FocusCycleView do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, focus(term, "one")}
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box id="one" focusable>One</box>
+        <box id="two" focusable>Two</box>
+        <box id="three" focusable>Three</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule ThemeSwitchView do
     use Breeze.View
 
@@ -176,6 +195,64 @@ defmodule Breeze.InputRouterTest do
     assert_receive :started
 
     send(pid, {reader, {:data, "q"}})
+    assert_receive :halted
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+  end
+
+  test "ctrl-c always halts regardless of global keybindings" do
+    assert_ctrl_c_halts("\x03")
+    assert_ctrl_c_halts("\e[99;5u")
+    assert_ctrl_c_halts("\e[27;5;99u")
+    assert_ctrl_c_halts("\e[27;5;99~")
+  end
+
+  test "ctrl-c halts even when a focused implicit captures printable input" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: FocusedInputView,
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter],
+        halt_fun: fn -> send(parent, :halted) end
+      )
+
+    ref = Process.monitor(pid)
+    state = :sys.get_state(pid)
+    reader = state.reader
+    server_pid = state.server_pid
+
+    wait_until(fn ->
+      match?(
+        %{captures_printable_keys: true},
+        Breeze.Server.focused_implicit_metadata(server_pid)
+      )
+    end)
+
+    send(pid, {reader, {:data, "\e[99;5u"}})
+
+    assert_receive :halted
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+  end
+
+  defp assert_ctrl_c_halts(sequence) do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: BlockingView,
+        start_opts: [parent: parent],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter],
+        halt_fun: fn -> send(parent, :halted) end,
+        global_keybindings: []
+      )
+
+    ref = Process.monitor(pid)
+    reader = :sys.get_state(pid).reader
+
+    send(pid, {reader, {:data, sequence}})
+
     assert_receive :halted
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
   end
@@ -250,6 +327,79 @@ defmodule Breeze.InputRouterTest do
 
     assert_receive :halted
     assert_receive {:terminal_write, "\e[<u\e[>4;0m"}
+  end
+
+  test "enhanced shift-tab moves focus backward" do
+    assert_enhanced_shift_tab_moves_focus_backward("\e[9;2u")
+    assert_enhanced_shift_tab_moves_focus_backward("\e[9;2:1u")
+    assert_enhanced_shift_tab_moves_focus_backward("\e[1;2Z")
+  end
+
+  test "structured shift-tab moves focus backward" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: FocusCycleView,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+
+    wait_until(fn ->
+      :sys.get_state(pid).focused == "one"
+    end)
+
+    assert {:noreply, "two", true} =
+             Breeze.ChildServer.dispatch_input(
+               :sys.get_state(pid).view_pid,
+               "\t",
+               invalidate: false
+             )
+
+    assert {:noreply, "one", true} =
+             Breeze.ChildServer.dispatch_input(
+               :sys.get_state(pid).view_pid,
+               %{"key" => "\t", "shiftKey" => true},
+               invalidate: false
+             )
+  end
+
+  defp assert_enhanced_shift_tab_moves_focus_backward(sequence) do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: FocusCycleView,
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter],
+        halt_fun: fn -> send(parent, :halted) end,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    state = :sys.get_state(pid)
+    reader = state.reader
+    server_pid = state.server_pid
+
+    wait_until(fn ->
+      :sys.get_state(server_pid).focused == "one"
+    end)
+
+    send(pid, {reader, {:data, "\t"}})
+
+    wait_until(fn ->
+      :sys.get_state(server_pid).focused == "two"
+    end)
+
+    send(pid, {reader, {:data, sequence}})
+
+    wait_until(fn ->
+      :sys.get_state(server_pid).focused == "one"
+    end)
+
+    send(pid, {reader, {:data, "q"}})
+    assert_receive :halted
   end
 
   test "enhanced keyboard mode can be disabled" do

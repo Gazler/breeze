@@ -65,24 +65,10 @@ defmodule Breeze.InputRouter do
 
   @impl true
   def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
-    cond do
-      is_map(state.theme_probe) and is_binary(data) and String.starts_with?(data, "\e]") ->
-        {:noreply, consume_theme_probe_reply(state, data)}
-
-      true ->
-        case decode_input(data) do
-          {:key, key} ->
-            if stop_global_key?(key, state) do
-              stop(state)
-            else
-              send(state.server_pid, {reader, {:data, data}})
-              {:noreply, state}
-            end
-
-          _decoded ->
-            send(state.server_pid, {reader, {:data, data}})
-            {:noreply, state}
-        end
+    if theme_probe_reply?(state, data) do
+      {:noreply, consume_theme_probe_reply(state, data)}
+    else
+      route_reader_data(reader, data, state)
     end
   end
 
@@ -128,6 +114,43 @@ defmodule Breeze.InputRouter do
     do:
       Breeze.GlobalKeybindings.stop_action?(normalize_key_event(key), state) and
         not focused_implicit_captures_printable_key?(key, state)
+
+  defp route_reader_data(reader, data, state) do
+    decoded = decode_input(data)
+
+    cond do
+      forced_stop_input?(data, decoded) ->
+        stop(state)
+
+      stop_decoded_input?(decoded, state) ->
+        stop(state)
+
+      true ->
+        forward_reader_data(reader, data, state)
+    end
+  end
+
+  defp forward_reader_data(reader, data, state) do
+    send(state.server_pid, {reader, {:data, data}})
+    {:noreply, state}
+  end
+
+  defp theme_probe_reply?(state, data) do
+    is_map(state.theme_probe) and is_binary(data) and String.starts_with?(data, "\e]")
+  end
+
+  defp stop_decoded_input?({:key, key}, state), do: stop_global_key?(key, state)
+  defp stop_decoded_input?(_decoded, _state), do: false
+
+  defp forced_stop_input?("\x03", _decoded), do: true
+
+  defp forced_stop_input?(_data, {:key, %{"ctrlKey" => true, "key" => key}}),
+    do: key in ["c", "C"]
+
+  defp forced_stop_input?(_data, {:key, %{"ctrlKey" => "true", "key" => key}}),
+    do: key in ["c", "C"]
+
+  defp forced_stop_input?(_data, _decoded), do: false
 
   defp focused_implicit_captures_printable_key?(key, state) do
     printable_key?(key) and

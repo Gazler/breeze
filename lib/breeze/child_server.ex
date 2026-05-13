@@ -149,7 +149,7 @@ defmodule Breeze.ChildServer do
 
   def handle_call({:input, input, opts}, _from, term) do
     touched_term = touch_interaction(term)
-    reply_from_input_result(process_input(input, touched_term), touched_term, opts)
+    reply_from_input_result(process_input(input, touched_term, opts), touched_term, opts)
   end
 
   def handle_call({:set_focus, focused}, _from, term) do
@@ -603,7 +603,15 @@ defmodule Breeze.ChildServer do
   defp normalize_result({:noreply, next_term}, _term), do: {:noreply, next_term}
   defp normalize_result({:stop, next_term}, _term), do: {:stop, next_term}
 
-  defp process_input("\t", term) do
+  defp process_input(%{"key" => "\t"} = event, term, opts) do
+    if truthy_modifier?(Map.get(event, "shiftKey")) do
+      process_input("ShiftTab", term, opts)
+    else
+      process_input("\t", term, opts)
+    end
+  end
+
+  defp process_input("\t", term, _opts) do
     focusables = Breeze.Focus.active_focusables(term.focusables, term.focus_meta)
     index = Enum.find_index(focusables, &(&1 == term.focused))
     trapped_scope = Breeze.Focus.trapped_scope?(term.focusables, term.focus_meta)
@@ -619,7 +627,7 @@ defmodule Breeze.ChildServer do
     {:noreply, %{term | focused: focused, allow_unfocused?: is_nil(focused)}}
   end
 
-  defp process_input("ShiftTab", term) do
+  defp process_input("ShiftTab", term, _opts) do
     focusables = Breeze.Focus.active_focusables(term.focusables, term.focus_meta)
     index = Enum.find_index(focusables, &(&1 == term.focused))
     trapped_scope = Breeze.Focus.trapped_scope?(term.focusables, term.focus_meta)
@@ -637,7 +645,7 @@ defmodule Breeze.ChildServer do
     {:noreply, %{term | focused: focused, allow_unfocused?: is_nil(focused)}}
   end
 
-  defp process_input(%{"mouse" => mouse} = event, term) do
+  defp process_input(%{"mouse" => mouse} = event, term, _opts) do
     case mouse_target(term, mouse) do
       nil ->
         normalize_result(term.view.handle_event(:ignore_me, event, term), term)
@@ -660,7 +668,7 @@ defmodule Breeze.ChildServer do
     end
   end
 
-  defp process_input(key, term) do
+  defp process_input(key, term, _opts) do
     event = normalize_key_event(key)
 
     steps =
