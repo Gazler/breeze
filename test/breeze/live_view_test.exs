@@ -706,15 +706,17 @@ defmodule Breeze.LiveViewTest do
 
     assert box.content =~ "Count: 1"
 
-    assert_receive {:telemetry_event, [:breeze, :render, :stop], measurements, metadata}
+    assert_receive {:telemetry_event, [:breeze, :render, :stop], measurements,
+                    %{scope: ^profile_scope} = metadata}
+
     assert is_integer(measurements.duration)
-    assert metadata.scope == profile_scope
     assert metadata.label == "counter-child"
     assert metadata.metric in [:view_render_us, :template_tree_us, :build_tree_us, :layout_us]
 
-    assert_receive {:telemetry_event, [:breeze, :render, :metric], %{value: value}, metadata}
+    assert_receive {:telemetry_event, [:breeze, :render, :metric], %{value: value},
+                    %{scope: ^profile_scope} = metadata}
+
     assert value > 0
-    assert metadata.scope == profile_scope
     assert metadata.label == "counter-child"
     assert metadata.metric == :element_count
   end

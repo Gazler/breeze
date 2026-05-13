@@ -123,8 +123,12 @@ defmodule Breeze.RemoteInspector do
     case Process.whereis(:pg) do
       nil ->
         case :pg.start_link() do
-          {:ok, _pid} -> :ok
-          {:error, {:already_started, _pid}} -> :ok
+          {:ok, pid} ->
+            Process.unlink(pid)
+            :ok
+
+          {:error, {:already_started, _pid}} ->
+            :ok
         end
 
       _pid ->
