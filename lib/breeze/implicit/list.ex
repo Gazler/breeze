@@ -15,6 +15,7 @@ defmodule Breeze.Implicit.List do
   Child boxes should define a `value` attribute.
   """
 
+  alias Breeze.Implicit.Common
   alias Breeze.Viewport
 
   @type state :: %{
@@ -37,25 +38,32 @@ defmodule Breeze.Implicit.List do
       |> Enum.filter(&Map.has_key?(&1, :value))
       |> Enum.map(& &1.value)
 
-    loop = bool_option(root_attrs, :"list-loop", Map.get(last_state, :loop, true))
+    loop =
+      Common.bool_option(root_attrs, :"list-loop", Map.get(last_state, :loop, true),
+        numeric: true
+      )
 
     scroll_padding =
-      int_option(root_attrs, :"list-scroll-padding", Map.get(last_state, :scroll_padding, 0))
+      Common.int_option(
+        root_attrs,
+        :"list-scroll-padding",
+        Map.get(last_state, :scroll_padding, 0)
+      )
 
-    width = int_option(root_attrs, :"list-width", Map.get(last_state, :width, 0))
+    width = Common.int_option(root_attrs, :"list-width", Map.get(last_state, :width, 0))
 
     selected_index =
       values
       |> pick_selected_index(last_state, root_attrs)
-      |> normalize_selected_index(values)
+      |> Common.normalize_selected_index(values)
 
-    selected = if selected_index, do: Enum.at(values, selected_index), else: nil
+    selected = Common.selected_value(values, selected_index)
 
     %{
       values: values,
       selected: selected,
       selected_index: selected_index,
-      offset: normalize_int(Map.get(last_state, :offset, 0)),
+      offset: Common.normalize_int(Map.get(last_state, :offset, 0)),
       loop: loop,
       scroll_padding: scroll_padding,
       width: width
@@ -132,35 +140,30 @@ defmodule Breeze.Implicit.List do
 
   def handle_event(_, %{"mouse" => %{button: :wheel_down} = mouse, "element" => element}, state) do
     viewport = Viewport.from_dimensions(element)
-    offset = Viewport.clamp_scroll_y(state.offset + wheel_repeat(mouse), viewport)
+    offset = Viewport.clamp_scroll_y(state.offset + Common.wheel_repeat(mouse), viewport)
     {:noreply, %{state | offset: offset}}
   end
 
   def handle_event(_, %{"mouse" => %{button: :wheel_up} = mouse, "element" => element}, state) do
     viewport = Viewport.from_dimensions(element)
-    offset = Viewport.clamp_scroll_y(state.offset - wheel_repeat(mouse), viewport)
+    offset = Viewport.clamp_scroll_y(state.offset - Common.wheel_repeat(mouse), viewport)
     {:noreply, %{state | offset: offset}}
   end
 
   def handle_event(_, _, state), do: {:noreply, state}
 
   @spec handle_modifiers(:root | :child, keyword(), state()) :: keyword()
-  def handle_modifiers(:root, _flags, state), do: [scroll_y: state.offset]
+  def handle_modifiers(:root, _flags, state), do: Common.root_scroll_modifier(state)
 
-  def handle_modifiers(:child, flags, state) do
-    case Keyword.get(flags, :value) do
-      value when not is_nil(value) and state.selected == value -> [selected: true]
-      _ -> []
-    end
-  end
+  def handle_modifiers(:child, flags, state), do: Common.selected_modifier(flags, state)
 
   defp move_selection(%{values: []} = state, _delta, _element), do: state
 
   defp move_selection(state, delta, element) do
     index =
       state
-      |> next_index(delta)
-      |> normalize_selected_index(state.values)
+      |> Common.next_index(delta)
+      |> Common.normalize_selected_index(state.values)
 
     set_selection(state, index, element)
   end
@@ -169,9 +172,9 @@ defmodule Breeze.Implicit.List do
 
   defp set_selection(state, index, element) do
     values = state.values
-    index = normalize_selected_index(index, values)
+    index = Common.normalize_selected_index(index, values)
 
-    selected = if index, do: Enum.at(values, index), else: nil
+    selected = Common.selected_value(values, index)
 
     viewport = Viewport.from_dimensions(element)
 
@@ -190,32 +193,7 @@ defmodule Breeze.Implicit.List do
     %{state | selected_index: index, selected: selected, offset: offset}
   end
 
-  defp maybe_change(state) do
-    payload = %{
-      value: state.selected,
-      index: state.selected_index,
-      offset: state.offset
-    }
-
-    {{:change, payload}, state}
-  end
-
-  defp wheel_repeat(%{repeat: repeat}) when is_integer(repeat) and repeat > 0, do: repeat
-  defp wheel_repeat(_mouse), do: 1
-
-  defp next_index(%{selected_index: nil}, delta) when delta >= 0, do: 0
-  defp next_index(%{selected_index: nil, values: values}, _delta), do: max(length(values) - 1, 0)
-
-  defp next_index(%{selected_index: selected_index, values: values, loop: loop?}, delta) do
-    max_index = max(length(values) - 1, 0)
-    next = selected_index + delta
-
-    cond do
-      loop? && next > max_index -> 0
-      loop? && next < 0 -> max_index
-      true -> next
-    end
-  end
+  defp maybe_change(state), do: Common.change_reply(state)
 
   defp pick_selected_index(values, last_state, root_attrs) do
     selected = Map.get(last_state, :selected)
@@ -233,7 +211,7 @@ defmodule Breeze.Implicit.List do
 
       true ->
         case Map.fetch(root_attrs, :"list-initial-index") do
-          {:ok, value} -> normalize_int(value)
+          {:ok, value} -> Common.normalize_int(value)
           :error -> nil
         end
     end
@@ -276,47 +254,4 @@ defmodule Breeze.Implicit.List do
     end)
     |> elem(1)
   end
-
-  defp normalize_selected_index(_index, []), do: nil
-
-  defp normalize_selected_index(index, values) when is_integer(index) do
-    max_index = length(values) - 1
-
-    index
-    |> max(0)
-    |> min(max_index)
-  end
-
-  defp normalize_selected_index(_index, _values), do: nil
-
-  defp int_option(attrs, key, default) do
-    attrs
-    |> Map.get(key)
-    |> normalize_int(default)
-  end
-
-  defp bool_option(attrs, key, default) do
-    case Map.get(attrs, key) do
-      true -> true
-      false -> false
-      "true" -> true
-      "false" -> false
-      "1" -> true
-      "0" -> false
-      nil -> default
-      _ -> default
-    end
-  end
-
-  defp normalize_int(value, default \\ 0)
-  defp normalize_int(value, _default) when is_integer(value), do: max(value, 0)
-
-  defp normalize_int(value, default) when is_binary(value) do
-    case Integer.parse(value) do
-      {value, ""} -> max(value, 0)
-      _ -> max(default, 0)
-    end
-  end
-
-  defp normalize_int(_value, default), do: max(default, 0)
 end

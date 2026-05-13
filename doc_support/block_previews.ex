@@ -40,6 +40,12 @@ defmodule Breeze.Docs.BlockPreviews do
             render_view(__MODULE__.SelectedListPreview, size: {28, 10}, focused: "preview-list")
           end}
        ]},
+      {"Table",
+       [
+         {"Initial", fn -> render_view(__MODULE__.TablePreview, size: {44, 8}) end},
+         {"Selected",
+          fn -> render_view(__MODULE__.TablePreview, size: {44, 8}, focused: "preview-table") end}
+       ]},
       {"Dropdown",
        [
          {"Closed", fn -> render_view(__MODULE__.DropdownPreview, size: {28, 4}) end},
@@ -175,6 +181,7 @@ defmodule Breeze.Docs.BlockPreviews do
   end
 
   defp component_ref("List"), do: "Breeze.Blocks.list/1"
+  defp component_ref("Table"), do: "Breeze.Blocks.table/1"
   defp component_ref("Dropdown"), do: "Breeze.Blocks.dropdown/1"
   defp component_ref("Tabs"), do: "Breeze.Blocks.tabs/1"
   defp component_ref("Markdown"), do: "Breeze.Blocks.markdown/1"
@@ -183,6 +190,7 @@ defmodule Breeze.Docs.BlockPreviews do
   defp component_ref("Modal"), do: "Breeze.Blocks.modal/1"
 
   defp component_code("List"), do: render_template_source(__MODULE__.ListPreview)
+  defp component_code("Table"), do: render_template_source(__MODULE__.TablePreview)
   defp component_code("Dropdown"), do: render_template_source(__MODULE__.DropdownPreview)
   defp component_code("Tabs"), do: render_template_source(__MODULE__.TabsPreview)
   defp component_code("Markdown"), do: render_template_source(__MODULE__.MarkdownPreview)
@@ -204,6 +212,14 @@ defmodule Breeze.Docs.BlockPreviews do
       {"small", "Small"},
       {"medium", "Medium"},
       {"large", "Large"}
+    ]
+  end
+
+  def table_rows do
+    [
+      %{id: "tokyo", rank: "1", city: "Tokyo", country: "Japan", population: "37.2m"},
+      %{id: "delhi", rank: "2", city: "Delhi", country: "India", population: "32.0m"},
+      %{id: "shanghai", rank: "3", city: "Shanghai", country: "China", population: "28.5m"}
     ]
   end
 
@@ -325,6 +341,27 @@ defmodule Breeze.Docs.BlockPreviews do
     end
   end
 
+  defmodule TablePreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      assigns = Map.put(assigns, :rows, Breeze.Docs.BlockPreviews.table_rows())
+
+      ~H"""
+      <.table id="preview-table" rows={@rows} selected="delhi" style="width-44 height-8">
+        <:col :let={city} label="#" width={4} align="right">{city.rank}</:col>
+        <:col :let={city} label="City" width={12}>{city.city}</:col>
+        <:col :let={city} label="Country" width={12}>{city.country}</:col>
+        <:col :let={city} label="Pop." width={10} align="right">{city.population}</:col>
+      </.table>
+      """
+    end
+  end
+
   defmodule DropdownPreview do
     use Breeze.View
     import Breeze.Blocks
@@ -394,7 +431,7 @@ defmodule Breeze.Docs.BlockPreviews do
       assigns = Map.put(assigns, :content, Breeze.Docs.BlockPreviews.markdown_content())
 
       ~H"""
-      <.markdown id="preview-markdown" content={@content} width={36} style="width-40 height-8" />
+      <.markdown id="preview-markdown" content={@content} width={36} style="width-40 height-8"/>
       """
     end
   end

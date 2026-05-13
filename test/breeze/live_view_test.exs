@@ -107,6 +107,53 @@ defmodule Breeze.LiveViewTest do
     end
   end
 
+  defmodule ThemeLeafLiveChild do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box>Leaf</box>
+      """
+    end
+  end
+
+  defmodule ThemeBranchLiveChild do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <live id="leaf" view={ThemeLeafLiveChild}>
+        </live>
+      </box>
+      """
+    end
+  end
+
+  defmodule ThemeSwitchingParent do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok, focus(term, "switch")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box id="switch" focusable>Switch</box>
+        <live id="branch" view={ThemeBranchLiveChild}>
+        </live>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "t"}, term) do
+      {:noreply, put_theme(term, Breeze.Theme.builtin(:nebula))}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
   defmodule HeaderedLiveChild do
     use Breeze.View
 
@@ -801,6 +848,32 @@ defmodule Breeze.LiveViewTest do
              ChildServer.render_snapshot(root_pid, terminal: terminal, live_view: live_view)
 
     assert %{focused: nil} = ChildServer.metadata(root_pid)
+  end
+
+  test "theme changes cascade to nested live children immediately" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    {:ok, pid} =
+      ChildServer.start(
+        view: ThemeSwitchingParent,
+        terminal: terminal,
+        theme: Breeze.Theme.builtin(:gruvbox)
+      )
+
+    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
+
+    branch = :sys.get_state(pid).children["branch"].pid
+    leaf = :sys.get_state(branch).children["leaf"].pid
+
+    assert ChildServer.metadata(pid).theme.name == "gruvbox-dark"
+    assert ChildServer.metadata(branch).theme.name == "gruvbox-dark"
+    assert ChildServer.metadata(leaf).theme.name == "gruvbox-dark"
+
+    assert {:noreply, "switch", true} = ChildServer.dispatch_event(pid, "switch", %{"key" => "t"})
+
+    assert ChildServer.metadata(pid).theme.name == "nebula"
+    assert ChildServer.metadata(branch).theme.name == "nebula"
+    assert ChildServer.metadata(leaf).theme.name == "nebula"
   end
 
   test "unfocused live children do not render their own local focus ring" do

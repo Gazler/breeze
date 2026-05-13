@@ -174,6 +174,49 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule TableExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term) do
+      {:ok, term |> focus("cities") |> assign(selected_city: "delhi")}
+    end
+
+    def render(assigns) do
+      rows = [
+        %{id: "tokyo", rank: "1", city: "Tokyo", country: "Japan", population: "37.2m"},
+        %{id: "delhi", rank: "2", city: "Delhi", country: "India", population: "32.0m"},
+        %{id: "shanghai", rank: "3", city: "Shanghai", country: "China", population: "28.5m"}
+      ]
+
+      assigns = assign(assigns, rows: rows)
+
+      ~H"""
+      <.table
+        id="cities"
+        rows={@rows}
+        selected={@selected_city}
+        br-change="city_changed"
+        class="width-42 height-5"
+      >
+        <:col :let={city} label="#" width={4} align="right">{city.rank}</:col>
+        <:col :let={city} label="City" width={12}>{city.city}</:col>
+        <:col :let={city} label="Country" width={12} align="center">{city.country}</:col>
+        <:col :let={city} label="Pop." width={10} align={:right}>
+          <box class="text-muted">{city.population}</box>
+        </:col>
+      </.table>
+      """
+    end
+
+    def handle_event("city_changed", %{value: value}, term) do
+      {:noreply, assign(term, selected_city: value)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   describe "merge_class/2" do
     test "matches merge_style semantics" do
       assert Blocks.merge_class("border width-24 height-8", "width-32 bg-4") ==
@@ -338,5 +381,28 @@ defmodule Breeze.BlocksTest do
     refute box.content =~ ">Three"
     assert box.content =~ " One"
     assert box.content =~ " Two"
+  end
+
+  test "table renders headers, rows, and selectable cells" do
+    {:ok, pid} = ChildServer.start(view: TableExample, start_opts: [])
+
+    {:ok, acc, box} = ChildServer.render(pid, focused: "cities", implicit_state: %{})
+
+    assert acc.focusables == ["cities"]
+    assert box.content =~ "City"
+    assert box.content =~ "Tokyo"
+    assert box.content =~ "Delhi"
+    assert box.content =~ "India"
+    assert box.content =~ ~r/\e\[[0-9;]*48;5;4/
+  end
+
+  test "table emits change events from keyboard navigation" do
+    {:ok, pid} = ChildServer.start(view: TableExample, start_opts: [])
+
+    assert {:ok, _acc, _box} = ChildServer.render(pid, focused: "cities", implicit_state: %{})
+    assert {:noreply, "cities", true} = ChildServer.dispatch_input(pid, "ArrowDown")
+
+    term = :sys.get_state(pid)
+    assert term.assigns.selected_city == "shanghai"
   end
 end

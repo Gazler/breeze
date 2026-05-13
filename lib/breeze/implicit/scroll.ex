@@ -7,6 +7,7 @@ defmodule Breeze.Implicit.Scroll do
   Supports Up/Down/PageUp/PageDown/Home/End for vertical scrolling.
   """
 
+  alias Breeze.Implicit.Common
   alias Breeze.Viewport
 
   def init(children, last_state), do: init(children, %{}, last_state)
@@ -104,8 +105,7 @@ defmodule Breeze.Implicit.Scroll do
     max(div(height, 2), 1)
   end
 
-  defp wheel_repeat(%{repeat: repeat}) when is_integer(repeat) and repeat > 0, do: repeat
-  defp wheel_repeat(_mouse), do: 1
+  defp wheel_repeat(mouse), do: Common.wheel_repeat(mouse)
 
   defp effective_offset_y(state, nil), do: Map.get(state, :offset_y, 0)
 
