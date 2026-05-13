@@ -586,35 +586,48 @@ defmodule Breeze.Storybook.ViewTest do
 
     view_pid = :sys.get_state(pid).view_pid
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(view_pid, terminal: terminal)
-
-    assert {:noreply, "storybook-nav", true} =
-             Breeze.ChildServer.dispatch_input(view_pid, "ArrowDown")
-
-    assert {:noreply, "storybook-nav", true} =
-             Breeze.ChildServer.dispatch_input(view_pid, "ArrowDown")
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(view_pid, terminal: terminal)
-
-    assert {:noreply, "storybook-preview::storybook-input-active", true} =
-             Breeze.ChildServer.set_focus(view_pid, "storybook-preview::storybook-input-active")
-
-    send(pid, {:child_invalidated, "storybook-preview"})
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
 
     wait_until(fn ->
-      length(:sys.get_state(pid).frame.last_overlays) == 1
+      :sys.get_state(view_pid).assigns.current_story_id == "button"
     end)
 
-    assert {:noreply, "storybook-nav", true} =
-             Breeze.ChildServer.dispatch_input(view_pid, %{
-               "ctrlKey" => true,
-               "key" => "ArrowDown"
-             })
+    send(pid, {reader, {:data, "\e[B"}})
 
     wait_until(fn ->
-      :sys.get_state(pid).focused == "storybook-nav" and
-        :sys.get_state(pid).frame.last_overlays == []
+      :sys.get_state(view_pid).assigns.current_story_id == "dropdown"
     end)
+
+    send(pid, {reader, {:data, "\e[B"}})
+
+    wait_until(fn ->
+      :sys.get_state(view_pid).assigns.current_story_id == "input"
+    end)
+
+    send(pid, {reader, {:data, "\t"}})
+
+    wait_until(
+      fn ->
+        state = :sys.get_state(pid)
+
+        state.focused == "storybook-preview::storybook-input-active" and
+          length(state.frame.last_overlays) == 1
+      end,
+      100
+    )
+
+    send(pid, {reader, {:data, "\e[1;5B"}})
+
+    wait_until(
+      fn ->
+        state = :sys.get_state(pid)
+
+        state.focused == "storybook-nav" and
+          :sys.get_state(view_pid).assigns.current_story_id == "list" and
+          state.frame.last_overlays == []
+      end,
+      100
+    )
   end
 
   test "preview panel highlights for the dropdown story when the dropdown is focused" do

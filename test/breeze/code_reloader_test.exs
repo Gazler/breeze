@@ -48,8 +48,15 @@ defmodule Breeze.CodeReloaderTest do
     Breeze.Example.run([])
     """)
 
-    assert [{ReloadCompileExample, _bytecode}] =
-             Breeze.ReloadContext.with_compile(fn -> Code.compile_file(path) end)
+    previous = Code.compiler_options()
+    Code.put_compiler_option(:ignore_module_conflict, true)
+
+    try do
+      assert [{ReloadCompileExample, _bytecode}] =
+               Breeze.ReloadContext.with_compile(fn -> Code.compile_file(path) end)
+    after
+      Code.compiler_options(previous)
+    end
   end
 
   test "uses file watcher events when a watcher module is available" do
