@@ -356,6 +356,7 @@ defmodule Breeze.ChildServer do
       assigns
       |> maybe_put_theme_assign(:theme_status, Breeze.Theme.probe_status(theme) || :ready)
       |> maybe_put_theme_assign(:actual_theme_mode, theme.mode)
+      |> put_breeze_assign(:theme, theme)
       |> put_breeze_assign(:keybindings, active_keybindings(term))
 
     %{term | assigns: assigns}

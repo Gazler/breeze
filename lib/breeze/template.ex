@@ -199,6 +199,7 @@ defmodule Breeze.Template do
       |> Map.new()
       |> maybe_put_rest(rest)
       |> Map.merge(build_slots(children, ctx))
+      |> maybe_put_parent_breeze(ctx)
 
     {%__MODULE__{nodes: comp_nodes, env: comp_env}, comp_assigns} =
       unwrap_component(invoke_component(module, fun, assigns), assigns)
@@ -307,6 +308,7 @@ defmodule Breeze.Template do
       |> Map.new()
       |> maybe_put_rest(rest)
       |> Map.merge(build_slots(children, ctx))
+      |> maybe_put_parent_breeze(ctx)
 
     {template, comp_assigns} =
       unwrap_component(invoke_component(module, fun, assigns), assigns)
@@ -343,6 +345,12 @@ defmodule Breeze.Template do
   defp unwrap_component(%__MODULE__{} = template, caller_assigns) do
     {template, caller_assigns}
   end
+
+  defp maybe_put_parent_breeze(assigns, %{assigns: %{breeze: breeze}}) do
+    Map.put_new(assigns, :breeze, breeze)
+  end
+
+  defp maybe_put_parent_breeze(assigns, _ctx), do: assigns
 
   defp build_slots(children, ctx) do
     {slots, inner_block_nodes} =
