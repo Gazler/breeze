@@ -90,11 +90,13 @@ defmodule Breeze.Server.Frame do
 
   defp changed_base_rows(prev_lines, lines) do
     lines
-    |> Enum.zip(prev_lines)
     |> Enum.with_index()
-    |> Enum.reduce(MapSet.new(), fn
-      {{line, line}, _row}, acc -> acc
-      {_pair, row}, acc -> MapSet.put(acc, row)
+    |> Enum.reduce(MapSet.new(), fn {line, row}, acc ->
+      if line == Enum.at(prev_lines, row, "") do
+        acc
+      else
+        MapSet.put(acc, row)
+      end
     end)
   end
 

@@ -28,6 +28,7 @@ defmodule Breeze.Server do
     :clipboard_opts,
     :crash,
     :crash_scrollback?,
+    :terminal_size_override,
     :last_render_at,
     :last_interaction_at,
     children: %{},
@@ -72,6 +73,36 @@ defmodule Breeze.Server do
     Breeze.InputRouter.start_link(opts)
   end
 
+  @doc """
+  Run the Breeze application until it exits.
+
+  This is intended for interactive sessions such as IEx. It starts the terminal
+  input router without linking it to the caller, waits for the app to stop, and
+  returns `:ok` instead of halting the VM.
+  """
+  @spec run(keyword()) :: :ok | {:error, term()}
+  def run(opts) do
+    opts =
+      opts
+      |> Keyword.put_new_lazy(:halt_fun, fn -> fn -> :ok end end)
+      |> Keyword.put_new(:pause_iex, true)
+
+    case Breeze.InputRouter.start(opts) do
+      {:ok, pid} ->
+        ref = Process.monitor(pid)
+
+        receive do
+          {:DOWN, ^ref, :process, ^pid, :normal} -> :ok
+          {:DOWN, ^ref, :process, ^pid, :shutdown} -> :ok
+          {:DOWN, ^ref, :process, ^pid, {:shutdown, _}} -> :ok
+          {:DOWN, ^ref, :process, ^pid, reason} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   @doc false
   @spec start_app_link(keyword()) :: GenServer.on_start()
   def start_app_link(opts) do
@@ -109,7 +140,11 @@ defmodule Breeze.Server do
     start_opts = Keyword.get(opts, :start_opts, [])
     frame_delay_ms = Keyword.get(opts, :frame_delay_ms, 80)
     debug_push_interval_ms = Keyword.get(opts, :debug_push_interval_ms, 250)
-    terminal = Keyword.fetch!(opts, :terminal)
+    terminal_size_override = Keyword.get(opts, :terminal_size_override)
+
+    terminal =
+      opts |> Keyword.fetch!(:terminal) |> apply_terminal_size_override(terminal_size_override)
+
     theme = Breeze.Theme.new(Keyword.get(opts, :theme), terminal: terminal)
     theme_source = Keyword.get(opts, :theme)
     apply_theme_defaults? = Breeze.Theme.defaults_enabled?(Keyword.get(opts, :theme))
@@ -161,6 +196,7 @@ defmodule Breeze.Server do
         theme: theme,
         apply_theme_defaults?: apply_theme_defaults?,
         clipboard_opts: Keyword.get(opts, :clipboard, []),
+        terminal_size_override: terminal_size_override,
         global_keybindings: Keyword.get(opts, :global_keybindings, []),
         last_render_at: System.monotonic_time(:millisecond),
         last_interaction_at: nil,
@@ -235,12 +271,12 @@ defmodule Breeze.Server do
 
   def handle_info({reader, {:signal, :winch}}, %{reader: reader, crash: crash} = state)
       when not is_nil(crash) do
-    terminal = Termite.Terminal.resize(state.terminal)
+    terminal = resize_terminal(state)
     {:noreply, render_crash(%{state | terminal: terminal}, force_full_redraw?: true)}
   end
 
   def handle_info({reader, {:signal, :winch}}, %{reader: reader} = state) do
-    terminal = Termite.Terminal.resize(state.terminal)
+    terminal = resize_terminal(state)
     state = %{state | terminal: terminal}
 
     case safe_call(fn ->
@@ -846,6 +882,19 @@ defmodule Breeze.Server do
     |> maybe_render_base(cause)
   end
 
+  defp resize_terminal(state) do
+    state.terminal
+    |> Termite.Terminal.resize()
+    |> apply_terminal_size_override(state.terminal_size_override)
+  end
+
+  defp apply_terminal_size_override(%Termite.Terminal{} = terminal, fun)
+       when is_function(fun, 1) do
+    %{terminal | size: fun.(terminal.size)}
+  end
+
+  defp apply_terminal_size_override(%Termite.Terminal{} = terminal, _fun), do: terminal
+
   defp render_live_child(attrs, opts, state, profile_scope, tracking_ref) do
     ctx = live_child_context(attrs, opts, state)
 
@@ -1437,9 +1486,7 @@ defmodule Breeze.Server do
   defp live_placeholder_style(_child, _state, _terminal), do: %{}
 
   defp stop(state) do
-    if Process.alive?(state.view_pid) do
-      Process.exit(state.view_pid, :normal)
-    end
+    shutdown_root_view(state.view_pid)
 
     terminal =
       state.terminal

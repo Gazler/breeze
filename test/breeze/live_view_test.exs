@@ -40,6 +40,29 @@ defmodule Breeze.LiveViewTest do
     def resize(term), do: term.size
   end
 
+  defmodule ResizeAdapter do
+    @behaviour Termite.Terminal.Adapter
+
+    def start(opts) do
+      {:ok,
+       %{
+         ref: make_ref(),
+         size: %{width: 80, height: 24},
+         resized: %{width: 120, height: 67},
+         owner: Keyword.fetch!(opts, :owner)
+       }}
+    end
+
+    def reader(term), do: {:ok, term.ref}
+
+    def write(term, str) do
+      send(term.owner, {:terminal_write, str})
+      {:ok, term}
+    end
+
+    def resize(term), do: term.resized
+  end
+
   defmodule FakeWatcher do
     use GenServer
 
@@ -90,6 +113,26 @@ defmodule Breeze.LiveViewTest do
       {:noreply, assign(term, count: term.assigns.count + 1)}
     end
 
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule GrowingRoot do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok, term |> assign(height: 24) |> focus("root")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box id="root" focusable>
+        <box :for={row <- 1..@height}>{"row #{row}"}</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "+"}, term), do: {:noreply, assign(term, height: 26)}
     def handle_event(_, _, term), do: {:noreply, term}
     def handle_info(_, term), do: {:noreply, term}
   end
@@ -1755,7 +1798,73 @@ defmodule Breeze.LiveViewTest do
         if writes == [], do: false, else: writes
       end)
 
-    assert Enum.any?(writes, &String.starts_with?(&1, "\e[2J\e[H"))
+    payload = IO.iodata_to_binary(writes)
+
+    assert payload =~ "\e[2J\e[H"
+
+    Process.exit(pid, :normal)
+  end
+
+  test "terminal size override is reapplied after resize" do
+    terminal = Termite.Terminal.start(adapter: ResizeAdapter, owner: self())
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: CounterChild,
+        terminal: terminal,
+        terminal_size_override: fn size -> %{size | height: max(size.height - 1, 1)} end
+      )
+
+    assert :sys.get_state(pid).terminal.size == %{width: 120, height: 66}
+
+    send(pid, {terminal.reader, {:signal, :winch}})
+
+    wait_until(fn ->
+      case :sys.get_state(pid).debug.stats[:last_render_cause] do
+        :resize -> true
+        _ -> false
+      end
+    end)
+
+    assert :sys.get_state(pid).terminal.size == %{width: 120, height: 66}
+
+    Process.exit(pid, :normal)
+  end
+
+  test "incremental frame diff writes rows introduced by a height increase" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: GrowingRoot,
+        terminal: terminal
+      )
+
+    drain_terminal_writes()
+
+    :sys.replace_state(pid, fn state ->
+      terminal = %{state.terminal | size: %{state.terminal.size | height: 26}}
+      frame = %{state.frame | last_payload: nil}
+      %{state | terminal: terminal, frame: frame}
+    end)
+
+    send(pid, {terminal.reader, {:data, "+"}})
+
+    writes =
+      wait_until(fn ->
+        writes = drain_terminal_writes()
+        payload = IO.iodata_to_binary(writes)
+
+        if payload =~ "\e[25;1H" and payload =~ "\e[26;1H" do
+          writes
+        else
+          false
+        end
+      end)
+
+    payload = IO.iodata_to_binary(writes)
+    assert payload =~ "row 25"
+    assert payload =~ "row 26"
 
     Process.exit(pid, :normal)
   end
