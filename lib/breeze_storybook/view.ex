@@ -14,6 +14,7 @@ defmodule Breeze.Storybook.View do
 
     {:ok,
      term
+     |> switch_theme(theme_id(term.theme_source || term.theme))
      |> Map.put(:global_keybindings, storybook_global_keybindings())
      |> assign(
        story_directory: story_directory,
@@ -177,6 +178,10 @@ defmodule Breeze.Storybook.View do
     {:noreply, assign(term, show_debug: !term.assigns.show_debug)}
   end
 
+  def handle_event(_, %{"key" => "F3"}, term) do
+    {:noreply, cycle_storybook_theme(term) |> sync_storybook_layout()}
+  end
+
   def handle_event(_, %{"ctrlKey" => true, "key" => "ArrowLeft"}, term) do
     {:noreply,
      term |> step_variant(-1) |> focus("storybook-variant-tabs") |> sync_storybook_layout()}
@@ -274,6 +279,8 @@ defmodule Breeze.Storybook.View do
 
   defp storybook_global_keybindings do
     [
+      {"F2", &handle_storybook_global_key/2},
+      {"F3", &handle_storybook_global_key/2},
       {"ArrowLeft", &handle_storybook_global_key/2},
       {"h", &handle_storybook_global_key/2},
       {"ArrowRight", &handle_storybook_global_key/2},
@@ -307,7 +314,52 @@ defmodule Breeze.Storybook.View do
     {:noreply, term |> step_story(1) |> focus("storybook-nav") |> sync_storybook_layout()}
   end
 
+  defp handle_storybook_global_key(%{"key" => "F2"}, term) do
+    {:noreply, assign(term, show_debug: !term.assigns.show_debug)}
+  end
+
+  defp handle_storybook_global_key(%{"key" => "F3"}, term) do
+    {:noreply, cycle_storybook_theme(term) |> sync_storybook_layout()}
+  end
+
   defp handle_storybook_global_key(_event, _term), do: :continue
+
+  defp cycle_storybook_theme(term) do
+    term = Breeze.View.cycle_theme(term)
+
+    term
+    |> put_preview_child_theme(term.theme_source)
+  end
+
+  defp put_preview_child_theme(term, theme) do
+    Enum.each(term.children, fn
+      {_id, %{pid: pid}} when is_pid(pid) ->
+        if Process.alive?(pid) do
+          :ok =
+            Breeze.ChildServer.put_theme(pid, theme,
+              apply_theme_defaults?: term.apply_theme_defaults?,
+              notify?: false
+            )
+        end
+
+      _child ->
+        :ok
+    end)
+
+    term
+  end
+
+  defp theme_id(%Breeze.Theme{name: "nebula"}), do: :nebula
+  defp theme_id(%Breeze.Theme{name: "catppuccin-mocha"}), do: :catppuccin
+  defp theme_id(%Breeze.Theme{name: "dracula"}), do: :dracula
+  defp theme_id(%Breeze.Theme{name: "gruvbox-dark"}), do: :gruvbox
+  defp theme_id(%Breeze.Theme{name: "nord"}), do: :nord
+  defp theme_id(%Breeze.Theme{name: "solarized-light"}), do: :solarized_light
+  defp theme_id(%Breeze.Theme{name: "solarized-dark"}), do: :solarized_dark
+  defp theme_id(%Breeze.Theme{mode: :system16}), do: :system16
+  defp theme_id(:system16), do: :system16
+  defp theme_id(:system), do: :system
+  defp theme_id(_theme), do: :gruvbox
 
   defp step_story(term, delta) do
     stories = term.assigns.stories

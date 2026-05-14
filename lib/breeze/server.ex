@@ -612,12 +612,17 @@ defmodule Breeze.Server do
     Map.get(focused_child_or_root_metadata(state), :focused_implicit_meta, %{})
   end
 
-  defp focused_implicit_captures_printable_key?(state, key) when is_binary(key) do
-    Input.raw_printable_key?(key) and
+  defp focused_implicit_captures_printable_key?(state, key) do
+    printable_input?(key) and
       match?(%{captures_printable_keys: true}, focused_implicit_meta(state))
   end
 
-  defp focused_implicit_captures_printable_key?(_state, _key), do: false
+  defp printable_input?(%{"__batched_printable__" => true, "key" => key}) when is_binary(key) do
+    String.printable?(key)
+  end
+
+  defp printable_input?(key) when is_binary(key), do: Input.raw_printable_key?(key)
+  defp printable_input?(_key), do: false
 
   defp focused_child_or_root_metadata(state) do
     case focused_child_chain(state) do
@@ -712,6 +717,18 @@ defmodule Breeze.Server do
     render_base(%{state | focused: focused}, cause, attempts - 1)
   end
 
+  defp continue_base_render(
+         %{theme: previous_theme} = state,
+         %{attempts: attempts, metadata_theme: metadata_theme, cause: cause}
+       )
+       when attempts > 0 and metadata_theme != previous_theme do
+    state =
+      %{state | theme: metadata_theme}
+      |> cascade_live_child_theme_if_changed(previous_theme)
+
+    render_base(state, cause, attempts - 1)
+  end
+
   defp continue_base_render(state, result) do
     finish_base_render(state, result)
   end
@@ -720,7 +737,12 @@ defmodule Breeze.Server do
     decorations =
       RenderTracking.dedupe_decorations(result.decorations ++ result.child_decorations)
 
-    state = %{state | focused: result.focused, theme: result.metadata_theme}
+    previous_theme = state.theme
+
+    state =
+      %{state | focused: result.focused, theme: result.metadata_theme}
+      |> cascade_live_child_theme_if_changed(previous_theme)
+
     prep_started_at = System.monotonic_time(:microsecond)
     {base_output, decorations} = prepare_decorations(result.box.content, decorations, state)
     prepare_decorations_us = System.monotonic_time(:microsecond) - prep_started_at
@@ -1890,6 +1912,29 @@ defmodule Breeze.Server do
     end
   end
 
+  defp cascade_live_child_theme_if_changed(%{theme: theme} = state, previous_theme) do
+    if theme == previous_theme do
+      state
+    else
+      Enum.each(state.children, fn
+        {_id, %{pid: pid}} when is_pid(pid) ->
+          if Process.alive?(pid) do
+            safe_call(fn ->
+              Breeze.ChildServer.put_theme(pid, theme,
+                apply_theme_defaults?: state.apply_theme_defaults?,
+                notify?: false
+              )
+            end)
+          end
+
+        _child ->
+          :ok
+      end)
+
+      state
+    end
+  end
+
   defp prune_dead_children(state) do
     alive_children =
       state.children
@@ -2043,6 +2088,33 @@ defmodule Breeze.Server do
   end
 
   defp dispatch_input_hierarchy(state, key) do
+    state =
+      case safe_root_metadata(state) do
+        %{focused: focused} -> %{state | focused: focused}
+        _metadata -> state
+      end
+
+    root_global_reply =
+      if printable_input?(key) do
+        nil
+      else
+        case safe_call(fn ->
+               Breeze.ChildServer.dispatch_global_keybindings(state.view_pid, key)
+             end) do
+          {:ok, {:noreply, _focused, false}} -> nil
+          {:ok, reply} -> reply
+          {:crash, crash} -> {:crash, crash}
+        end
+      end
+
+    if root_global_reply do
+      root_global_reply
+    else
+      dispatch_focused_input_hierarchy(state, key)
+    end
+  end
+
+  defp dispatch_focused_input_hierarchy(state, key) do
     child_reply =
       state
       |> focused_child_chain()
@@ -2067,7 +2139,13 @@ defmodule Breeze.Server do
         crash
 
       nil ->
-        case safe_call(fn -> Breeze.ChildServer.dispatch_input(state.view_pid, key) end) do
+        case safe_call(fn ->
+               if state.focused, do: Breeze.ChildServer.set_focus(state.view_pid, state.focused)
+
+               Breeze.ChildServer.dispatch_input(state.view_pid, key,
+                 skip_global: focused_implicit_captures_printable_key?(state, key)
+               )
+             end) do
           {:ok, reply} -> reply
           {:crash, crash} -> {:crash, crash}
         end

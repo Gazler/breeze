@@ -27,6 +27,10 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, {:input, input, opts})
   end
 
+  def dispatch_global_keybindings(pid, input, opts \\ []) do
+    GenServer.call(pid, {:global_input, input, opts})
+  end
+
   def set_focus(pid, focused) do
     GenServer.call(pid, {:set_focus, focused})
   end
@@ -45,6 +49,10 @@ defmodule Breeze.ChildServer do
 
   def put_global_keybindings(pid, keybindings) do
     GenServer.call(pid, {:put_global_keybindings, keybindings})
+  end
+
+  def put_theme(pid, theme, opts \\ []) do
+    GenServer.call(pid, {:put_theme, theme, opts})
   end
 
   @impl true
@@ -152,6 +160,19 @@ defmodule Breeze.ChildServer do
     reply_from_input_result(process_input(input, touched_term, opts), touched_term, opts)
   end
 
+  def handle_call({:global_input, input, opts}, _from, term) do
+    touched_term = touch_interaction(term)
+    event = normalize_key_event(input)
+
+    case Breeze.GlobalKeybindings.dispatch(event, touched_term) do
+      :continue ->
+        {:reply, {:noreply, touched_term.focused, false}, touched_term}
+
+      reply ->
+        reply_from_input_result(reply, touched_term, opts)
+    end
+  end
+
   def handle_call({:set_focus, focused}, _from, term) do
     next_term =
       term
@@ -169,6 +190,29 @@ defmodule Breeze.ChildServer do
 
   def handle_call({:put_global_keybindings, keybindings}, _from, term) do
     {:reply, :ok, %{term | global_keybindings: keybindings}}
+  end
+
+  def handle_call({:put_theme, theme_input, opts}, _from, term) do
+    theme = Breeze.Theme.new(theme_input, terminal: term.terminal)
+
+    next_term =
+      %{
+        term
+        | theme: theme,
+          theme_source: theme_input,
+          apply_theme_defaults?:
+            Keyword.get(opts, :apply_theme_defaults?, Breeze.Theme.defaults_enabled?(theme_input))
+      }
+      |> sync_theme_assigns()
+      |> put_child_themes(theme_input)
+
+    maybe_probe_system_theme(next_term.theme, next_term.terminal, next_term.server)
+
+    if Keyword.get(opts, :notify?, true) do
+      notify_invalidate(next_term)
+    end
+
+    {:reply, :ok, next_term}
   end
 
   def handle_call({:update_assigns, assigns}, _from, term) do
@@ -190,7 +234,11 @@ defmodule Breeze.ChildServer do
         |> Breeze.Theme.normalize_requested_source()
         |> Breeze.Theme.new(terminal: term.terminal)
 
-      next_term = %{term | theme: theme} |> sync_theme_assigns()
+      next_term =
+        %{term | theme: theme}
+        |> sync_theme_assigns()
+        |> cascade_theme_if_changed(term)
+
       notify_invalidate(next_term)
       {:noreply, next_term}
     else
@@ -208,18 +256,22 @@ defmodule Breeze.ChildServer do
 
     case term.view.handle_info(message, term) do
       {:noreply, next_term} ->
+        next_term = cascade_info_theme_change(next_term, term)
         notify_invalidate(next_term)
         {:noreply, next_term}
 
       {:noreply, next_term, opts} ->
+        next_term = cascade_info_theme_change(next_term, term)
         maybe_notify_invalidate(next_term, opts)
         {:noreply, next_term}
 
       {:stop, next_term} ->
+        next_term = cascade_info_theme_change(next_term, term)
         notify_invalidate(next_term)
         {:stop, :normal, next_term}
 
       {:stop, next_term, opts} ->
+        next_term = cascade_info_theme_change(next_term, term)
         maybe_notify_invalidate(next_term, opts)
         {:stop, :normal, next_term}
     end
@@ -231,7 +283,12 @@ defmodule Breeze.ChildServer do
       |> apply_focus_transitions(next_term)
 
     maybe_probe_system_theme(next_term.theme, next_term.terminal, next_term.server)
-    next_term = sync_theme_assigns(next_term)
+
+    next_term =
+      next_term
+      |> sync_theme_assigns()
+      |> cascade_theme_if_changed(term)
+
     notify_invalidate(next_term)
     {:reply, {:noreply, next_term.focused}, next_term}
   end
@@ -242,7 +299,12 @@ defmodule Breeze.ChildServer do
       |> apply_focus_transitions(next_term)
 
     maybe_probe_system_theme(next_term.theme, next_term.terminal, next_term.server)
-    next_term = sync_theme_assigns(next_term)
+
+    next_term =
+      next_term
+      |> sync_theme_assigns()
+      |> cascade_theme_if_changed(term)
+
     maybe_notify_invalidate(next_term, opts)
     {:reply, {:noreply, next_term.focused}, next_term}
   end
@@ -252,6 +314,7 @@ defmodule Breeze.ChildServer do
       term
       |> apply_focus_transitions(next_term)
       |> sync_theme_assigns()
+      |> cascade_theme_if_changed(term)
 
     notify_invalidate(next_term)
     {:stop, :normal, {:stop, next_term.focused}, next_term}
@@ -262,6 +325,7 @@ defmodule Breeze.ChildServer do
       term
       |> apply_focus_transitions(next_term)
       |> sync_theme_assigns()
+      |> cascade_theme_if_changed(term)
 
     maybe_notify_invalidate(next_term, opts)
     {:stop, :normal, {:stop, next_term.focused}, next_term}
@@ -680,18 +744,22 @@ defmodule Breeze.ChildServer do
     end
   end
 
-  defp process_input(key, term, _opts) do
+  defp process_input(key, term, opts) do
     event = normalize_key_event(key)
 
     steps =
-      if focused_implicit_captures_printable_key?(event, term) do
+      if printable_key?(event) do
         [:hierarchy, :focused_implicit, :local, :global, :view_direct]
       else
         [:global, :hierarchy, :local, :view]
       end
+      |> maybe_skip_global(Keyword.get(opts, :skip_global, false))
 
     dispatch_input_steps(steps, event, key, term)
   end
+
+  defp maybe_skip_global(steps, true), do: List.delete(steps, :global)
+  defp maybe_skip_global(steps, _skip?), do: steps
 
   defp handle_event(change, event, term, target_id \\ nil) do
     target_id = target_id || term.focused
@@ -805,24 +873,6 @@ defmodule Breeze.ChildServer do
     end
   end
 
-  defp focused_implicit_captures_printable_key?(event, term) do
-    printable_key?(event) and
-      match?(%{captures_printable_keys: true}, current_focused_implicit_meta(term))
-  end
-
-  defp current_focused_implicit_meta(term) do
-    case focused_child_chain(term) do
-      [{child_id, %{pid: pid}} | _] ->
-        case safe_child_metadata(pid, focused: strip_live_prefix(term.focused, child_id)) do
-          %{focused_implicit_meta: meta} when is_map(meta) -> meta
-          _ -> %{}
-        end
-
-      [] ->
-        focused_implicit_meta(term, term.focused)
-    end
-  end
-
   defp printable_key?(%{"key" => key} = event) when is_binary(key) do
     batched_printable_event?(event) or
       (not truthy_modifier?(Map.get(event, "ctrlKey")) and
@@ -919,6 +969,43 @@ defmodule Breeze.ChildServer do
           put_in(acc.children[id], start_child!(id, attrs, acc))
       end
     end)
+  end
+
+  defp put_child_themes(term, theme_input) do
+    Enum.each(term.children, fn
+      {_id, %{pid: pid}} when is_pid(pid) ->
+        if Process.alive?(pid) do
+          :ok =
+            Breeze.ChildServer.put_theme(pid, theme_input,
+              apply_theme_defaults?: term.apply_theme_defaults?,
+              notify?: false
+            )
+        end
+
+      _child ->
+        :ok
+    end)
+
+    term
+  end
+
+  defp cascade_theme_if_changed(next_term, previous_term) do
+    if theme_changed?(next_term, previous_term) do
+      put_child_themes(next_term, next_term.theme_source || next_term.theme)
+    else
+      next_term
+    end
+  end
+
+  defp theme_changed?(next_term, previous_term) do
+    next_term.theme != previous_term.theme or next_term.theme_source != previous_term.theme_source or
+      next_term.apply_theme_defaults? != previous_term.apply_theme_defaults?
+  end
+
+  defp cascade_info_theme_change(next_term, previous_term) do
+    next_term
+    |> sync_theme_assigns()
+    |> cascade_theme_if_changed(previous_term)
   end
 
   defp start_child!(id, attrs, term) do
@@ -1253,7 +1340,12 @@ defmodule Breeze.ChildServer do
       |> apply_focus_transitions(next_term)
 
     maybe_probe_system_theme(next_term.theme, next_term.terminal, next_term.server)
-    next_term = sync_theme_assigns(next_term)
+
+    next_term =
+      next_term
+      |> sync_theme_assigns()
+      |> cascade_theme_if_changed(term)
+
     maybe_notify_invalidate(next_term, opts)
     {:reply, {:noreply, next_term.focused, next_term != term}, next_term}
   end
@@ -1269,6 +1361,7 @@ defmodule Breeze.ChildServer do
       term
       |> apply_focus_transitions(next_term)
       |> sync_theme_assigns()
+      |> cascade_theme_if_changed(term)
 
     maybe_notify_invalidate(next_term, opts)
     {:stop, :normal, {:stop, next_term.focused, true}, next_term}

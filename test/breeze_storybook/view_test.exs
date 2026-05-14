@@ -354,6 +354,107 @@ defmodule Breeze.Storybook.ViewTest do
     assert plain_content =~ "Debug"
   end
 
+  test "F3 cycles the storybook theme" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    {:ok, pid} =
+      Breeze.ChildServer.start(
+        view: Breeze.Storybook.View,
+        terminal: terminal,
+        theme: Breeze.Theme.builtin(:gruvbox)
+      )
+
+    assert Breeze.ChildServer.metadata(pid).theme.name == "gruvbox-dark"
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    child = :sys.get_state(pid).children["storybook-preview"].pid
+    assert Breeze.ChildServer.metadata(child).theme.name == "gruvbox-dark"
+
+    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "F3")
+
+    metadata = Breeze.ChildServer.metadata(pid)
+    assert metadata.theme.name == "nord"
+    assert metadata.assigns.breeze.theme.name == :nord
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert Breeze.ChildServer.metadata(child).theme.name == "nord"
+  end
+
+  test "F3 cycles the storybook theme while focus is inside the preview" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    {:ok, pid} =
+      Breeze.ChildServer.start(
+        view: Breeze.Storybook.View,
+        terminal: terminal,
+        theme: Breeze.Theme.builtin(:gruvbox)
+      )
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert {:noreply, "storybook-preview::storybook-button-primary", true} =
+             Breeze.ChildServer.set_focus(pid, "storybook-preview::storybook-button-primary")
+
+    assert {:noreply, "storybook-preview::storybook-button-primary", true} =
+             Breeze.ChildServer.dispatch_input(pid, "F3")
+
+    assert Breeze.ChildServer.metadata(pid).theme.name == "nord"
+  end
+
+  test "server lets storybook F3 run before focused preview live child input" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: Breeze.Storybook.View,
+        terminal: terminal,
+        theme: Breeze.Theme.builtin(:gruvbox)
+      )
+
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+
+    view_pid = :sys.get_state(pid).view_pid
+
+    wait_until(fn ->
+      Map.has_key?(:sys.get_state(pid).children, "storybook-preview")
+    end)
+
+    assert {:noreply, "storybook-preview::storybook-button-primary", true} =
+             Breeze.ChildServer.set_focus(view_pid, "storybook-preview::storybook-button-primary")
+
+    send(pid, :child_invalidated)
+
+    wait_until(fn ->
+      :sys.get_state(pid).focused == "storybook-preview::storybook-button-primary"
+    end)
+
+    send(pid, {terminal.reader, {:data, "\e[13~"}})
+
+    wait_until(fn ->
+      Breeze.ChildServer.metadata(view_pid).theme.name == "nord"
+    end)
+  end
+
+  test "F4 toggles the inspector in the storybook server" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: Breeze.Storybook.View,
+        terminal: terminal,
+        inspector: true
+      )
+
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+
+    refute :sys.get_state(pid).inspector_state.visible?
+
+    send(pid, {terminal.reader, {:data, "\e[S"}})
+
+    wait_until(fn ->
+      :sys.get_state(pid).inspector_state.visible?
+    end)
+  end
+
   test "list story renders variant tabs below the description and switches variants" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
