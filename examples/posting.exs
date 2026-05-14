@@ -3,8 +3,6 @@ defmodule Posting do
   use Breeze.View
   import Breeze.Blocks
 
-  alias Breeze.Theme
-
   @methods ["GET", "POST", "PUT", "PATCH", "DELETE"]
   @collection [
     {"echo_get", "GET  echo"},
@@ -32,7 +30,7 @@ defmodule Posting do
 
     term =
       term
-      |> Breeze.View.put_theme(Theme.builtin(:gruvbox))
+      |> switch_theme(:gruvbox)
       |> focus("url")
       |> put_local_keybindings(base_keybindings())
       |> put_focus_keybindings("request-header-name", [{"Enter", "Next"}])
@@ -49,9 +47,6 @@ defmodule Posting do
         user_host: user_host,
         request_tab: "headers",
         response_tab: "body",
-        theme_mode: :gruvbox,
-        actual_theme_mode: term.theme.mode,
-        theme_status: Breeze.Theme.probe_status(term.theme) || :ready,
         show_debug: System.get_env("BREEZE_DEBUG") == "1",
         show_help: false,
         request_headers: [],
@@ -71,7 +66,9 @@ defmodule Posting do
             <box class="inline width-full height-1">
               <box class="bold text-primary">Req It Ralph</box>
               <box class="text-muted"> 0.0.1</box>
-              <box class="text-muted"> {@theme_mode}/{@actual_theme_mode} ({@theme_status})</box>
+              <box class="text-muted">
+                {" "}{@breeze.theme.name}/{@breeze.theme.actual_mode} ({@breeze.theme.status})
+              </box>
               <box class="width-full text-right text-muted">{@user_host}</box>
             </box>
           </box>
@@ -271,7 +268,7 @@ defmodule Posting do
         </box>
         <box class="inline">
           <box class="width-8 bg-primary text-bg bold">{" Theme "}</box>
-          <box>{@theme_mode}</box>
+          <box>{@breeze.theme.name}</box>
         </box>
       </.modal>
       <box :if={@show_debug} style="fixed right-0 bottom-0 width-42 height-24">
@@ -323,21 +320,6 @@ defmodule Posting do
   def handle_event(_, %{"key" => "F2"}, term),
     do: {:noreply, assign(term, show_debug: !term.assigns.show_debug)}
 
-  def handle_event(_, %{"key" => "F3"}, term) do
-    {theme_mode, theme} =
-      next_theme(term.assigns.theme_mode || :solarized_dark)
-
-    term = Breeze.View.put_theme(term, theme)
-
-    {:noreply,
-     term
-     |> assign(
-       theme_mode: theme_mode,
-       actual_theme_mode: term.theme.mode,
-       theme_status: Breeze.Theme.probe_status(term.theme) || :ready
-     )}
-  end
-
   def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
   def handle_event(_, _, term), do: {:noreply, term}
 
@@ -360,16 +342,6 @@ defmodule Posting do
       |> focus("request-header-name")
     end
   end
-
-  defp next_theme(:system16), do: {:system, :system}
-  defp next_theme(:system), do: {:nebula, Theme.builtin(:nebula)}
-  defp next_theme(:nebula), do: {:catppuccin, Theme.builtin(:catppuccin)}
-  defp next_theme(:catppuccin), do: {:dracula, Theme.builtin(:dracula)}
-  defp next_theme(:dracula), do: {:gruvbox, Theme.builtin(:gruvbox)}
-  defp next_theme(:gruvbox), do: {:nord, Theme.builtin(:nord)}
-  defp next_theme(:nord), do: {:solarized_light, Theme.builtin(:solarized, :light)}
-  defp next_theme(:solarized_light), do: {:solarized_dark, Theme.builtin(:solarized, :dark)}
-  defp next_theme(_theme_mode), do: {:system16, :system16}
 
   defp current_user_host do
     case Application.get_env(:breeze, :example_user_host) do
@@ -427,5 +399,8 @@ Breeze.Example.run(
   hide_cursor: true,
   mouse: [mode: :motion],
   inspector: true,
-  global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+  global_keybindings: [
+    {"F3", "Cycle theme", &Breeze.View.cycle_theme/2},
+    {"q", fn _event, term -> {:stop, term} end}
+  ]
 )

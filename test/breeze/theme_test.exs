@@ -72,6 +72,33 @@ defmodule Breeze.ThemeTest do
     assert Theme.default_style(theme).border_color == 7
   end
 
+  test "default_cycle lists the standard named themes" do
+    assert Theme.default_cycle() == [
+             :system16,
+             :system,
+             :nebula,
+             :catppuccin,
+             :dracula,
+             :gruvbox,
+             :nord,
+             :solarized_light,
+             :solarized_dark
+           ]
+  end
+
+  test "resolve_theme resolves special and built-in named themes" do
+    assert Theme.resolve_theme(:system16) == {:system16, :system16}
+    assert Theme.resolve_theme(:system) == {:system, :system}
+    assert {:gruvbox, %Theme{name: "gruvbox-dark"}} = Theme.resolve_theme(:gruvbox)
+  end
+
+  test "next_theme advances through a theme cycle" do
+    assert {:nord, %Theme{name: "nord"}} = Theme.next_theme(:gruvbox)
+    assert {:system16, :system16} = Theme.next_theme(:solarized_dark)
+    assert {:system16, :system16} = Theme.next_theme(:missing)
+    assert Theme.next_theme(:missing, []) == nil
+  end
+
   test "system derives colors from the terminal palette" do
     theme =
       Theme.system(

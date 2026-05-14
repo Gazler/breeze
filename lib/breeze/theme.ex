@@ -53,6 +53,40 @@ defmodule Breeze.Theme do
   def builtin(name, variant \\ nil),
     do: Breeze.Theme.Builtin.fetch!(name, variant)
 
+  @spec default_cycle() :: [atom()]
+  def default_cycle do
+    [
+      :system16,
+      :system,
+      :nebula,
+      :catppuccin,
+      :dracula,
+      :gruvbox,
+      :nord,
+      :solarized_light,
+      :solarized_dark
+    ]
+  end
+
+  @spec resolve_theme(atom() | {term(), term()}) :: {term(), term()}
+  def resolve_theme({name, theme}), do: {name, theme}
+  def resolve_theme(:system16), do: {:system16, :system16}
+  def resolve_theme(:system), do: {:system, :system}
+  def resolve_theme(name) when is_atom(name), do: {name, builtin(name)}
+
+  @spec next_theme(term(), [atom() | {term(), term()}]) :: {term(), term()} | nil
+  def next_theme(current, themes \\ default_cycle()) when is_list(themes) do
+    case Enum.map(themes, &resolve_theme/1) do
+      [] ->
+        nil
+
+      entries ->
+        index = Enum.find_index(entries, fn {name, _theme} -> name == current end)
+        next_index = if is_integer(index), do: rem(index + 1, length(entries)), else: 0
+        Enum.at(entries, next_index)
+    end
+  end
+
   @spec defaults_enabled?(term()) :: boolean()
   def defaults_enabled?(theme), do: theme not in [nil, false]
 

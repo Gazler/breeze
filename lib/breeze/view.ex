@@ -721,6 +721,95 @@ defmodule Breeze.View do
   end
 
   @doc """
+  Set a named theme and update `assigns.breeze.theme` metadata.
+
+  The theme can be one of Breeze's built-in cycle names (`:system16`, `:system`,
+  `:nebula`, `:catppuccin`, `:dracula`, `:gruvbox`, `:nord`,
+  `:solarized_light`, or `:solarized_dark`) or a `{name, theme}` tuple.
+  """
+  @spec switch_theme(map(), atom() | {term(), term()}, keyword()) :: map()
+  def switch_theme(%{theme: _} = term, theme, opts \\ []) when is_list(opts) do
+    {name, theme} = Breeze.Theme.resolve_theme(theme)
+
+    term
+    |> put_theme(theme)
+    |> put_breeze_theme_metadata(name, opts)
+  end
+
+  @doc """
+  Cycle through Breeze's standard theme set.
+
+  This can be used directly as a global keybinding handler:
+
+      global_keybindings: [{"F3", "Cycle theme", &Breeze.View.cycle_theme/2}]
+
+  For custom cycles, pass `:themes` with a list of built-in names or
+  `{name, theme}` tuples.
+  """
+  @spec cycle_theme(map(), keyword()) :: map()
+  def cycle_theme(%{theme: _} = term), do: cycle_theme(term, [])
+
+  def cycle_theme(%{theme: _} = term, opts) when is_list(opts) do
+    current = current_theme_name(term, opts)
+
+    case Breeze.Theme.next_theme(
+           current,
+           Keyword.get(opts, :themes, Breeze.Theme.default_cycle())
+         ) do
+      nil ->
+        term
+
+      {name, theme} ->
+        term
+        |> put_theme(theme)
+        |> put_breeze_theme_metadata(name, opts)
+    end
+  end
+
+  def cycle_theme(_event, %{theme: _} = term), do: {:noreply, cycle_theme(term)}
+
+  def cycle_theme(_event, %{theme: _} = term, opts) when is_list(opts),
+    do: {:noreply, cycle_theme(term, opts)}
+
+  defp current_theme_name(term, opts) do
+    Keyword.get(opts, :current) ||
+      get_in(term.assigns, [:breeze, :theme, :name]) ||
+      get_in(term.assigns, [Keyword.get(opts, :mode_assign, :theme_mode)]) ||
+      theme_source_name(term.theme_source)
+  end
+
+  defp theme_source_name(:system16), do: :system16
+  defp theme_source_name(:system), do: :system
+  defp theme_source_name(_theme_source), do: nil
+
+  defp put_breeze_theme_metadata(term, name, opts) do
+    if Keyword.get(opts, :assign, true) do
+      update_in(term.assigns, fn assigns ->
+        breeze =
+          assigns
+          |> Map.get(:breeze, %{})
+          |> then(fn
+            value when is_map(value) -> value
+            _ -> %{}
+          end)
+          |> Map.put(:theme, theme_metadata(term, name))
+
+        Map.put(assigns, :breeze, breeze)
+      end)
+    else
+      term
+    end
+  end
+
+  defp theme_metadata(term, name) do
+    %{
+      name: name,
+      actual_mode: term.theme.mode,
+      status: Breeze.Theme.probe_status(term.theme) || :ready
+    }
+  end
+
+  @doc """
   Reset the implicit state for the given element ID, causing it to reinitialise
   on the next render.
   """

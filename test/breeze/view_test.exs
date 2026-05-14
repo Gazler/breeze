@@ -3,6 +3,18 @@ defmodule Breeze.ViewTest do
 
   import Breeze.View
 
+  defmodule BreezeAssignsView do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box>{@breeze.theme.name}/{@breeze.theme.actual_mode}/{@breeze.theme.status}</box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
   test "update_implicit updates an existing implicit state" do
     term = %{
       implicit_state: %{
@@ -39,5 +51,45 @@ defmodule Breeze.ViewTest do
     assert updated.focus_keybindings == %{
              "editor" => [%{key: "Enter", label: "Save", handler: nil}]
            }
+  end
+
+  test "switch_theme applies a named theme and standard Breeze metadata assigns" do
+    term = %Breeze.Term{assigns: %{}}
+
+    updated = switch_theme(term, :gruvbox)
+
+    assert updated.assigns.breeze.theme == %{
+             name: :gruvbox,
+             actual_mode: :custom,
+             status: :ready
+           }
+
+    assert updated.theme.name == "gruvbox-dark"
+  end
+
+  test "cycle_theme advances through the default theme cycle" do
+    term =
+      %Breeze.Term{assigns: %{}}
+      |> switch_theme(:gruvbox)
+      |> cycle_theme()
+
+    assert term.assigns.breeze.theme.name == :nord
+    assert term.theme.name == "nord"
+  end
+
+  test "cycle_theme can be used directly as a keybinding handler" do
+    term = %Breeze.Term{assigns: %{}} |> switch_theme(:solarized_dark)
+
+    assert {:noreply, updated} = cycle_theme(%{"key" => "F3"}, term)
+    assert updated.assigns.breeze.theme.name == :system16
+    assert updated.theme.mode == :system16
+  end
+
+  test "rendering exposes theme metadata in the Breeze assigns namespace" do
+    session = Breeze.Test.start!(BreezeAssignsView, theme: Breeze.Theme.builtin(:gruvbox))
+
+    assert Breeze.Test.render!(session) =~ "gruvbox-dark/custom/ready"
+
+    Breeze.Test.stop(session)
   end
 end

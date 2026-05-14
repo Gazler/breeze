@@ -292,6 +292,7 @@ defmodule Breeze.ChildServer do
       assigns
       |> maybe_put_theme_assign(:theme_status, Breeze.Theme.probe_status(theme) || :ready)
       |> maybe_put_theme_assign(:actual_theme_mode, theme.mode)
+      |> put_breeze_assign(:theme, breeze_theme_assign(term))
       |> put_breeze_assign(:keybindings, active_keybindings(term))
 
     %{term | assigns: assigns}
@@ -319,6 +320,17 @@ defmodule Breeze.ChildServer do
       breeze when is_map(breeze) -> Map.put(breeze, key, value)
       _ -> %{key => value}
     end)
+  end
+
+  defp breeze_theme_assign(%{theme: theme, assigns: assigns}) do
+    current = get_in(assigns, [:breeze, :theme]) || %{}
+    name = Map.get(current, :name) || Map.get(current, "name") || theme.name || theme.mode
+
+    %{
+      name: name,
+      actual_mode: theme.mode,
+      status: Breeze.Theme.probe_status(theme) || :ready
+    }
   end
 
   defp render_term(term, opts) do
