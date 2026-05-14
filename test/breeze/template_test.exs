@@ -94,6 +94,29 @@ defmodule Breeze.TemplateTest do
     end
   end
 
+  defmodule SlotLetView do
+    use Breeze.View
+
+    attr :rows, :list, default: []
+    slot :col
+
+    def table(assigns) do
+      ~H"""
+      <box>
+        <box :for={row <- @rows}>{render_slot(@col, row)}</box>
+      </box>
+      """
+    end
+
+    def render(assigns) do
+      ~H"""
+      <.table rows={@rows}>
+        <:col :let={row}>{row.name}</:col>
+      </.table>
+      """
+    end
+  end
+
   defmodule PrivateComponentView do
     use Breeze.View
 
@@ -146,6 +169,11 @@ defmodule Breeze.TemplateTest do
     test "supports named slots, :for on slots, and render_slot assigns" do
       assert render(SlotView, %{labels: ["a", "b"]}) ==
                "<box><box>a:a!</box><box>b:b!</box></box>"
+    end
+
+    test "supports :let on slots" do
+      assert render(SlotLetView, %{rows: [%{name: "Ada"}, %{name: "Grace"}]}) ==
+               "<box><box>Ada</box><box>Grace</box></box>"
     end
 
     test "supports private function components" do

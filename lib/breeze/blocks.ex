@@ -470,6 +470,165 @@ defmodule Breeze.Blocks do
     """
   end
 
+  attr :id, :string, required: true
+  attr :rows, :list, default: []
+  attr :selected, :any, default: nil
+  attr :row_value, :any, default: :id
+  attr :loop, :boolean, default: true
+  attr :scroll_padding, :integer, default: 0
+  attr :empty, :string, default: "No rows"
+  attr :rest, :global
+
+  slot :col do
+    attr :label, :string, default: nil
+    attr :width, :integer, default: nil
+    attr :align, :any, default: "left"
+    attr :class, :string, default: nil
+    attr :style, :any, default: nil
+  end
+
+  def table(assigns) do
+    rows = Map.get(assigns, :rows, [])
+    columns = normalize_table_columns(assigns.col, rows)
+    rows = normalize_table_rows(rows, columns, Map.get(assigns, :row_value, :id))
+
+    assigns =
+      assigns
+      |> assign(columns: columns)
+      |> assign(rows: rows)
+      |> assign(cell_class: "height-1 overflow-hidden selected:bg-primary selected:text-bg")
+
+    ~H"""
+    <box
+      class="border width-full height-8 overflow-hidden bg-panel focus:border-primary"
+      focus-within="true"
+    >
+      <box
+        :if={@columns != []}
+        class="inline width-full height-1 overflow-hidden bold bg-emphasize-20"
+      >
+        <box :for={column <- @columns} class={column.header_class}>{column.label}</box>
+      </box>
+      <box
+        id={@id}
+        focusable
+        implicit={Breeze.Implicit.List}
+        list-loop={@loop}
+        list-selected={@selected}
+        list-scroll-padding={@scroll_padding}
+        class="height-full width-full overflow-scroll scrollbar-arrows focus:scrollbar-primary"
+        {@rest}
+      >
+        <box :if={@rows == []} class="width-full height-1 text-muted">{@empty}</box>
+        <box
+          :for={row <- @rows}
+          value={row.value}
+          focus-with-owner
+          class="inline width-full height-1 overflow-hidden selected:bg-primary selected:text-bg"
+        >
+          <box
+            :for={cell <- row.cells}
+            selected-with-owner
+            class={Breeze.Blocks.merge_class(@cell_class, cell.class)}
+            style={cell.style}
+          >
+            {render_slot(cell.slot, cell.row)}
+          </box>
+        </box>
+      </box>
+    </box>
+    """
+  end
+
+  defp normalize_table_columns(columns, rows) do
+    columns =
+      Enum.map(columns, fn column ->
+        %{
+          slot: column,
+          label: Map.get(column, :label) || "",
+          width: Map.get(column, :width),
+          align: normalize_align(Map.get(column, :align, "left")),
+          class: Map.get(column, :class),
+          style: Map.get(column, :style)
+        }
+      end)
+
+    Enum.map(columns, fn column ->
+      width = column.width || inferred_table_column_width(column, rows)
+      align_class = table_align_class(column.align)
+
+      column
+      |> Map.put(:width, width)
+      |> Map.put(
+        :header_class,
+        "width-#{width} padding-left-1 padding-right-1 overflow-hidden #{align_class}"
+      )
+      |> Map.put(
+        :cell_class,
+        "width-#{width} padding-left-1 padding-right-1 overflow-hidden #{align_class}"
+      )
+    end)
+  end
+
+  defp inferred_table_column_width(column, rows) do
+    rows
+    |> Enum.map(fn row -> render_slot(column.slot, row) |> Ucwidth.width() end)
+    |> Kernel.++([Ucwidth.width(column.label), 4])
+    |> Enum.max()
+  end
+
+  defp normalize_table_rows(rows, columns, row_value) do
+    Enum.map(rows, fn row ->
+      %{
+        value: table_row_value(row, row_value),
+        cells:
+          Enum.map(columns, fn column ->
+            %{
+              slot: column.slot,
+              row: row,
+              class: merge_class(column.cell_class, column.class),
+              style: column.style
+            }
+          end)
+      }
+    end)
+  end
+
+  defp table_row_value(row, fun) when is_function(fun, 1), do: fun.(row)
+
+  defp table_row_value(row, nil), do: row
+
+  defp table_row_value(row, key) when is_atom(key) or is_binary(key) do
+    table_row_lookup(row, key, row)
+  end
+
+  defp table_row_value(row, _row_value), do: row
+
+  defp table_row_lookup(row, key, default) when is_map(row) do
+    Map.get(row, key) || Map.get(row, to_string(key)) || Map.get(row, key_to_existing_atom(key)) ||
+      default
+  end
+
+  defp table_row_lookup(_row, _key, default), do: default
+
+  defp key_to_existing_atom(key) when is_atom(key), do: key
+
+  defp key_to_existing_atom(key) when is_binary(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp key_to_existing_atom(_key), do: nil
+
+  defp normalize_align(value) when value in [:right, "right"], do: :right
+  defp normalize_align(value) when value in [:center, "center"], do: :center
+  defp normalize_align(_value), do: :left
+
+  defp table_align_class(:right), do: "text-right"
+  defp table_align_class(:center), do: "text-center"
+  defp table_align_class(_align), do: "text-left"
+
   attr :id, :string, default: nil
   attr :focusable, :boolean, default: true
   attr :class, :string, default: nil

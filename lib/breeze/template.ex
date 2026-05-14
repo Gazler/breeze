@@ -165,12 +165,19 @@ defmodule Breeze.Template do
     slot_assigns = normalize_assigns(slot_assigns)
 
     Enum.flat_map(slots, fn
+      %{__breeze_slot_raw__: {children, slot_ctx, let_pattern}} ->
+        nodes_to_tree(children, slot_ctx |> put_slot_vars(slot_assigns, let_pattern))
+
       %{__breeze_slot_raw__: {children, slot_ctx}} ->
         nodes_to_tree(children, %{slot_ctx | vars: Map.merge(slot_ctx.vars, slot_assigns)})
 
       _ ->
         []
     end)
+  end
+
+  defp expand_slot(%{__breeze_slot_raw__: {children, slot_ctx, let_pattern}}, slot_assigns, _ctx) do
+    nodes_to_tree(children, slot_ctx |> put_slot_vars(slot_assigns, let_pattern))
   end
 
   defp expand_slot(%{__breeze_slot_raw__: {children, slot_ctx}}, slot_assigns, _ctx) do
@@ -345,7 +352,7 @@ defmodule Breeze.Template do
             expand_for(directives[:for], ctx)
             |> Enum.flat_map(fn slot_ctx ->
               if render_if?(directives[:if], slot_ctx) do
-                [slot_entry(slot_attrs, slot_children, slot_ctx)]
+                [slot_entry(slot_attrs, slot_children, slot_ctx, directives[:let])]
               else
                 []
               end
@@ -366,18 +373,17 @@ defmodule Breeze.Template do
     end
   end
 
-  defp slot_entry(attrs, children, ctx) do
+  defp slot_entry(attrs, children, ctx, let_pattern \\ nil) do
     slot_attrs = eval_component_attrs(attrs, ctx) |> Map.new()
 
     render_fun = fn args ->
-      args = normalize_assigns(args)
-      slot_ctx = %{ctx | vars: Map.merge(ctx.vars, args)}
+      slot_ctx = put_slot_vars(ctx, args, let_pattern)
       render_nodes(children, slot_ctx)
     end
 
     slot_attrs
     |> Map.put(:__breeze_slot__, render_fun)
-    |> Map.put(:__breeze_slot_raw__, {children, ctx})
+    |> Map.put(:__breeze_slot_raw__, {children, ctx, let_pattern})
   end
 
   defp eval_html_attrs(attrs, ctx) do
@@ -579,6 +585,23 @@ defmodule Breeze.Template do
   defp normalize_assigns(assigns) when is_list(assigns), do: Map.new(assigns)
   defp normalize_assigns(_assigns), do: %{}
 
+  defp put_slot_vars(ctx, assigns, nil) do
+    %{ctx | vars: Map.merge(ctx.vars, normalize_assigns(assigns))}
+  end
+
+  defp put_slot_vars(ctx, assigns, let_pattern) do
+    pattern_expr =
+      case let_pattern do
+        {_pattern_string, pattern_expr} -> pattern_expr
+        pattern_expr -> pattern_expr
+      end
+
+    case bind_for_pattern(pattern_expr, assigns, ctx) do
+      {:ok, vars} -> %{ctx | vars: vars}
+      :error -> %{ctx | vars: ctx.vars}
+    end
+  end
+
   defp parse_nodes("", nil, _env, acc), do: {Enum.reverse(acc), ""}
 
   defp parse_nodes("", closing, _env, _acc) do
@@ -636,7 +659,7 @@ defmodule Breeze.Template do
     end
 
     {attrs, directives, self_closing?, rest} =
-      parse_attributes(rest, env, [], %{for: nil, if: nil})
+      parse_attributes(rest, env, [], %{for: nil, if: nil, let: nil})
 
     {name, attrs, directives, self_closing?, rest}
   end
@@ -678,6 +701,9 @@ defmodule Breeze.Template do
 
           {:directive, :for, expr} ->
             parse_attributes(rest, env, attrs, %{directives | for: expr})
+
+          {:directive, :let, expr} ->
+            parse_attributes(rest, env, attrs, %{directives | let: expr})
 
           _ ->
             parse_attributes(rest, env, [attr | attrs], directives)
@@ -733,12 +759,20 @@ defmodule Breeze.Template do
      {pattern, compile_for_pattern(pattern, env), compile_expr(enumerable, env)}}
   end
 
+  defp build_attribute(":let", {:dynamic, expr}, env) do
+    {:directive, :let, {String.trim(expr), compile_for_pattern(expr, env)}}
+  end
+
   defp build_attribute(":if", _other, _env) do
     raise "the :if directive requires an expression, e.g. :if={...}"
   end
 
   defp build_attribute(":for", _other, _env) do
     raise "the :for directive requires an expression, e.g. :for={x <- ...}"
+  end
+
+  defp build_attribute(":let", _other, _env) do
+    raise "the :let directive requires an expression, e.g. :let={item}"
   end
 
   defp build_attribute(name, {:dynamic, expr}, env) do
