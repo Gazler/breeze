@@ -1150,7 +1150,6 @@ defmodule Breeze.Server do
     {output, decorations} =
       apply_decorations(state.frame.base_output, state.frame.decorations, state)
 
-    output = strip_private_use_chars(output)
     overlays = terminal_overlays(decorations, state)
 
     lines =
@@ -1290,13 +1289,6 @@ defmodule Breeze.Server do
       id: decoration.id,
       layout: decoration[:layout]
     }
-  end
-
-  defp strip_private_use_chars(output) do
-    output
-    |> String.to_charlist()
-    |> Enum.reject(&(&1 in 0xE000..0xF8FF))
-    |> List.to_string()
   end
 
   defp rendered_fragment(box, state, layout) do

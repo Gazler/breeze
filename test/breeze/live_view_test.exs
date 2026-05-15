@@ -150,6 +150,21 @@ defmodule Breeze.LiveViewTest do
     end
   end
 
+  defmodule PrivateUseGlyphRoot do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-24 height-2">
+        <box> _build</box>
+        <box>󰂺 README.md</box>
+      </box>
+      """
+    end
+  end
+
   defmodule HeaderedLiveChild do
     use Breeze.View
 
@@ -870,6 +885,31 @@ defmodule Breeze.LiveViewTest do
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: nil, implicit_state: %{})
     assert box.content =~ "Frame: 1"
+  end
+
+  test "server preserves private-use glyphs in terminal output" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: PrivateUseGlyphRoot,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+
+    payload =
+      wait_until(fn ->
+        writes = drain_terminal_writes()
+
+        if Enum.any?(writes, &String.contains?(&1, "")) do
+          IO.iodata_to_binary(writes)
+        end
+      end)
+
+    assert payload =~ " _build"
+    assert payload =~ "󰂺 README.md"
   end
 
   test "server starts nested live children that appear after an event" do
