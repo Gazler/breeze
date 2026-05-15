@@ -62,8 +62,6 @@ defmodule Breeze.KeyDecoder do
   defp convert_csi("4~"), do: "End"
   defp convert_csi("5~"), do: "PageUp"
   defp convert_csi("6~"), do: "PageDown"
-  defp convert_csi("8;5u"), do: %{"ctrlKey" => true, "key" => "Backspace"}
-  defp convert_csi("127;5u"), do: %{"ctrlKey" => true, "key" => "w"}
 
   defp convert_csi(sequence) do
     case decode_modified_csi(sequence) do
@@ -183,10 +181,13 @@ defmodule Breeze.KeyDecoder do
   defp decode_tilde_key(21), do: "F10"
   defp decode_tilde_key(23), do: "F11"
   defp decode_tilde_key(24), do: "F12"
+  defp decode_tilde_key(127), do: "Backspace"
   defp decode_tilde_key(_codepoint), do: nil
 
+  defp decode_csi_u_key(8), do: "Backspace"
   defp decode_csi_u_key(9), do: "\t"
   defp decode_csi_u_key(13), do: "Enter"
+  defp decode_csi_u_key(127), do: "Backspace"
   defp decode_csi_u_key(codepoint) when codepoint in 57376..57398, do: "F#{codepoint - 57363}"
 
   defp decode_csi_u_key(codepoint) when codepoint in 32..0x10FFFF do
