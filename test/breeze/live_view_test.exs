@@ -1988,6 +1988,24 @@ defmodule Breeze.LiveViewTest do
              Breeze.GlobalKeybindings.dispatch(event, term)
   end
 
+  test "global stop keybindings win over inspector movement keys" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: CounterChild,
+        terminal: terminal,
+        global_keybindings: [{"F10", fn _event, term -> {:stop, term} end}]
+      )
+
+    ref = Process.monitor(pid)
+
+    send(pid, {reader, {:data, "\e[21~"}})
+
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+  end
+
   defp drain_terminal_writes(writes \\ []) do
     receive do
       {:terminal_write, str} -> drain_terminal_writes([str | writes])

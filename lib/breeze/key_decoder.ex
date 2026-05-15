@@ -119,11 +119,20 @@ defmodule Breeze.KeyDecoder do
   end
 
   defp decode_tilde_csi(sequence) do
-    with [_, codepoint, modifier] <- Regex.run(~r/^(\d+)(?:;(\d+)(?::\d+)?)?~$/, sequence) do
-      codepoint
-      |> to_int()
-      |> decode_tilde_key()
-      |> maybe_with_modifiers(modifier)
+    case Regex.run(~r/^(\d+)(?:;(\d+)(?::\d+)?)?~$/, sequence) do
+      [_, codepoint] ->
+        codepoint
+        |> to_int()
+        |> decode_tilde_key()
+
+      [_, codepoint, modifier] ->
+        codepoint
+        |> to_int()
+        |> decode_tilde_key()
+        |> maybe_with_modifiers(modifier)
+
+      _ ->
+        nil
     end
   end
 

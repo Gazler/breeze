@@ -21,6 +21,11 @@ defmodule Breeze.KeyDecoderTest do
     assert Breeze.KeyDecoder.decode("\e[1;2S") == %{"shiftKey" => true, "key" => "F4"}
   end
 
+  test "decodes tilde function keys without modifiers" do
+    assert Breeze.KeyDecoder.decode("\e[21~") == "F10"
+    assert Breeze.KeyDecoder.decode("\e[21;1~") == "F10"
+  end
+
   test "decodes kitty private-use function keys" do
     assert Breeze.KeyDecoder.decode("\e[57376u") == "F13"
     assert Breeze.KeyDecoder.decode("\e[57376;2u") == %{"shiftKey" => true, "key" => "F13"}

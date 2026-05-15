@@ -572,11 +572,16 @@ defmodule Breeze.Server do
 
   defp sync_key_action(key, state) do
     cond do
+      stop_global_key?(key, state) -> :global_stop
       Inspector.toggle_key?(key, state) -> :inspector_toggle
       Inspector.move_key?(key, state) -> :inspector_move
       tab_input?(key) -> :tab
       true -> :hierarchy
     end
+  end
+
+  defp handle_sync_key_action(state, :global_stop, _key) do
+    {:stop, state}
   end
 
   defp handle_sync_key_action(state, :inspector_toggle, _key) do
