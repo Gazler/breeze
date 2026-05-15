@@ -88,6 +88,9 @@ defmodule Breeze.ErrorView do
       {:key, key} when key in ["r", "R"] ->
         :restart
 
+      {:key, key} when key in ["q", "Q"] ->
+        :stop
+
       {:key, key} when key in ["y", "Y", "c", "C"] ->
         {:copy_details, crash}
 

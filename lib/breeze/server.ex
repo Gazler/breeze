@@ -1671,6 +1671,9 @@ defmodule Breeze.Server do
       :restart ->
         {:noreply, restart_root(state, :restart)}
 
+      :stop ->
+        {:stop, state}
+
       {:copy_details, crash} ->
         copy_or_print_crash_details(state, crash)
 

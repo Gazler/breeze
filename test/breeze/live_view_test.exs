@@ -1043,6 +1043,33 @@ defmodule Breeze.LiveViewTest do
     end)
   end
 
+  test "crash screen q quits the server" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+      reader = terminal.reader
+
+      {:ok, pid} =
+        Breeze.Server.start_app_link(
+          view: CrashingView,
+          terminal: terminal,
+          global_keybindings: [{"^c", "Quit", fn _event, term -> {:stop, term} end}]
+        )
+
+      ref = Process.monitor(pid)
+
+      send(pid, {reader, {:data, "c"}})
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+        state.crash && state.frame.base_output =~ "Breeze Error"
+      end)
+
+      send(pid, {reader, {:data, "q"}})
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    end)
+  end
+
   test "crash details text wraps to the details pane width" do
     crash = %{
       kind: :error,
