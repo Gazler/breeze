@@ -74,6 +74,38 @@ defmodule Breeze.TemplateTest do
     end
   end
 
+  defmodule ComponentDefaults do
+    use Breeze.View
+
+    attr :label, :string, default: "default label"
+    attr :enabled, :boolean, default: true
+    attr :rest, :global
+    slot :item
+
+    def badge(assigns) do
+      ~H|<box enabled={@enabled} {@rest}>{@label}:{render_slot(@item)}</box>|
+    end
+  end
+
+  defmodule ImportedComponentDefaultView do
+    use Breeze.View
+    import ComponentDefaults
+
+    def render(assigns) do
+      ~H|<.badge/>|
+    end
+  end
+
+  defmodule PrivateHelperView do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H|<box>{format_name(@name)}</box>|
+    end
+
+    defp format_name(name), do: String.upcase(name)
+  end
+
   defmodule SlotView do
     use Breeze.View
 
@@ -164,6 +196,14 @@ defmodule Breeze.TemplateTest do
       html = render(ComponentView, %{name: "joe"})
 
       assert html == ~s(<box class="wrapper" br-change="tick"><box>inner joe</box></box>)
+    end
+
+    test "applies attr and slot defaults for imported components" do
+      assert render(ImportedComponentDefaultView, %{}) == ~s(<box enabled>default label:</box>)
+    end
+
+    test "supports private helper calls inside templates" do
+      assert render(PrivateHelperView, %{name: "ada"}) == "<box>ADA</box>"
     end
 
     test "supports named slots, :for on slots, and render_slot assigns" do

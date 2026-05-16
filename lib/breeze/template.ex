@@ -58,6 +58,14 @@ defmodule Breeze.Template do
     |> Enum.uniq()
   end
 
+  def local_helper_captures(%__MODULE__{nodes: nodes}), do: local_helper_captures(nodes)
+
+  def local_helper_captures(nodes) when is_list(nodes) do
+    nodes
+    |> Enum.flat_map(&node_local_helper_captures/1)
+    |> Enum.uniq()
+  end
+
   def render(%__MODULE__{nodes: nodes, env: env}, assigns) do
     ctx = %{assigns: normalize_assigns(assigns), vars: %{}, env: env}
     render_nodes(nodes, ctx)
@@ -236,6 +244,84 @@ defmodule Breeze.Template do
       node, acc -> [node | acc]
     end)
     |> Enum.reverse()
+  end
+
+  defp node_local_helper_captures({:text, segments}) do
+    Enum.flat_map(segments, fn
+      {:expr, expr} -> expr_local_helper_captures(expr)
+      _ -> []
+    end)
+  end
+
+  defp node_local_helper_captures({:expr, expr}), do: expr_local_helper_captures(expr)
+
+  defp node_local_helper_captures({:element, _name, attrs, directives, children}) do
+    attr_helpers =
+      Enum.flat_map(attrs, fn
+        {:dynamic, _name, expr} -> expr_local_helper_captures(expr)
+        {:spread, expr} -> expr_local_helper_captures(expr)
+        _ -> []
+      end)
+
+    directive_helpers =
+      directives
+      |> Map.values()
+      |> Enum.flat_map(fn
+        nil ->
+          []
+
+        {_pattern, pattern_expr, enumerable_expr} ->
+          expr_local_helper_captures(pattern_expr) ++ expr_local_helper_captures(enumerable_expr)
+
+        {_pattern, pattern_expr} ->
+          expr_local_helper_captures(pattern_expr)
+
+        expr ->
+          expr_local_helper_captures(expr)
+      end)
+
+    attr_helpers ++ directive_helpers ++ local_helper_captures(children)
+  end
+
+  defp node_local_helper_captures(_node), do: []
+
+  defp expr_local_helper_captures(expr) do
+    {_expr, helpers} =
+      Macro.prewalk(expr, [], fn
+        {{:., _meta, [_module, :__breeze_eval_helper__]}, _call_meta, [name, arity, _args]} =
+            node,
+        helpers
+        when is_atom(name) and is_integer(arity) ->
+          {node, [{name, arity} | helpers]}
+
+        {name, _meta, args} = node, helpers when is_atom(name) and is_list(args) ->
+          helper = {name, length(args)}
+
+          if local_helper_capture?(helper) do
+            {node, [helper | helpers]}
+          else
+            {node, helpers}
+          end
+
+        node, helpers ->
+          {node, helpers}
+      end)
+
+    helpers
+  end
+
+  defp local_helper_capture?({name, arity}) do
+    local_helper_name?(name) and
+      not Macro.special_form?(name, arity) and
+      {name, arity} not in Kernel.__info__(:functions) and
+      {name, arity} not in Kernel.__info__(:macros) and
+      name not in [:__block__, :__aliases__, :render_slot]
+  end
+
+  defp local_helper_name?(name) do
+    name
+    |> Atom.to_string()
+    |> String.match?(~r/^[a-z_][a-zA-Z0-9_]*[?!]?$/)
   end
 
   defp annotate_component_nodes(nodes, label) do
@@ -988,7 +1074,28 @@ defmodule Breeze.Template do
     expr
     |> Code.string_to_quoted!(file: env.file, line: env.line)
     |> normalize_assign_refs()
+    |> wrap_local_helper_calls(env.module)
     |> simplify_expr()
+  end
+
+  defp wrap_local_helper_calls(ast, module) do
+    Macro.prewalk(ast, fn
+      {name, _meta, args} = node when is_atom(name) and is_list(args) ->
+        arity = length(args)
+
+        if local_helper_capture?({name, arity}) do
+          {{:., [], [module_alias(module), :__breeze_eval_helper__]}, [], [name, arity, args]}
+        else
+          node
+        end
+
+      node ->
+        node
+    end)
+  end
+
+  defp module_alias(module) do
+    {:__aliases__, [alias: false], module |> Module.split() |> Enum.map(&String.to_atom/1)}
   end
 
   defp simplify_expr(

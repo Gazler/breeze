@@ -266,6 +266,10 @@ defmodule Breeze.HTMLFormatter do
       when is_atom(name) ->
         {:@, [], [{name, [], nil}]}
 
+      {{:., _, [_module, :__breeze_eval_helper__]}, _, [name, _arity, args]}
+      when is_atom(name) and is_list(args) ->
+        {name, [], args}
+
       node ->
         node
     end)

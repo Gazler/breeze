@@ -263,6 +263,8 @@ defmodule Breeze.View do
       Module.register_attribute(__MODULE__, :__slot_attrs__, accumulate: true)
       Module.register_attribute(__MODULE__, :__slots__, accumulate: true)
       Module.register_attribute(__MODULE__, :__slot__, accumulate: false)
+      Module.register_attribute(__MODULE__, :__component_specs__, accumulate: true)
+      Module.register_attribute(__MODULE__, :__template_helper_captures__, accumulate: true)
       @on_definition Breeze.View
       @before_compile Breeze.View
     end
@@ -278,6 +280,10 @@ defmodule Breeze.View do
     template
     |> Breeze.Template.component_names()
     |> Enum.each(&Module.put_attribute(__CALLER__.module, :breeze_components, &1))
+
+    template
+    |> Breeze.Template.local_helper_captures()
+    |> Enum.each(&Module.put_attribute(__CALLER__.module, :__template_helper_captures__, &1))
 
     quote do
       _ = var!(assigns)
@@ -302,15 +308,77 @@ defmodule Breeze.View do
       |> Module.get_attribute(:breeze_components)
       |> Enum.uniq()
 
-    component_definitions =
-      Enum.map(components, fn component ->
+    component_specs = pop_component_specs(env)
+    helper_captures = pop_template_helper_captures(env)
+    component_spec_names = Enum.map(component_specs, & &1.name)
+    local_components = Enum.uniq(component_spec_names ++ local_component_names(env, components))
+
+    helper_definitions =
+      helper_captures
+      |> Enum.uniq()
+      |> Enum.map(fn {name, arity} ->
+        args = Macro.generate_arguments(arity, __MODULE__)
+
         quote do
-          def __breeze_component__(unquote(component), assigns), do: unquote(component)(assigns)
+          def __breeze_eval_helper__(unquote(name), unquote(arity), [unquote_splicing(args)]) do
+            unquote({name, [], args})
+          end
+        end
+      end)
+
+    local_component_definitions =
+      Enum.map(local_components, fn component ->
+        spec = Enum.find(component_specs, &(&1.name == component))
+
+        quote do
+          def __breeze_component__(unquote(component), assigns) do
+            assigns =
+              Breeze.View.__apply_component_defaults__(
+                assigns,
+                unquote(Macro.escape((spec && spec.attrs) || [])),
+                unquote(Macro.escape((spec && spec.slots) || []))
+              )
+
+            unquote(component)(assigns)
+          end
+        end
+      end)
+
+    imported_component_definitions =
+      components
+      |> Enum.reject(&(&1 in local_components))
+      |> Enum.map(fn component ->
+        imported_fun = Macro.var(component, nil)
+
+        case imported_component_module(env, component) do
+          nil ->
+            quote do
+              def __breeze_component__(unquote(component), assigns),
+                do: unquote(component)(assigns)
+            end
+
+          module ->
+            quote do
+              def __breeze_component__(unquote(component), assigns) do
+                _ = &(unquote(imported_fun) / 1)
+
+                if function_exported?(unquote(module), :__breeze_components__, 0) and
+                     unquote(component) in unquote(module).__breeze_components__() do
+                  unquote(module).__breeze_component__(unquote(component), assigns)
+                else
+                  apply(unquote(module), unquote(component), [assigns])
+                end
+              end
+            end
         end
       end)
 
     quote do
-      unquote_splicing(component_definitions)
+      unquote_splicing(helper_definitions)
+      unquote_splicing(local_component_definitions)
+      unquote_splicing(imported_component_definitions)
+
+      def __breeze_components__, do: unquote(local_components)
 
       def __breeze_component__(name, _assigns) do
         raise UndefinedFunctionError, module: __MODULE__, function: name, arity: 1
@@ -420,6 +488,8 @@ defmodule Breeze.View do
 
     if attrs != [] or slots != [] do
       if kind in [:def, :defp] and length(args) == 1 do
+        register_component_spec(env, name, slots, attrs)
+
         if kind == :def do
           register_component_doc(env, slots, attrs)
         end
@@ -445,6 +515,36 @@ defmodule Breeze.View do
         end)
       end
     end
+  end
+
+  @doc false
+  def __apply_component_defaults__(assigns, attrs, slots) do
+    assigns = Map.new(assigns || %{})
+
+    attrs
+    |> Enum.reduce(assigns, fn
+      %{type: :global, name: name}, acc ->
+        Map.put_new(acc, name, [])
+
+      %{name: name, opts: opts}, acc ->
+        case Keyword.fetch(opts, :default) do
+          {:ok, default} -> Map.put_new(acc, name, default)
+          :error -> acc
+        end
+    end)
+    |> then(fn assigns ->
+      Enum.reduce(slots, assigns, fn %{name: name}, acc ->
+        Map.put_new(acc, name, [])
+      end)
+    end)
+  end
+
+  defp register_component_spec(env, name, slots, attrs) do
+    Module.put_attribute(env.module, :__component_specs__, %{
+      name: name,
+      attrs: attrs,
+      slots: slots
+    })
   end
 
   defp register_component_doc(env, slots, attrs) do
@@ -613,6 +713,39 @@ defmodule Breeze.View do
 
   defp pop_slots(env),
     do: env.module |> Module.delete_attribute(:__slots__) |> List.wrap() |> Enum.reverse()
+
+  defp pop_component_specs(env),
+    do:
+      env.module
+      |> Module.delete_attribute(:__component_specs__)
+      |> List.wrap()
+      |> Enum.reverse()
+
+  defp pop_template_helper_captures(env),
+    do:
+      env.module
+      |> Module.delete_attribute(:__template_helper_captures__)
+      |> List.wrap()
+      |> Enum.reverse()
+
+  defp local_component_names(env, components) do
+    Enum.filter(components, fn component ->
+      Module.defines?(env.module, {component, 1}, :def) or
+        Module.defines?(env.module, {component, 1}, :defp)
+    end)
+  end
+
+  defp imported_component_module(env, component) do
+    Enum.find_value(env.functions, fn
+      {module, functions} ->
+        if module != Kernel and Enum.member?(Keyword.get_values(functions, component), 1) do
+          module
+        end
+
+      _ ->
+        nil
+    end)
+  end
 
   defp validate_misplaced_attrs!([], _file, _message_fun), do: :ok
 
