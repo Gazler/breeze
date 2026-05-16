@@ -286,6 +286,327 @@ defmodule Breeze.Blocks do
 
   defp list_variant_item_class(_), do: nil
 
+  attr :id, :string, required: true
+  attr :nodes, :list, default: []
+  attr :selected, :any, default: nil
+  attr :expanded, :any, default: nil
+  attr :default_expanded, :any, default: []
+  attr :node_value, :any, default: :id
+  attr :node_label, :any, default: :label
+  attr :node_children, :any, default: :children
+  attr :node_expandable, :any, default: :expandable?
+  attr :loop, :boolean, default: true
+  attr :scroll_padding, :integer, default: 1
+  attr :indent, :integer, default: 2
+  attr :collapsed_prefix, :string, default: ">"
+  attr :expanded_prefix, :string, default: "⌄"
+  attr :leaf_prefix, :string, default: " "
+  attr :variant, :string, default: nil
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :item_class, :string, default: nil
+  attr :item_style, :any, default: nil
+  attr :empty, :string, default: "No items"
+  attr :rest, :global
+
+  slot :item
+
+  def tree(assigns) do
+    assigns =
+      assign(assigns,
+        nodes: Map.get(assigns, :nodes, []),
+        selected: Map.get(assigns, :selected),
+        expanded: Map.get(assigns, :expanded),
+        default_expanded: Map.get(assigns, :default_expanded, []),
+        node_value: Map.get(assigns, :node_value, :id),
+        node_label: Map.get(assigns, :node_label, :label),
+        node_children: Map.get(assigns, :node_children, :children),
+        node_expandable: Map.get(assigns, :node_expandable, :expandable?),
+        loop: Map.get(assigns, :loop, true),
+        scroll_padding: Map.get(assigns, :scroll_padding, 1),
+        indent: Map.get(assigns, :indent, 2),
+        collapsed_prefix: Map.get(assigns, :collapsed_prefix, ">"),
+        expanded_prefix: Map.get(assigns, :expanded_prefix, "⌄"),
+        leaf_prefix: Map.get(assigns, :leaf_prefix, " "),
+        empty: Map.get(assigns, :empty, "No items"),
+        item: Map.get(assigns, :item, [])
+      )
+
+    indent = max(Map.get(assigns, :indent, 2), 0)
+    visible_expanded = controlled_tree_expanded(assigns)
+    controlled_expanded? = not is_nil(visible_expanded)
+    rows = normalize_tree_rows(Map.get(assigns, :nodes, []), assigns, visible_expanded)
+
+    prefix_width =
+      [
+        Map.get(assigns, :collapsed_prefix, ">"),
+        Map.get(assigns, :expanded_prefix, "⌄"),
+        Map.get(assigns, :leaf_prefix, " ")
+      ]
+      |> Enum.map(&tree_prefix_width/1)
+      |> Enum.max()
+      |> max(1)
+
+    item_visual_defaults =
+      merge_class(
+        "selected:bg-primary selected:text-bg",
+        list_variant_item_class(Map.get(assigns, :variant))
+      )
+
+    assigns =
+      assigns
+      |> assign(rows: rows)
+      |> assign(indent: indent)
+      |> assign(controlled_expanded?: controlled_expanded?)
+      |> assign(prefix_width: prefix_width)
+      |> assign(
+        class:
+          merge_class(
+            "border width-full height-8 overflow-scroll scrollbar-arrows focus:border-primary focus:scrollbar-primary",
+            class_override(assigns)
+          )
+      )
+      |> assign(
+        item_class:
+          merge_class(
+            "inline width-full height-1 overflow-hidden",
+            merge_class(item_visual_defaults, class_override(assigns, :item_class, :item_style))
+          )
+      )
+      |> assign(prefix_cell_class: "inline width-#{prefix_width} height-1 overflow-hidden")
+      |> assign(label_class: merge_class("inline height-1 overflow-hidden", item_visual_defaults))
+
+    ~H"""
+    <box
+      id={@id}
+      implicit={Breeze.Implicit.Tree}
+      tree-loop={@loop}
+      tree-selected={@selected}
+      tree-expanded={@expanded}
+      tree-default-expanded={@default_expanded}
+      tree-scroll-padding={@scroll_padding}
+      focusable
+      class={@class}
+      style={Breeze.Blocks.inline_style(assigns)}
+      {@rest}
+    >
+      <box :if={@rows == []} class="width-full height-1 text-muted">{@empty}</box>
+      <box
+        :for={row <- @rows}
+        value={row.value}
+        tree-node
+        tree-depth={row.depth}
+        tree-parent={row.parent}
+        tree-parents={row.parents}
+        tree-expandable={row.expandable?}
+        focus-with-owner
+        class={@item_class}
+        style={Breeze.Blocks.inline_style(assigns, :item_class, :item_style)}
+      >
+        <box
+          :if={row.indent_width > 0}
+          tree-node-part
+          selected-with-owner
+          class={"inline width-#{row.indent_width} height-1 overflow-hidden"}
+        >
+        </box>
+        <box
+          :if={@controlled_expanded?}
+          tree-node-part
+          selected-with-owner
+          class={@prefix_cell_class}
+        >
+          {row.prefix}
+        </box>
+        <box
+          :if={!@controlled_expanded?}
+          tree-node-part
+          selected-with-owner
+          class={@prefix_cell_class}
+        >
+          <box tree-collapsed-prefix selected-with-owner class={@prefix_cell_class}>
+            {@collapsed_prefix}
+          </box>
+          <box tree-expanded-prefix selected-with-owner class={@prefix_cell_class}>
+            {@expanded_prefix}
+          </box>
+          <box tree-leaf-prefix selected-with-owner class={@prefix_cell_class}>{@leaf_prefix}</box>
+        </box>
+        <box :if={@item == []} tree-node-part selected-with-owner class={@label_class}>
+          {row.label}
+        </box>
+        <box :if={@item != []} tree-node-part selected-with-owner class={@label_class}>
+          {render_slot(@item, row)}
+        </box>
+      </box>
+    </box>
+    """
+  end
+
+  defp normalize_tree_rows(nodes, assigns, visible_expanded) do
+    nodes
+    |> List.wrap()
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {node, index} ->
+      normalize_tree_node(node, assigns, visible_expanded, nil, [], 0, [index])
+    end)
+  end
+
+  defp normalize_tree_node(node, assigns, visible_expanded, parent, parents, depth, path) do
+    value = tree_node_value(node, assigns[:node_value], path)
+    label = tree_node_label(node, assigns[:node_label], value)
+    children = tree_node_children(node, assigns[:node_children])
+    expandable? = tree_node_expandable(node, assigns[:node_expandable], children != [])
+
+    row = %{
+      value: value,
+      label: label,
+      node: node,
+      prefix: tree_row_prefix(value, expandable?, visible_expanded, assigns),
+      parent: parent,
+      parents: parents,
+      depth: depth,
+      indent_width: depth * assigns.indent,
+      expandable?: expandable?
+    }
+
+    child_rows =
+      if render_tree_children?(visible_expanded, value) do
+        children
+        |> Enum.with_index()
+        |> Enum.flat_map(fn {child, index} ->
+          normalize_tree_node(
+            child,
+            assigns,
+            visible_expanded,
+            value,
+            parents ++ [value],
+            depth + 1,
+            path ++ [index]
+          )
+        end)
+      else
+        []
+      end
+
+    [row | child_rows]
+  end
+
+  defp tree_node_value(node, fun, _path) when is_function(fun, 1), do: fun.(node)
+  defp tree_node_value(node, nil, _path), do: node
+
+  defp tree_node_value(node, key, path) when is_atom(key) or is_binary(key) do
+    tree_node_lookup(node, key, path)
+  end
+
+  defp tree_node_value(_node, _key, path), do: path
+
+  defp tree_node_label(node, fun, _value) when is_function(fun, 1),
+    do: node |> fun.() |> normalize_tree_label()
+
+  defp tree_node_label(_node, nil, value), do: normalize_tree_label(value)
+
+  defp tree_node_label(node, key, value) when is_atom(key) or is_binary(key) do
+    node
+    |> tree_node_lookup(key, value)
+    |> normalize_tree_label()
+  end
+
+  defp tree_node_label(_node, _key, value), do: normalize_tree_label(value)
+
+  defp normalize_tree_label(%{__struct__: BackBreeze.VirtualText} = value), do: value
+  defp normalize_tree_label([%{__struct__: BackBreeze.TextSpan} | _rest] = value), do: value
+  defp normalize_tree_label(value), do: to_string(value)
+
+  defp tree_node_children(node, fun) when is_function(fun, 1),
+    do: normalize_tree_children(fun.(node))
+
+  defp tree_node_children(_node, nil), do: []
+
+  defp tree_node_children(node, key) when is_atom(key) or is_binary(key) do
+    node
+    |> tree_node_lookup(key, [])
+    |> normalize_tree_children()
+  end
+
+  defp tree_node_children(_node, _key), do: []
+
+  defp tree_node_expandable(node, fun, _default) when is_function(fun, 1),
+    do: normalize_tree_expandable(fun.(node))
+
+  defp tree_node_expandable(_node, nil, default), do: default
+
+  defp tree_node_expandable(node, key, default) when is_atom(key) or is_binary(key) do
+    node
+    |> tree_node_lookup(key, default)
+    |> normalize_tree_expandable()
+  end
+
+  defp tree_node_expandable(_node, _key, default), do: default
+
+  defp tree_row_prefix(_value, false, _visible_expanded, assigns), do: assigns.leaf_prefix
+
+  defp tree_row_prefix(value, true, %MapSet{} = visible_expanded, assigns) do
+    if MapSet.member?(visible_expanded, value),
+      do: assigns.expanded_prefix,
+      else: assigns.collapsed_prefix
+  end
+
+  defp tree_row_prefix(_value, _expandable?, _visible_expanded, _assigns), do: nil
+
+  defp normalize_tree_children(children) when is_list(children), do: children
+  defp normalize_tree_children(_children), do: []
+
+  defp normalize_tree_expandable(value), do: value in [true, "true", "1", ""]
+
+  defp controlled_tree_expanded(assigns) do
+    if Map.has_key?(assigns, :expanded) and not is_nil(assigns.expanded) do
+      tree_value_set(assigns.expanded)
+    else
+      nil
+    end
+  end
+
+  defp render_tree_children?(nil, _value), do: true
+  defp render_tree_children?(%MapSet{} = expanded, value), do: MapSet.member?(expanded, value)
+
+  defp tree_value_set(%MapSet{} = values), do: values
+  defp tree_value_set(values) when is_list(values), do: MapSet.new(values)
+
+  defp tree_value_set(values) when is_map(values) do
+    values
+    |> Enum.filter(fn {_key, value} -> value in [true, "true", "1", ""] end)
+    |> Enum.map(fn {key, _value} -> key end)
+    |> MapSet.new()
+  end
+
+  defp tree_value_set(value), do: MapSet.new([value])
+
+  defp tree_node_lookup(node, key, default) when is_map(node) do
+    cond do
+      Map.has_key?(node, key) -> Map.get(node, key)
+      Map.has_key?(node, to_string(key)) -> Map.get(node, to_string(key))
+      true -> Map.get(node, key_to_existing_atom(key), default)
+    end
+  end
+
+  defp tree_node_lookup(node, key, default) when is_list(node) do
+    if Keyword.keyword?(node) do
+      cond do
+        Keyword.has_key?(node, key) -> Keyword.get(node, key)
+        Keyword.has_key?(node, to_string(key)) -> Keyword.get(node, to_string(key))
+        true -> Keyword.get(node, key_to_existing_atom(key), default)
+      end
+    else
+      default
+    end
+  end
+
+  defp tree_node_lookup(_node, _key, default), do: default
+
+  defp tree_prefix_width(prefix) when is_binary(prefix), do: max(Ucwidth.width(prefix), 0)
+  defp tree_prefix_width(_prefix), do: 0
+
   defp size_class(axis, :full), do: "#{axis}-full"
   defp size_class(axis, size) when is_integer(size), do: "#{axis}-#{size}"
 
