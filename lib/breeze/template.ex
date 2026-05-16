@@ -206,6 +206,7 @@ defmodule Breeze.Template do
       attrs
       |> Map.new()
       |> maybe_put_rest(rest)
+      |> Map.put(:__breeze_caller_assigns__, ctx.assigns)
       |> Map.merge(build_slots(children, ctx))
 
     {%__MODULE__{nodes: comp_nodes, env: comp_env}, comp_assigns} =

@@ -56,6 +56,45 @@ defmodule BreezeBench.TreeBenchmark do
     end
   end
 
+  defmodule SpanView do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen bg-panel">
+        <.tree
+          id="repo-tree"
+          nodes={@nodes}
+          selected={@selected}
+          expanded={@expanded}
+          class="width-full height-full border-invisible bg-panel focus:border-primary"
+        />
+      </box>
+      """
+    end
+  end
+
+  defmodule VirtualSpanView do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen bg-panel">
+        <.tree
+          id="repo-tree"
+          nodes={@nodes}
+          selected={@selected}
+          expanded={@expanded}
+          virtual
+          class="width-full height-full border-invisible bg-panel focus:border-primary"
+        />
+      </box>
+      """
+    end
+  end
+
   def run(root \\ File.cwd!()) do
     root = Path.expand(root)
 
@@ -76,11 +115,22 @@ defmodule BreezeBench.TreeBenchmark do
         end
 
       nodes = List.last(build_samples).result
+      span_nodes = colorize_labels(nodes)
       row_count = count_rows(nodes)
 
       render_samples =
         for _ <- 1..@samples do
           collect_render_sample(View, nodes, expanded)
+        end
+
+      span_render_samples =
+        for _ <- 1..@samples do
+          collect_render_sample(SpanView, span_nodes, expanded)
+        end
+
+      virtual_span_render_samples =
+        for _ <- 1..@samples do
+          collect_render_sample(VirtualSpanView, span_nodes, expanded)
         end
 
       plain_render_samples =
@@ -110,6 +160,27 @@ defmodule BreezeBench.TreeBenchmark do
         IO.puts(
           "    #{format_label(label)}: #{format_ms(value)} (#{Float.round(count, 1)} calls)"
         )
+      end)
+
+      IO.puts("  span-label render wall avg: #{format_ms(avg_us(span_render_samples))}")
+      IO.puts("  span-label render profile avg:")
+
+      span_render_samples
+      |> average_profile()
+      |> Enum.each(fn {metric, value} ->
+        IO.puts("    #{metric}: #{format_ms(value)}")
+      end)
+
+      IO.puts(
+        "  virtual span-label render wall avg: #{format_ms(avg_us(virtual_span_render_samples))}"
+      )
+
+      IO.puts("  virtual span-label render profile avg:")
+
+      virtual_span_render_samples
+      |> average_profile()
+      |> Enum.each(fn {metric, value} ->
+        IO.puts("    #{metric}: #{format_ms(value)}")
       end)
 
       IO.puts("  plain render wall avg: #{format_ms(avg_us(plain_render_samples))}")
@@ -152,8 +223,11 @@ defmodule BreezeBench.TreeBenchmark do
     %{us: us, result: result}
   end
 
-  defp collect_render_sample(view, nodes, expanded) do
-    assigns = %{nodes: nodes, expanded: expanded, selected: List.first(expanded)}
+  defp collect_render_sample(view, nodes, expanded, extra_assigns \\ []) do
+    assigns =
+      %{nodes: nodes, expanded: expanded, selected: List.first(expanded)}
+      |> Map.merge(Map.new(extra_assigns))
+
     implicit_state = bootstrap_implicit_state(view, assigns)
     scope = make_ref()
     Breeze.DebugProfiler.reset(scope)
@@ -301,6 +375,22 @@ defmodule BreezeBench.TreeBenchmark do
   end
 
   defp existing(paths), do: Enum.filter(paths, &File.dir?/1)
+
+  defp colorize_labels(nodes) do
+    Enum.map(nodes, fn node ->
+      icon = Map.get(node, :icon, "")
+      icon_color = Map.get(node, :icon_color, {171, 178, 191})
+      label = Map.get(node, :label, "")
+      children = node |> Map.get(:children, []) |> colorize_labels()
+
+      node
+      |> Map.put(:label, [
+        BackBreeze.TextSpan.new(icon <> " ", %{foreground_color: icon_color}),
+        BackBreeze.TextSpan.new(label)
+      ])
+      |> Map.put(:children, children)
+    end)
+  end
 
   defp count_rows(nodes) do
     Enum.reduce(nodes, 0, fn node, count ->

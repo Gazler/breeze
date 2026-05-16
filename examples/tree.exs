@@ -2,8 +2,11 @@ defmodule TreeExample do
   use Breeze.View
   import Breeze.Blocks
 
+  alias BackBreeze.TextSpan
+
   def mount(opts, term) do
     root = Keyword.get(opts, :root, File.cwd!()) |> Path.expand()
+    # We maintain our own expanded list here because we lazily retrieve the entries
     expanded = [root]
     root_node = directory_node(root, display_root(root), MapSet.new(expanded), root?: true)
 
@@ -29,22 +32,11 @@ defmodule TreeExample do
         nodes={@nodes}
         selected={@selected}
         expanded={@expanded}
+        virtual
         br-change="select"
-        class="width-full height-full border-invisible bg-panel focus:border-primary"
+        class="width-full height-full"
       >
-        <:item :let={row}>
-          <box class="inline height-1 overflow-hidden">
-            <box
-              class="inline width-2 height-1 overflow-hidden"
-              style={%{foreground_color: row.node.icon_color}}
-            >
-              {row.node.icon}
-            </box>
-            <box selected-with-owner class="inline height-1 overflow-hidden selected:text-bg">
-              {row.label}
-            </box>
-          </box>
-        </:item>
+        <:item :let={row}>{icon_label(row.node.icon, row.node.icon_color, row.label)}</:item>
       </.tree>
     </box>
     """
@@ -74,11 +66,14 @@ defmodule TreeExample do
         []
       end
 
+    icon = directory_icon(path, expanded, Keyword.get(opts, :root?, false))
+    icon_color = {86, 156, 214}
+
     %{
       id: path,
       label: label,
-      icon: directory_icon(path, expanded, Keyword.get(opts, :root?, false)),
-      icon_color: {86, 156, 214},
+      icon: icon,
+      icon_color: icon_color,
       expandable?: true,
       children: children
     }
@@ -91,8 +86,22 @@ defmodule TreeExample do
       directory_node(path, name <> "/", expanded)
     else
       {icon, icon_color} = file_icon(name)
-      %{id: path, label: name, icon: icon, icon_color: icon_color, expandable?: false}
+
+      %{
+        id: path,
+        label: name,
+        icon: icon,
+        icon_color: icon_color,
+        expandable?: false
+      }
     end
+  end
+
+  defp icon_label(icon, icon_color, label) do
+    [
+      TextSpan.new(icon <> " ", %{foreground_color: icon_color}),
+      TextSpan.new(label)
+    ]
   end
 
   defp list_entries(path) do

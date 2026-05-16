@@ -62,6 +62,20 @@ defmodule Breeze.Implicit.TreeTest do
 
       assert state.values == ["root", "src"]
     end
+
+    test "can initialize from root row metadata when rendered children are windowed" do
+      rows = [
+        %{value: "root", parent: nil, parents: [], expandable?: true, depth: 0},
+        %{value: "src", parent: "root", parents: ["root"], expandable?: false, depth: 1},
+        %{value: "mix", parent: nil, parents: [], expandable?: false, depth: 0}
+      ]
+
+      state =
+        Implicit.Tree.init([], %{:"tree-rows" => rows, :"tree-expanded" => ["root"]}, %{})
+
+      assert state.rows == rows
+      assert state.values == ["root", "src", "mix"]
+    end
   end
 
   describe "handle_event/3" do
@@ -119,6 +133,31 @@ defmodule Breeze.Implicit.TreeTest do
       assert collapsed.values == ["root", "src"]
       refute MapSet.member?(collapsed.expanded, "src")
       refute "src" in collapse_payload.expanded
+    end
+
+    test "emits offset changes from mouse wheel events" do
+      element = %{height: 3, viewport_height: 3, content_height: 10}
+
+      state = %{
+        rows: [],
+        values: Enum.to_list(1..10),
+        selected: 1,
+        selected_index: 0,
+        offset: 0,
+        loop: true,
+        scroll_padding: 0,
+        expanded: MapSet.new()
+      }
+
+      {{:change, payload}, scrolled} =
+        Implicit.Tree.handle_event(
+          :ignore,
+          %{"mouse" => %{button: :wheel_down}, "element" => element},
+          state
+        )
+
+      assert scrolled.offset == 1
+      assert payload.offset == 1
     end
   end
 

@@ -3,6 +3,16 @@ defmodule Breeze.RichTextTest do
 
   alias BackBreeze.TextSpan
 
+  defmodule InlineSpanExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="inline overflow-hidden">{@content}</box>
+      """
+    end
+  end
+
   test "renders styled text spans within a box" do
     content = [
       TextSpan.new("Hello ", %{foreground_color: 2}),
@@ -74,5 +84,21 @@ defmodule Breeze.RichTextTest do
              │\e[38;5;2mLine \e[0m\e[1m199\e[0m│
              └────────┘\
              """
+  end
+
+  test "resolves intrinsic inline width for text spans" do
+    content = [
+      TextSpan.new(" ", %{foreground_color: {154, 103, 174}}),
+      TextSpan.new("mix.exs")
+    ]
+
+    {_acc, box} =
+      Breeze.Renderer.render(InlineSpanExample, %{content: content},
+        terminal: %Termite.Terminal{size: %{width: 20, height: 3}},
+        theme: Breeze.Theme.builtin(:gruvbox)
+      )
+
+    assert box.width == 9
+    assert box.content =~ "mix.exs"
   end
 end

@@ -27,10 +27,7 @@ defmodule Breeze.Implicit.Tree do
 
   @spec init(list(map()), map(), map()) :: state()
   def init(children, root_attrs, last_state) do
-    rows =
-      children
-      |> Enum.filter(&Map.get(&1, :"tree-node"))
-      |> Enum.map(&row_from_child/1)
+    rows = rows_from_attrs(root_attrs, children)
 
     expanded = expanded_values(root_attrs, last_state)
     values = visible_values(rows, expanded)
@@ -54,12 +51,18 @@ defmodule Breeze.Implicit.Tree do
 
     selected = Common.selected_value(values, selected_index)
 
+    offset =
+      root_attrs
+      |> Map.get(:"tree-offset")
+      |> Common.normalize_int(Map.get(last_state, :offset, 0))
+      |> min(max(length(values) - 1, 0))
+
     %{
       rows: rows,
       values: values,
       selected: selected,
       selected_index: selected_index,
-      offset: Common.normalize_int(Map.get(last_state, :offset, 0)),
+      offset: offset,
       loop: loop,
       scroll_padding: scroll_padding,
       expanded: expanded
@@ -115,52 +118,22 @@ defmodule Breeze.Implicit.Tree do
 
   def handle_event(_, %{"key" => key, "element" => element}, state)
       when key in ["ArrowRight", "l"] do
-    case selected_row(state) do
-      %{expandable?: true, value: value} = row ->
-        if expanded?(state, value) do
-          state
-          |> select_first_child(row, element)
-          |> maybe_change()
-        else
-          state
-          |> expand_row(value)
-          |> maybe_change()
-        end
-
-      _ ->
-        {:noreply, state}
-    end
+    state
+    |> selected_row()
+    |> handle_arrow_right(state, element)
   end
 
   def handle_event(_, %{"key" => key, "element" => element}, state)
       when key in ["ArrowLeft", "h"] do
-    case selected_row(state) do
-      %{expandable?: true, value: value} ->
-        if expanded?(state, value) do
-          state
-          |> collapse_row(value)
-          |> maybe_change()
-        else
-          state
-          |> select_parent(element)
-          |> maybe_change()
-        end
-
-      %{parent: parent} when not is_nil(parent) ->
-        state
-        |> select_parent(element)
-        |> maybe_change()
-
-      _ ->
-        {:noreply, state}
-    end
+    state
+    |> selected_row()
+    |> handle_arrow_left(state, element)
   end
 
   def handle_event(_, %{"key" => key}, state) when key in ["Enter", " "] do
-    case selected_row(state) do
-      %{expandable?: true, value: value} -> state |> toggle_row(value) |> maybe_change()
-      _ -> {:noreply, state}
-    end
+    state
+    |> selected_row()
+    |> handle_toggle_key(state)
   end
 
   def handle_event(
@@ -174,34 +147,15 @@ defmodule Breeze.Implicit.Tree do
         state
       )
       when is_integer(row) and row >= 0 do
-    with index when is_integer(index) <- row + state.offset,
-         true <- index < length(state.values) do
-      next_state = set_selection(state, index, element)
-      selected = Enum.at(next_state.values, index)
-      row = find_row(next_state.rows, selected)
-
-      if row && row.expandable? && toggle_col?(row, col) do
-        next_state
-        |> toggle_row(selected)
-        |> maybe_change()
-      else
-        maybe_change(next_state)
-      end
-    else
-      _ -> {:noreply, state}
-    end
+    handle_tree_click(row + state.offset, col, element, state)
   end
 
   def handle_event(_, %{"mouse" => %{button: :wheel_down} = mouse, "element" => element}, state) do
-    viewport = Viewport.from_dimensions(element)
-    offset = Viewport.clamp_scroll_y(state.offset + Common.wheel_repeat(mouse), viewport)
-    {:noreply, %{state | offset: offset}}
+    scroll_by_mouse(state, element, Common.wheel_repeat(mouse))
   end
 
   def handle_event(_, %{"mouse" => %{button: :wheel_up} = mouse, "element" => element}, state) do
-    viewport = Viewport.from_dimensions(element)
-    offset = Viewport.clamp_scroll_y(state.offset - Common.wheel_repeat(mouse), viewport)
-    {:noreply, %{state | offset: offset}}
+    scroll_by_mouse(state, element, -Common.wheel_repeat(mouse))
   end
 
   def handle_event(_, _, state), do: {:noreply, state}
@@ -210,26 +164,69 @@ defmodule Breeze.Implicit.Tree do
   def handle_modifiers(:root, _flags, state), do: Common.root_scroll_modifier(state)
 
   def handle_modifiers(:child, flags, state) do
-    cond do
-      Keyword.get(flags, :"tree-node") ->
-        tree_node_modifiers(flags, state)
-
-      Keyword.get(flags, :"tree-node-part") ->
-        tree_node_part_modifiers(flags, state)
-
-      Keyword.get(flags, :"tree-collapsed-prefix") ->
-        prefix_modifiers(flags, state, :collapsed)
-
-      Keyword.get(flags, :"tree-expanded-prefix") ->
-        prefix_modifiers(flags, state, :expanded)
-
-      Keyword.get(flags, :"tree-leaf-prefix") ->
-        prefix_modifiers(flags, state, :leaf)
-
-      true ->
-        []
-    end
+    flags
+    |> child_modifier_flags()
+    |> child_modifiers(flags, state)
   end
+
+  defp child_modifier_flags(flags) do
+    {
+      Keyword.get(flags, :"tree-node"),
+      Keyword.get(flags, :"tree-node-part"),
+      Keyword.get(flags, :"tree-collapsed-prefix"),
+      Keyword.get(flags, :"tree-expanded-prefix"),
+      Keyword.get(flags, :"tree-leaf-prefix")
+    }
+  end
+
+  defp child_modifiers({node_flag, _part, _collapsed, _expanded, _leaf}, flags, state)
+       when node_flag not in [nil, false] do
+    tree_node_modifiers(flags, state)
+  end
+
+  defp child_modifiers({_node, part_flag, _collapsed, _expanded, _leaf}, flags, state)
+       when part_flag not in [nil, false] do
+    tree_node_part_modifiers(flags, state)
+  end
+
+  defp child_modifiers({_node, _part, collapsed_flag, _expanded, _leaf}, flags, state)
+       when collapsed_flag not in [nil, false] do
+    prefix_modifiers(flags, state, :collapsed)
+  end
+
+  defp child_modifiers({_node, _part, _collapsed, expanded_flag, _leaf}, flags, state)
+       when expanded_flag not in [nil, false] do
+    prefix_modifiers(flags, state, :expanded)
+  end
+
+  defp child_modifiers({_node, _part, _collapsed, _expanded, leaf_flag}, flags, state)
+       when leaf_flag not in [nil, false] do
+    prefix_modifiers(flags, state, :leaf)
+  end
+
+  defp child_modifiers(_flags_tuple, _flags, _state), do: []
+
+  defp rows_from_attrs(%{:"tree-rows" => rows}, _children) when is_list(rows) and rows != [] do
+    Enum.map(rows, &row_from_attrs/1)
+  end
+
+  defp rows_from_attrs(_root_attrs, children) do
+    children
+    |> Enum.filter(&Map.get(&1, :"tree-node"))
+    |> Enum.map(&row_from_child/1)
+  end
+
+  defp row_from_attrs(row) when is_map(row) do
+    %{
+      value: Map.fetch!(row, :value),
+      parent: Map.get(row, :parent),
+      parents: List.wrap(Map.get(row, :parents, [])),
+      expandable?: Map.get(row, :expandable?, false) in [true, "true", ""],
+      depth: Common.normalize_int(Map.get(row, :depth, 0))
+    }
+  end
+
+  defp row_from_attrs(row), do: row_from_child(row)
 
   defp row_from_child(child) do
     %{
@@ -241,17 +238,14 @@ defmodule Breeze.Implicit.Tree do
     }
   end
 
-  defp expanded_values(root_attrs, last_state) do
-    cond do
-      Map.has_key?(root_attrs, :"tree-expanded") and not is_nil(root_attrs[:"tree-expanded"]) ->
-        value_set(root_attrs[:"tree-expanded"])
+  defp expanded_values(%{:"tree-expanded" => expanded}, _last_state) when not is_nil(expanded) do
+    value_set(expanded)
+  end
 
-      Map.has_key?(last_state, :expanded) ->
-        value_set(last_state.expanded)
+  defp expanded_values(_root_attrs, %{expanded: expanded}), do: value_set(expanded)
 
-      true ->
-        value_set(Map.get(root_attrs, :"tree-default-expanded", []))
-    end
+  defp expanded_values(root_attrs, _last_state) do
+    value_set(Map.get(root_attrs, :"tree-default-expanded", []))
   end
 
   defp value_set(%MapSet{} = values), do: values
@@ -278,57 +272,71 @@ defmodule Breeze.Implicit.Tree do
     do: Enum.all?(parents, &MapSet.member?(expanded, &1))
 
   defp pick_selected_index(values, rows, expanded, last_state, root_attrs) do
-    controlled_selected = Map.get(root_attrs, :"tree-selected")
-    selected = Map.get(last_state, :selected)
-
-    cond do
-      not is_nil(controlled_selected) ->
-        index_or_visible_ancestor(values, rows, expanded, controlled_selected)
-
-      not is_nil(selected) ->
-        index_or_visible_ancestor(values, rows, expanded, selected)
-
-      match?(i when is_integer(i), Map.get(last_state, :selected_index)) ->
-        Map.get(last_state, :selected_index)
-
-      true ->
-        case Map.fetch(root_attrs, :"tree-initial-index") do
-          {:ok, value} -> Common.normalize_int(value)
-          :error -> nil
-        end
-    end
+    root_attrs
+    |> selected_index_source(last_state)
+    |> selected_index_from_source(values, rows, expanded)
   end
+
+  defp selected_index_source(%{:"tree-selected" => selected}, _last_state)
+       when not is_nil(selected) do
+    {:value, selected}
+  end
+
+  defp selected_index_source(_root_attrs, %{selected: selected}) when not is_nil(selected) do
+    {:value, selected}
+  end
+
+  defp selected_index_source(_root_attrs, %{selected_index: index}) when is_integer(index) do
+    {:index, index}
+  end
+
+  defp selected_index_source(%{:"tree-initial-index" => index}, _last_state) do
+    {:index, Common.normalize_int(index)}
+  end
+
+  defp selected_index_source(_root_attrs, _last_state), do: nil
+
+  defp selected_index_from_source({:value, value}, values, rows, expanded) do
+    index_or_visible_ancestor(values, rows, expanded, value)
+  end
+
+  defp selected_index_from_source({:index, index}, _values, _rows, _expanded), do: index
+  defp selected_index_from_source(nil, _values, _rows, _expanded), do: nil
 
   defp index_or_visible_ancestor(values, rows, expanded, value) do
-    case Enum.find_index(values, &(&1 == value)) do
-      nil ->
-        rows
-        |> find_row(value)
-        |> visible_ancestor_value(rows, expanded)
-        |> then(fn
-          nil -> nil
-          ancestor -> Enum.find_index(values, &(&1 == ancestor))
-        end)
-
-      index ->
-        index
-    end
+    values
+    |> Enum.find_index(&(&1 == value))
+    |> index_or_visible_ancestor(values, rows, expanded, value)
   end
+
+  defp index_or_visible_ancestor(nil, values, rows, expanded, value) do
+    rows
+    |> find_row(value)
+    |> visible_ancestor_value(rows, expanded)
+    |> visible_ancestor_index(values)
+  end
+
+  defp index_or_visible_ancestor(index, _values, _rows, _expanded, _value), do: index
+
+  defp visible_ancestor_index(nil, _values), do: nil
+  defp visible_ancestor_index(ancestor, values), do: Enum.find_index(values, &(&1 == ancestor))
 
   defp visible_ancestor_value(nil, _rows, _expanded), do: nil
 
   defp visible_ancestor_value(%{parents: parents}, rows, expanded) do
     parents
     |> Enum.reverse()
-    |> Enum.find(fn value ->
-      rows
-      |> find_row(value)
-      |> case do
-        nil -> false
-        row -> visible?(row, expanded)
-      end
-    end)
+    |> Enum.find(&visible_row_value?(&1, rows, expanded))
   end
+
+  defp visible_row_value?(value, rows, expanded) do
+    rows
+    |> find_row(value)
+    |> visible_row?(expanded)
+  end
+
+  defp visible_row?(nil, _expanded), do: false
+  defp visible_row?(row, expanded), do: visible?(row, expanded)
 
   defp move_selection(%{values: []} = state, _delta, _element), do: state
 
@@ -349,21 +357,95 @@ defmodule Breeze.Implicit.Tree do
     selected = Common.selected_value(values, index)
     viewport = Viewport.from_dimensions(element)
 
-    offset =
-      if index do
-        Viewport.ensure_range_visible(state.offset, index, index, viewport,
-          padding: state.scroll_padding
-        )
-      else
-        Viewport.clamp_scroll_y(state.offset, viewport)
-      end
+    offset = selection_offset(index, state, viewport)
 
     %{state | selected_index: index, selected: selected, offset: offset}
+  end
+
+  defp selection_offset(nil, state, viewport), do: Viewport.clamp_scroll_y(state.offset, viewport)
+
+  defp selection_offset(index, state, viewport) do
+    Viewport.ensure_range_visible(state.offset, index, index, viewport,
+      padding: state.scroll_padding
+    )
   end
 
   defp selected_row(%{selected: selected, rows: rows}), do: find_row(rows, selected)
 
   defp find_row(rows, value), do: Enum.find(rows, &(&1.value == value))
+
+  defp handle_arrow_right(%{expandable?: true, value: value} = row, state, element) do
+    state
+    |> right_arrow_state(row, expanded?(state, value), element)
+    |> maybe_change()
+  end
+
+  defp handle_arrow_right(_row, state, _element), do: {:noreply, state}
+
+  defp right_arrow_state(state, row, true, element), do: select_first_child(state, row, element)
+  defp right_arrow_state(state, %{value: value}, false, _element), do: expand_row(state, value)
+
+  defp handle_arrow_left(%{expandable?: true, value: value}, state, element) do
+    state
+    |> left_arrow_state(value, expanded?(state, value), element)
+    |> maybe_change()
+  end
+
+  defp handle_arrow_left(%{parent: parent}, state, element) when not is_nil(parent) do
+    state
+    |> select_parent(element)
+    |> maybe_change()
+  end
+
+  defp handle_arrow_left(_row, state, _element), do: {:noreply, state}
+
+  defp left_arrow_state(state, value, true, _element), do: collapse_row(state, value)
+  defp left_arrow_state(state, _value, false, element), do: select_parent(state, element)
+
+  defp handle_toggle_key(%{expandable?: true, value: value}, state) do
+    state
+    |> toggle_row(value)
+    |> maybe_change()
+  end
+
+  defp handle_toggle_key(_row, state), do: {:noreply, state}
+
+  defp handle_tree_click(index, col, element, %{values: values} = state)
+       when is_integer(index) and index >= 0 and index < length(values) do
+    next_state = set_selection(state, index, element)
+    selected = Enum.at(next_state.values, index)
+
+    next_state.rows
+    |> find_row(selected)
+    |> handle_tree_click_row(selected, col, next_state)
+  end
+
+  defp handle_tree_click(_index, _col, _element, state), do: {:noreply, state}
+
+  defp handle_tree_click_row(%{expandable?: true} = row, selected, col, state) do
+    row
+    |> toggle_col?(col)
+    |> handle_tree_click_toggle(selected, state)
+  end
+
+  defp handle_tree_click_row(_row, _selected, _col, state), do: maybe_change(state)
+
+  defp handle_tree_click_toggle(true, selected, state) do
+    state
+    |> toggle_row(selected)
+    |> maybe_change()
+  end
+
+  defp handle_tree_click_toggle(false, _selected, state), do: maybe_change(state)
+
+  defp scroll_by_mouse(state, element, delta) do
+    viewport = Viewport.from_dimensions(element)
+    offset = Viewport.clamp_scroll_y(state.offset + delta, viewport)
+
+    state
+    |> Map.put(:offset, offset)
+    |> maybe_change()
+  end
 
   defp expand_row(state, value),
     do: rebuild_visible(%{state | expanded: MapSet.put(state.expanded, value)})
@@ -371,9 +453,10 @@ defmodule Breeze.Implicit.Tree do
   defp collapse_row(state, value),
     do: rebuild_visible(%{state | expanded: MapSet.delete(state.expanded, value)})
 
-  defp toggle_row(state, value) do
-    if expanded?(state, value), do: collapse_row(state, value), else: expand_row(state, value)
-  end
+  defp toggle_row(state, value), do: toggle_row(state, value, expanded?(state, value))
+
+  defp toggle_row(state, value, true), do: collapse_row(state, value)
+  defp toggle_row(state, value, false), do: expand_row(state, value)
 
   defp rebuild_visible(state) do
     values = visible_values(state.rows, state.expanded)
@@ -390,30 +473,37 @@ defmodule Breeze.Implicit.Tree do
 
   defp expanded?(state, value), do: MapSet.member?(state.expanded, value)
 
-  defp select_first_child(state, row, element) do
-    index =
-      Enum.find_index(state.values, fn value ->
-        case find_row(state.rows, value) do
-          %{parent: parent} -> parent == row.value
-          _ -> false
-        end
-      end)
-
-    if index, do: set_selection(state, index, element), else: state
+  defp select_first_child(state, %{value: parent}, element) do
+    state.values
+    |> Enum.find_index(&child_row_value?(state, &1, parent))
+    |> select_index(state, element)
   end
+
+  defp child_row_value?(state, value, parent) do
+    state.rows
+    |> find_row(value)
+    |> child_row?(parent)
+  end
+
+  defp child_row?(%{parent: row_parent}, parent), do: row_parent == parent
+  defp child_row?(_row, _parent), do: false
 
   defp select_parent(state, element) do
-    case selected_row(state) do
-      %{parent: parent} when not is_nil(parent) ->
-        case Enum.find_index(state.values, &(&1 == parent)) do
-          nil -> state
-          index -> set_selection(state, index, element)
-        end
-
-      _ ->
-        state
-    end
+    state
+    |> selected_row()
+    |> select_parent(state, element)
   end
+
+  defp select_parent(%{parent: parent}, state, element) when not is_nil(parent) do
+    state.values
+    |> Enum.find_index(&(&1 == parent))
+    |> select_index(state, element)
+  end
+
+  defp select_parent(_row, state, _element), do: state
+
+  defp select_index(nil, state, _element), do: state
+  defp select_index(index, state, element), do: set_selection(state, index, element)
 
   defp toggle_col?(%{depth: depth}, col) when is_integer(col) do
     col >= depth * 2 and col <= depth * 2 + 1
@@ -434,37 +524,65 @@ defmodule Breeze.Implicit.Tree do
   defp tree_node_modifiers(flags, state) do
     value = Keyword.get(flags, :value)
 
-    []
-    |> then(fn modifiers ->
-      if value in state.values, do: modifiers, else: [{:style, "hidden"} | modifiers]
-    end)
-    |> then(fn modifiers ->
-      if not is_nil(value) and state.selected == value,
-        do: [{:selected, true} | modifiers],
-        else: modifiers
-    end)
-    |> Enum.reverse()
+    hidden_tree_node_modifiers(value, state) ++
+      selected_tree_node_modifiers(value, state)
   end
 
-  defp tree_node_part_modifiers(flags, state) do
-    value = Keyword.get(flags, :selected_owner_value) || Keyword.get(flags, :value)
+  defp hidden_tree_node_modifiers(value, state) do
+    value
+    |> visible_value?(state)
+    |> hidden_modifiers()
+  end
 
-    if value in state.values, do: [], else: [{:style, "hidden"}]
+  defp selected_tree_node_modifiers(nil, _state), do: []
+
+  defp selected_tree_node_modifiers(value, %{selected: selected}) when value == selected do
+    [selected: true]
+  end
+
+  defp selected_tree_node_modifiers(_value, _state), do: []
+
+  defp tree_node_part_modifiers(flags, state) do
+    flags
+    |> tree_part_value()
+    |> visible_value?(state)
+    |> hidden_modifiers()
+  end
+
+  defp tree_part_value(flags) do
+    Keyword.get(flags, :selected_owner_value) || Keyword.get(flags, :value)
   end
 
   defp prefix_modifiers(flags, state, kind) do
-    value = Keyword.get(flags, :selected_owner_value) || Keyword.get(flags, :value)
-    row = find_row(state.rows, value)
+    value = tree_part_value(flags)
 
-    visible? =
-      value in state.values and
-        case {kind, row} do
-          {:collapsed, %{expandable?: true}} -> not expanded?(state, value)
-          {:expanded, %{expandable?: true}} -> expanded?(state, value)
-          {:leaf, %{expandable?: false}} -> true
-          _ -> false
-        end
-
-    if visible?, do: [], else: [{:style, "hidden"}]
+    state.rows
+    |> find_row(value)
+    |> prefix_visible?(kind, value, state)
+    |> hidden_modifiers()
   end
+
+  defp prefix_visible?(row, kind, value, state) do
+    value
+    |> visible_value?(state)
+    |> prefix_visible?(row, kind, value, state)
+  end
+
+  defp prefix_visible?(false, _row, _kind, _value, _state), do: false
+
+  defp prefix_visible?(true, %{expandable?: true}, :collapsed, value, state) do
+    not expanded?(state, value)
+  end
+
+  defp prefix_visible?(true, %{expandable?: true}, :expanded, value, state) do
+    expanded?(state, value)
+  end
+
+  defp prefix_visible?(true, %{expandable?: false}, :leaf, _value, _state), do: true
+  defp prefix_visible?(_visible, _row, _kind, _value, _state), do: false
+
+  defp visible_value?(value, %{values: values}), do: value in values
+
+  defp hidden_modifiers(true), do: []
+  defp hidden_modifiers(false), do: [style: "hidden"]
 end
