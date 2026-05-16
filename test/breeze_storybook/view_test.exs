@@ -675,25 +675,9 @@ defmodule Breeze.Storybook.ViewTest do
   end
 
   test "storybook preview child patches clear the full viewport height when the dropdown collapses" do
-    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
-
-    {:ok, pid} =
-      Breeze.Server.start_app_link(
-        view: Breeze.Storybook.View,
-        terminal: terminal
-      )
-
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
-
+    {terminal, pid} = start_storybook_server!("dropdown.story.exs")
     view_pid = :sys.get_state(pid).view_pid
     reader = terminal.reader
-
-    assert {:noreply, "storybook-nav", true} =
-             Breeze.ChildServer.dispatch_event(view_pid, "select_story", %{value: "dropdown"})
-
-    wait_until(fn ->
-      :sys.get_state(view_pid).assigns.current_story_id == "dropdown"
-    end)
 
     {preview_pid, viewport} = wait_for_preview_child(pid, "dropdown")
 
@@ -720,24 +704,7 @@ defmodule Breeze.Storybook.ViewTest do
   end
 
   test "storybook preview child patches clear the full viewport height when preview tabs switch" do
-    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
-
-    {:ok, pid} =
-      Breeze.Server.start_app_link(
-        view: Breeze.Storybook.View,
-        terminal: terminal
-      )
-
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
-
-    view_pid = :sys.get_state(pid).view_pid
-
-    assert {:noreply, "storybook-nav", true} =
-             Breeze.ChildServer.dispatch_event(view_pid, "select_story", %{value: "tabs"})
-
-    wait_until(fn ->
-      :sys.get_state(view_pid).assigns.current_story_id == "tabs"
-    end)
+    {terminal, pid} = start_storybook_server!("tabs.story.exs")
 
     {preview_pid, viewport} = wait_for_preview_child(pid, "tabs")
 
@@ -762,24 +729,7 @@ defmodule Breeze.Storybook.ViewTest do
   end
 
   test "storybook preview child patches clear the full viewport height when the list selection changes" do
-    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
-
-    {:ok, pid} =
-      Breeze.Server.start_app_link(
-        view: Breeze.Storybook.View,
-        terminal: terminal
-      )
-
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
-
-    view_pid = :sys.get_state(pid).view_pid
-
-    assert {:noreply, "storybook-nav", true} =
-             Breeze.ChildServer.dispatch_event(view_pid, "select_story", %{value: "list"})
-
-    wait_until(fn ->
-      :sys.get_state(view_pid).assigns.current_story_id == "list"
-    end)
+    {terminal, pid} = start_storybook_server!("list.story.exs")
 
     {preview_pid, viewport} = wait_for_preview_child(pid, "list")
 
@@ -803,24 +753,7 @@ defmodule Breeze.Storybook.ViewTest do
   end
 
   test "storybook preview child patches clear the full viewport height when the scroll position changes" do
-    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
-
-    {:ok, pid} =
-      Breeze.Server.start_app_link(
-        view: Breeze.Storybook.View,
-        terminal: terminal
-      )
-
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
-
-    view_pid = :sys.get_state(pid).view_pid
-
-    assert {:noreply, "storybook-nav", true} =
-             Breeze.ChildServer.dispatch_event(view_pid, "select_story", %{value: "scroll"})
-
-    wait_until(fn ->
-      :sys.get_state(view_pid).assigns.current_story_id == "scroll"
-    end)
+    {terminal, pid} = start_storybook_server!("scroll.story.exs")
 
     {preview_pid, viewport} = wait_for_preview_child(pid, "scroll")
 
@@ -844,24 +777,7 @@ defmodule Breeze.Storybook.ViewTest do
   end
 
   test "tabbing out of a focused story preview control patches the preview instead of redrawing the frame" do
-    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
-
-    {:ok, pid} =
-      Breeze.Server.start_app_link(
-        view: Breeze.Storybook.View,
-        terminal: terminal
-      )
-
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
-
-    view_pid = :sys.get_state(pid).view_pid
-
-    assert {:noreply, "storybook-nav", true} =
-             Breeze.ChildServer.dispatch_event(view_pid, "select_story", %{value: "tabs"})
-
-    wait_until(fn ->
-      :sys.get_state(view_pid).assigns.current_story_id == "tabs"
-    end)
+    {terminal, pid} = start_storybook_server!("tabs.story.exs")
 
     {preview_pid, viewport} = wait_for_preview_child(pid, "tabs")
     reader = terminal.reader
@@ -899,6 +815,21 @@ defmodule Breeze.Storybook.ViewTest do
     after
       10 -> Enum.reverse(writes)
     end
+  end
+
+  defp start_storybook_server!(file) do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: Breeze.Storybook.View,
+        terminal: terminal,
+        start_opts: [directory: "storybook", file: file]
+      )
+
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+
+    {terminal, pid}
   end
 
   defp wait_for_preview_child(pid, story_id) do
