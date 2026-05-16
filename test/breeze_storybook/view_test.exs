@@ -695,12 +695,7 @@ defmodule Breeze.Storybook.ViewTest do
       :sys.get_state(view_pid).assigns.current_story_id == "dropdown"
     end)
 
-    wait_until(fn ->
-      Map.has_key?(:sys.get_state(pid).children, "storybook-preview")
-    end)
-
-    preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
-    viewport = :sys.get_state(pid).rendered.elements["storybook-preview"]
+    {preview_pid, viewport} = wait_for_preview_child(pid, "dropdown")
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)
 
@@ -744,15 +739,7 @@ defmodule Breeze.Storybook.ViewTest do
       :sys.get_state(view_pid).assigns.current_story_id == "tabs"
     end)
 
-    wait_until(
-      fn ->
-        Map.has_key?(:sys.get_state(pid).children, "storybook-preview")
-      end,
-      100
-    )
-
-    preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
-    viewport = :sys.get_state(pid).rendered.elements["storybook-preview"]
+    {preview_pid, viewport} = wait_for_preview_child(pid, "tabs")
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)
 
@@ -794,12 +781,7 @@ defmodule Breeze.Storybook.ViewTest do
       :sys.get_state(view_pid).assigns.current_story_id == "list"
     end)
 
-    wait_until(fn ->
-      Map.has_key?(:sys.get_state(pid).children, "storybook-preview")
-    end)
-
-    preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
-    viewport = :sys.get_state(pid).rendered.elements["storybook-preview"]
+    {preview_pid, viewport} = wait_for_preview_child(pid, "list")
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)
 
@@ -840,12 +822,7 @@ defmodule Breeze.Storybook.ViewTest do
       :sys.get_state(view_pid).assigns.current_story_id == "scroll"
     end)
 
-    wait_until(fn ->
-      Map.has_key?(:sys.get_state(pid).children, "storybook-preview")
-    end)
-
-    preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
-    viewport = :sys.get_state(pid).rendered.elements["storybook-preview"]
+    {preview_pid, viewport} = wait_for_preview_child(pid, "scroll")
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)
 
@@ -886,12 +863,7 @@ defmodule Breeze.Storybook.ViewTest do
       :sys.get_state(view_pid).assigns.current_story_id == "tabs"
     end)
 
-    wait_until(fn ->
-      Map.has_key?(:sys.get_state(pid).children, "storybook-preview")
-    end)
-
-    preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
-    viewport = :sys.get_state(pid).rendered.elements["storybook-preview"]
+    {preview_pid, viewport} = wait_for_preview_child(pid, "tabs")
     reader = terminal.reader
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)
@@ -927,6 +899,27 @@ defmodule Breeze.Storybook.ViewTest do
     after
       10 -> Enum.reverse(writes)
     end
+  end
+
+  defp wait_for_preview_child(pid, story_id) do
+    %{module: expected_view} = Breeze.Storybook.Registry.story(story_id, "storybook")
+
+    wait_until(
+      fn ->
+        state = :sys.get_state(pid)
+
+        with %{pid: preview_pid, view: ^expected_view} <-
+               Map.get(state.children, "storybook-preview"),
+             %Breeze.Viewport{} = viewport <-
+               Map.get(state.rendered.elements, "storybook-preview"),
+             true <- Process.alive?(preview_pid) do
+          {preview_pid, viewport}
+        else
+          _ -> false
+        end
+      end,
+      100
+    )
   end
 
   defp patched_rows(writes, column) do
