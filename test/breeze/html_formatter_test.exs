@@ -31,12 +31,15 @@ defmodule Breeze.HTMLFormatterTest do
              """
   end
 
-  test "keeps :for/:if directives and assign syntax" do
-    source = "<box :for={item <- @items} :if={@enabled}>{item.value}</box>"
+  test "keeps :for/:let/:if directives and assign syntax" do
+    source =
+      "<.table><:col :for={item <- @items} :let={row} :if={@enabled}>{row.value}</:col></.table>"
 
     assert HTMLFormatter.format(source, sigil: :H, opening_delimiter: "\"\"\"") ==
              """
-             <box :for={item <- @items} :if={@enabled}>{item.value}</box>
+             <.table>
+               <:col :for={item <- @items} :let={row} :if={@enabled}>{row.value}</:col>
+             </.table>
              """
   end
 

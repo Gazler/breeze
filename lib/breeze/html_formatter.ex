@@ -168,6 +168,7 @@ defmodule Breeze.HTMLFormatter do
     directive_attrs =
       []
       |> maybe_add_for(directives[:for])
+      |> maybe_add_let(directives[:let])
       |> maybe_add_if(directives[:if])
 
     directive_attrs ++ Enum.map(attrs, &format_attr/1)
@@ -181,6 +182,11 @@ defmodule Breeze.HTMLFormatter do
 
   defp maybe_add_if(attrs, nil), do: attrs
   defp maybe_add_if(attrs, expr), do: attrs ++ [":if={" <> expr_to_string(expr) <> "}"]
+
+  defp maybe_add_let(attrs, nil), do: attrs
+
+  defp maybe_add_let(attrs, {pattern_string, _pattern_expr}),
+    do: attrs ++ [":let={" <> pattern_string <> "}"]
 
   defp format_attr({:boolean, name}), do: name
 
