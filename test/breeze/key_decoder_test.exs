@@ -49,8 +49,17 @@ defmodule Breeze.KeyDecoderTest do
   end
 
   test "decodes common ctrl-backspace sequences as structured key events" do
-    assert Breeze.KeyDecoder.decode("\e[8;5u") == %{"ctrlKey" => true, "key" => "Backspace"}
-    assert Breeze.KeyDecoder.decode("\e[127;5u") == %{"ctrlKey" => true, "key" => "w"}
+    for sequence <- [
+          "\b",
+          "\e[8;5u",
+          "\e[127;5u",
+          "\e[27;5;8u",
+          "\e[27;5;127u",
+          "\e[27;5;127~",
+          "\e[127;5~"
+        ] do
+      assert Breeze.KeyDecoder.decode(sequence) == %{"ctrlKey" => true, "key" => "Backspace"}
+    end
   end
 
   test "decodes ctrl-j and ctrl-k CSI-u sequences as structured key events" do

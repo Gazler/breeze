@@ -679,46 +679,26 @@ defmodule Breeze.ChildServer do
   defp normalize_result({:noreply, next_term}, _term), do: {:noreply, next_term}
   defp normalize_result({:stop, next_term}, _term), do: {:stop, next_term}
 
-  defp process_input(%{"key" => "\t"} = event, term, opts) do
-    if truthy_modifier?(Map.get(event, "shiftKey")) do
-      process_input("ShiftTab", term, opts)
+  defp process_input(%{"key" => key} = event, term, opts) when key in ["\t", "Tab"] do
+    event
+    |> Breeze.InputCapture.normalize_focus_key()
+    |> process_input(term, opts)
+  end
+
+  defp process_input("\t", term, opts) do
+    if focused_implicit_captures_key?("\t", term) do
+      dispatch_key_input("\t", term, opts)
     else
-      process_input("\t", term, opts)
+      focus_next(term)
     end
   end
 
-  defp process_input("\t", term, _opts) do
-    focusables = Breeze.Focus.active_focusables(term.focusables, term.focus_meta)
-    index = Enum.find_index(focusables, &(&1 == term.focused))
-    trapped_scope = Breeze.Focus.trapped_scope?(term.focusables, term.focus_meta)
-
-    focused =
-      cond do
-        focusables == [] -> nil
-        trapped_scope && is_integer(index) -> Enum.at(focusables, index + 1) || hd(focusables)
-        is_integer(index) -> Enum.at(focusables, index + 1)
-        true -> hd(focusables)
-      end
-
-    {:noreply, %{term | focused: focused, allow_unfocused?: is_nil(focused)}}
-  end
-
-  defp process_input("ShiftTab", term, _opts) do
-    focusables = Breeze.Focus.active_focusables(term.focusables, term.focus_meta)
-    index = Enum.find_index(focusables, &(&1 == term.focused))
-    trapped_scope = Breeze.Focus.trapped_scope?(term.focusables, term.focus_meta)
-
-    focused =
-      cond do
-        focusables == [] -> nil
-        trapped_scope && index == 0 -> List.last(focusables)
-        trapped_scope && is_integer(index) -> Enum.at(focusables, index - 1)
-        index == 0 -> nil
-        index == nil -> List.last(focusables)
-        true -> Enum.at(focusables, index - 1)
-      end
-
-    {:noreply, %{term | focused: focused, allow_unfocused?: is_nil(focused)}}
+  defp process_input("ShiftTab", term, opts) do
+    if focused_implicit_captures_key?("ShiftTab", term) do
+      dispatch_key_input("ShiftTab", term, opts)
+    else
+      focus_previous(term)
+    end
   end
 
   defp process_input(%{"mouse" => mouse} = event, term, _opts) do
@@ -745,17 +725,60 @@ defmodule Breeze.ChildServer do
   end
 
   defp process_input(key, term, opts) do
+    dispatch_key_input(key, term, opts)
+  end
+
+  defp dispatch_key_input(key, term, opts) do
     event = normalize_key_event(key)
 
     steps =
-      if printable_key?(event) do
-        [:hierarchy, :focused_implicit, :local, :global, :view_direct]
-      else
-        [:global, :hierarchy, :local, :view]
+      cond do
+        focused_implicit_captures_key?(event, term) ->
+          [:hierarchy, :focused_implicit, :local, :global, :view_direct]
+
+        printable_key?(event) ->
+          [:hierarchy, :focused_implicit, :local, :global, :view_direct]
+
+        true ->
+          [:global, :hierarchy, :local, :view]
       end
       |> maybe_skip_global(Keyword.get(opts, :skip_global, false))
 
     dispatch_input_steps(steps, event, key, term)
+  end
+
+  defp focus_next(term) do
+    focusables = Breeze.Focus.active_focusables(term.focusables, term.focus_meta)
+    index = Enum.find_index(focusables, &(&1 == term.focused))
+    trapped_scope = Breeze.Focus.trapped_scope?(term.focusables, term.focus_meta)
+
+    focused =
+      cond do
+        focusables == [] -> nil
+        trapped_scope && is_integer(index) -> Enum.at(focusables, index + 1) || hd(focusables)
+        is_integer(index) -> Enum.at(focusables, index + 1)
+        true -> hd(focusables)
+      end
+
+    {:noreply, %{term | focused: focused, allow_unfocused?: is_nil(focused)}}
+  end
+
+  defp focus_previous(term) do
+    focusables = Breeze.Focus.active_focusables(term.focusables, term.focus_meta)
+    index = Enum.find_index(focusables, &(&1 == term.focused))
+    trapped_scope = Breeze.Focus.trapped_scope?(term.focusables, term.focus_meta)
+
+    focused =
+      cond do
+        focusables == [] -> nil
+        trapped_scope && index == 0 -> List.last(focusables)
+        trapped_scope && is_integer(index) -> Enum.at(focusables, index - 1)
+        index == 0 -> nil
+        index == nil -> List.last(focusables)
+        true -> Enum.at(focusables, index - 1)
+      end
+
+    {:noreply, %{term | focused: focused, allow_unfocused?: is_nil(focused)}}
   end
 
   defp maybe_skip_global(steps, true), do: List.delete(steps, :global)
@@ -871,6 +894,12 @@ defmodule Breeze.ChildServer do
       true ->
         :continue
     end
+  end
+
+  defp focused_implicit_captures_key?(event, term) do
+    term
+    |> focused_implicit_meta(term.focused)
+    |> Breeze.InputCapture.captures_key?(event)
   end
 
   defp printable_key?(%{"key" => key} = event) when is_binary(key) do

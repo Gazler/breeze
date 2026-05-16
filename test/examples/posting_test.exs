@@ -226,6 +226,47 @@ defmodule PostingTest do
     Process.exit(pid, :normal)
   end
 
+  test "server forwards ctrl-backspace variants to the focused posting input" do
+    for raw_key <- [
+          "\b",
+          "\e[8;5u",
+          "\e[127;5u",
+          "\e[27;5;8u",
+          "\e[27;5;127u",
+          "\e[27;5;127~",
+          "\e[127;5~"
+        ] do
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+      {:ok, pid} =
+        Breeze.Server.start_link(
+          view: Posting,
+          alt_screen: false,
+          enhanced_keyboard: false,
+          hide_cursor: false,
+          terminal: terminal,
+          halt_fun: fn -> :ok end,
+          global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+        )
+
+      state = :sys.get_state(pid)
+      reader = state.reader
+      server_pid = state.server_pid
+
+      send(pid, {reader, {:data, raw_key}})
+
+      wait_until(fn ->
+        state = :sys.get_state(server_pid)
+        term = :sys.get_state(state.view_pid)
+
+        not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input) and
+          term.assigns.url == ""
+      end)
+
+      GenServer.stop(pid, :normal)
+    end
+  end
+
   test "posting keeps repeated wide characters contiguous in the url row" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)

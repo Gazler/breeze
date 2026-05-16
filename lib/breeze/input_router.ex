@@ -4,6 +4,7 @@ defmodule Breeze.InputRouter do
   use GenServer
 
   alias Breeze.InputRouter.{IExShellProxy, SilentGroupLeader, TerminalStart}
+  alias Breeze.InputCapture
 
   defstruct [
     :terminal,
@@ -132,13 +133,14 @@ defmodule Breeze.InputRouter do
   defp stop_global_key?(key, state),
     do:
       Breeze.GlobalKeybindings.stop_action?(normalize_key_event(key), state) and
-        not focused_implicit_captures_printable_key?(key, state)
+        not focused_implicit_captures_key?(key, state)
 
   defp route_reader_data(reader, data, state) do
     decoded = decode_input(data)
 
     cond do
-      forced_stop_input?(data, decoded) ->
+      forced_stop_input?(data, decoded) and
+          not focused_implicit_captures_decoded_input?(decoded, state) ->
         stop(state)
 
       stop_decoded_input?(decoded, state) ->
@@ -171,31 +173,18 @@ defmodule Breeze.InputRouter do
 
   defp forced_stop_input?(_data, _decoded), do: false
 
-  defp focused_implicit_captures_printable_key?(key, state) do
-    printable_key?(key) and
-      match?(
-        %{captures_printable_keys: true},
-        Breeze.Server.focused_implicit_metadata(state.server_pid)
-      )
+  defp focused_implicit_captures_decoded_input?({:key, key}, state),
+    do: focused_implicit_captures_key?(key, state)
+
+  defp focused_implicit_captures_decoded_input?(_decoded, _state), do: false
+
+  defp focused_implicit_captures_key?(key, state) do
+    state.server_pid
+    |> Breeze.Server.focused_implicit_metadata()
+    |> InputCapture.captures_key?(key)
   catch
     :exit, _reason -> false
   end
-
-  defp printable_key?(%{"key" => key} = event) when is_binary(key) do
-    not truthy_modifier?(Map.get(event, "ctrlKey")) and
-      not truthy_modifier?(Map.get(event, "altKey")) and
-      not truthy_modifier?(Map.get(event, "metaKey")) and
-      printable_key?(key)
-  end
-
-  defp printable_key?(key) when is_binary(key) do
-    String.length(key) == 1 and key not in ["\n", "\r", "\t", "\v", "\f"] and
-      String.printable?(key) and not String.match?(key, ~r/[\x00-\x1F\x7F]/u)
-  end
-
-  defp printable_key?(_key), do: false
-
-  defp truthy_modifier?(value), do: value in [true, "true"]
 
   defp maybe_start_theme_probe(%{theme_probe: probe} = state, _theme) when is_map(probe),
     do: state

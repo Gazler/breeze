@@ -114,6 +114,52 @@ defmodule Breeze.InputRouterTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule CapturingImplicit do
+    def init(_children, _attrs, state) do
+      {:ok, state,
+       active_when_focused: true,
+       captures_printable_keys: true,
+       captures_control_keys: true,
+       captures_focus_keys: true}
+    end
+
+    def handle_event(_, event, state), do: {{:change, event}, state}
+    def handle_modifiers(_, _, _), do: []
+    def animate(_, box, _, _, _), do: box
+  end
+
+  defmodule FocusedCaptureView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok, term |> focus("capture") |> assign(parent: Keyword.fetch!(opts, :parent))}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box
+          id="capture"
+          focusable
+          implicit={Breeze.InputRouterTest.CapturingImplicit}
+          br-change="captured"
+        >
+          capture
+        </box>
+        <box id="other" focusable>other</box>
+      </box>
+      """
+    end
+
+    def handle_event("captured", event, term) do
+      send(term.assigns.parent, {:captured, event})
+      {:noreply, term}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule FocusCycleView do
     use Breeze.View
 
@@ -221,6 +267,72 @@ defmodule Breeze.InputRouterTest do
 
     assert_receive :halted
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+  end
+
+  test "ctrl-c is forwarded when a focused implicit captures control keys" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: FocusedCaptureView,
+        start_opts: [parent: parent],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter],
+        halt_fun: fn -> send(parent, :halted) end
+      )
+
+    state = :sys.get_state(pid)
+    reader = state.reader
+    server_pid = state.server_pid
+
+    wait_until(fn ->
+      match?(
+        %{captures_control_keys: true},
+        Breeze.Server.focused_implicit_metadata(server_pid)
+      )
+    end)
+
+    send(pid, {reader, {:data, "\x03"}})
+
+    assert_receive {:captured, %{"ctrlKey" => true, "key" => "c"}}
+    refute_receive :halted, 50
+
+    Process.exit(pid, :normal)
+  end
+
+  test "tab and shift-tab are forwarded when a focused implicit captures focus keys" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: FocusedCaptureView,
+        start_opts: [parent: parent],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter],
+        halt_fun: fn -> send(parent, :halted) end
+      )
+
+    state = :sys.get_state(pid)
+    reader = state.reader
+    server_pid = state.server_pid
+
+    wait_until(fn ->
+      match?(
+        %{captures_focus_keys: true},
+        Breeze.Server.focused_implicit_metadata(server_pid)
+      )
+    end)
+
+    send(pid, {reader, {:data, "\t"}})
+    assert_receive {:captured, %{"key" => "\t"}}
+
+    send(pid, {reader, {:data, "\e[9;2u"}})
+    assert_receive {:captured, %{"key" => "ShiftTab"}}
+
+    refute_receive :halted, 50
+    assert :sys.get_state(server_pid).focused == "capture"
+
+    Process.exit(pid, :normal)
   end
 
   defp assert_ctrl_c_halts(sequence) do

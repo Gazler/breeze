@@ -575,6 +575,7 @@ defmodule Breeze.Server do
       stop_global_key?(key, state) -> :global_stop
       Inspector.toggle_key?(key, state) -> :inspector_toggle
       Inspector.move_key?(key, state) -> :inspector_move
+      focused_implicit_captures_key?(state, key) -> :hierarchy
       tab_input?(key) -> :tab
       true -> :hierarchy
     end
@@ -634,11 +635,13 @@ defmodule Breeze.Server do
   defp truthy_input_modifier?(value), do: value in [true, "true"]
 
   defp batchable_printable_input?(key, state) do
-    Input.raw_printable_key?(key) and focused_implicit_captures_printable_key?(state, key)
+    Breeze.InputCapture.printable_key?(key) and
+      focused_implicit_captures_printable_key?(state, key)
   end
 
   defp stop_global_key?(key, state) do
-    Breeze.GlobalKeybindings.stop_action?(%{"key" => key}, state)
+    Breeze.GlobalKeybindings.stop_action?(%{"key" => key}, state) and
+      not focused_implicit_captures_key?(state, key)
   end
 
   defp focused_implicit?(%{focused: nil}), do: false
@@ -654,16 +657,12 @@ defmodule Breeze.Server do
   end
 
   defp focused_implicit_captures_printable_key?(state, key) do
-    printable_input?(key) and
-      match?(%{captures_printable_keys: true}, focused_implicit_meta(state))
+    Breeze.InputCapture.captures_printable_key?(focused_implicit_meta(state), key)
   end
 
-  defp printable_input?(%{"__batched_printable__" => true, "key" => key}) when is_binary(key) do
-    String.printable?(key)
+  defp focused_implicit_captures_key?(state, key) do
+    Breeze.InputCapture.captures_key?(focused_implicit_meta(state), key)
   end
-
-  defp printable_input?(key) when is_binary(key), do: Input.raw_printable_key?(key)
-  defp printable_input?(_key), do: false
 
   defp focused_child_or_root_metadata(state) do
     case focused_child_chain(state) do
@@ -2142,7 +2141,7 @@ defmodule Breeze.Server do
       end
 
     root_global_reply =
-      if printable_input?(key) do
+      if Breeze.InputCapture.printable_key?(key) or focused_implicit_captures_key?(state, key) do
         nil
       else
         case safe_call(fn ->
@@ -2190,7 +2189,7 @@ defmodule Breeze.Server do
                if state.focused, do: Breeze.ChildServer.set_focus(state.view_pid, state.focused)
 
                Breeze.ChildServer.dispatch_input(state.view_pid, key,
-                 skip_global: focused_implicit_captures_printable_key?(state, key)
+                 skip_global: focused_implicit_captures_key?(state, key)
                )
              end) do
           {:ok, reply} -> reply
