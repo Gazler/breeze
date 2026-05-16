@@ -23,7 +23,11 @@ defmodule Breeze.RemoteInspector do
         {:ok, pid}
 
       nil ->
-        Server.start_link()
+        case Server.start_link() do
+          {:ok, pid} -> {:ok, pid}
+          {:error, {:already_started, pid}} when is_pid(pid) -> {:ok, pid}
+          other -> other
+        end
     end
   end
 
@@ -76,7 +80,7 @@ defmodule Breeze.RemoteInspector do
   end
 
   def local_server_pid do
-    Enum.find(members(), &(node(&1) == node()))
+    Process.whereis(Server) || Enum.find(members(), &(node(&1) == node()))
   end
 
   def remote_server_pid do
@@ -143,7 +147,7 @@ defmodule Breeze.RemoteInspector.Server do
   use GenServer
 
   def start_link do
-    GenServer.start_link(__MODULE__, %{})
+    GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
   end
 
   def subscribe(pid, subscriber) do

@@ -1,6 +1,8 @@
 defmodule Breeze.RemoteInspectorTest do
   use ExUnit.Case, async: false
 
+  import Breeze.TestSupport.WaitUntil
+
   defmodule InspectorAppView do
     use Breeze.View
 
@@ -297,13 +299,13 @@ defmodule Breeze.RemoteInspectorTest do
       end
     end)
 
-    Process.sleep(50)
+    wait_until(fn ->
+      %{snapshots: snapshots} = Breeze.RemoteInspector.Server.snapshot(inspector_pid)
 
-    %{snapshots: snapshots} = Breeze.RemoteInspector.snapshot()
-
-    assert Enum.any?(snapshots, fn {_key, entry} ->
-             entry.snapshot.root_view == InspectorAppView
-           end)
+      Enum.any?(snapshots, fn {_key, entry} ->
+        entry.snapshot.root_view == InspectorAppView
+      end)
+    end)
   end
 
   test "remote inspector keeps sources and marks them dead when the source pid exits" do
@@ -326,13 +328,17 @@ defmodule Breeze.RemoteInspectorTest do
       %{root_view: InspectorAppView, selected_id: "button"}
     )
 
-    Process.sleep(20)
-    GenServer.stop(source_pid)
-    Process.sleep(20)
-
-    %{snapshots: snapshots} = Breeze.RemoteInspector.snapshot()
     key = {node(source_pid), inspect(source_pid)}
 
-    assert %{alive?: false, snapshot: %{root_view: InspectorAppView}} = snapshots[key]
+    assert %{alive?: true, snapshot: %{root_view: InspectorAppView}} =
+             Breeze.RemoteInspector.Server.snapshot(inspector_pid).snapshots[key]
+
+    GenServer.stop(source_pid)
+
+    wait_until(fn ->
+      %{snapshots: snapshots} = Breeze.RemoteInspector.Server.snapshot(inspector_pid)
+
+      match?(%{alive?: false, snapshot: %{root_view: InspectorAppView}}, snapshots[key])
+    end)
   end
 end

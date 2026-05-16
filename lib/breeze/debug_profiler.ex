@@ -7,39 +7,17 @@ defmodule Breeze.DebugProfiler do
   @table :breeze_debug_profile
 
   def reset(scope) do
-    ensure_table()
     ensure_handler()
-
-    :ets.select_delete(
-      @table,
-      [
-        {
-          {{scope, :"$1", :"$2"}, :_},
-          [],
-          [true]
-        }
-      ]
-    )
+    delete_scope(scope)
 
     :ok
   end
 
   def snapshot(scope) do
-    ensure_table()
     ensure_handler()
 
-    entries = :ets.match_object(@table, {{scope, :_, :_}, :_})
-
-    :ets.select_delete(
-      @table,
-      [
-        {
-          {{scope, :"$1", :"$2"}, :_},
-          [],
-          [true]
-        }
-      ]
-    )
+    entries = match_scope(scope)
+    delete_scope(scope)
 
     entries
     |> Enum.map(fn {{^scope, label, metric}, value} ->
@@ -49,36 +27,90 @@ defmodule Breeze.DebugProfiler do
   end
 
   defp ensure_handler do
-    case :telemetry.list_handlers(@metric_event) do
-      [] ->
-        try do
-          :telemetry.attach_many(
-            @handler_id,
-            [@metric_event, @span_event ++ [:stop]],
-            &__MODULE__.handle_event/4,
-            nil
-          )
-        rescue
-          ArgumentError -> :ok
-        end
+    handlers = :telemetry.list_handlers(@metric_event)
 
-      _handlers ->
-        :ok
+    if Enum.any?(handlers, &(&1.id == @handler_id)) do
+      :ok
+    else
+      try do
+        :telemetry.attach_many(
+          @handler_id,
+          [@metric_event, @span_event ++ [:stop]],
+          &__MODULE__.handle_event/4,
+          nil
+        )
+      rescue
+        ArgumentError -> :ok
+      end
+    end
+  end
+
+  defp match_scope(scope) do
+    with_table(fn ->
+      :ets.match_object(@table, {{scope, :_, :_}, :_})
+    end)
+  end
+
+  defp delete_scope(scope) do
+    with_table(fn ->
+      :ets.select_delete(
+        @table,
+        [
+          {
+            {{scope, :"$1", :"$2"}, :_},
+            [],
+            [true]
+          }
+        ]
+      )
+    end)
+  end
+
+  defp insert_metric(scope, label, metric, value) do
+    with_table(fn ->
+      :ets.insert(@table, {{scope, label, metric}, value})
+    end)
+
+    :ok
+  end
+
+  defp with_table(fun) do
+    ensure_table()
+
+    try do
+      fun.()
+    rescue
+      ArgumentError ->
+        ensure_table_owner()
+        fun.()
     end
   end
 
   defp ensure_table do
     case :ets.whereis(@table) do
       :undefined ->
-        try do
-          :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
-        rescue
-          ArgumentError -> @table
-        end
+        ensure_table_owner()
+        :ok
 
       _tid ->
-        @table
+        :ok
     end
+  end
+
+  defp ensure_table_owner do
+    pid =
+      case Process.whereis(__MODULE__.TableOwner) do
+        nil ->
+          case __MODULE__.TableOwner.start() do
+            {:ok, pid} -> pid
+            {:error, {:already_started, pid}} -> pid
+          end
+
+        pid ->
+          pid
+      end
+
+    __MODULE__.TableOwner.ensure_table(pid)
   end
 
   def handle_event(
@@ -87,9 +119,7 @@ defmodule Breeze.DebugProfiler do
         %{scope: scope, label: label, metric: metric},
         _config
       ) do
-    ensure_table()
-    :ets.insert(@table, {{scope, label, metric}, value})
-    :ok
+    insert_metric(scope, label, metric, value)
   end
 
   def handle_event(
@@ -98,12 +128,51 @@ defmodule Breeze.DebugProfiler do
         %{scope: scope, label: label, metric: metric},
         _config
       ) do
-    ensure_table()
     value = System.convert_time_unit(duration, :native, :microsecond)
-    :ets.insert(@table, {{scope, label, metric}, value})
-    :ok
+    insert_metric(scope, label, metric, value)
   end
 
   defp sort_value(value) when is_integer(value), do: value
   defp sort_value(_value), do: -1
+end
+
+defmodule Breeze.DebugProfiler.TableOwner do
+  @moduledoc false
+
+  use GenServer
+
+  @table :breeze_debug_profile
+
+  def start do
+    GenServer.start(__MODULE__, %{}, name: __MODULE__)
+  end
+
+  def ensure_table(pid) do
+    GenServer.call(pid, :ensure_table)
+  end
+
+  @impl true
+  def init(state) do
+    ensure_table!()
+    {:ok, state}
+  end
+
+  @impl true
+  def handle_call(:ensure_table, _from, state) do
+    ensure_table!()
+    {:reply, :ok, state}
+  end
+
+  defp ensure_table! do
+    case :ets.whereis(@table) do
+      :undefined ->
+        :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
+        :ok
+
+      _tid ->
+        :ok
+    end
+  rescue
+    ArgumentError -> :ok
+  end
 end
