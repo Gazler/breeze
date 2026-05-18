@@ -8,6 +8,7 @@ Breeze.Example.run(
     start_opts: [directory: "storybook"],
     theme: Breeze.Theme.builtin(:gruvbox),
     hide_cursor: true,
+    mouse: true,
     reload: true,
     inspector: true,
     global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]

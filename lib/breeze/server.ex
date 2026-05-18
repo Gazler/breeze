@@ -794,7 +794,9 @@ defmodule Breeze.Server do
     state
     |> touch_interaction()
     |> safe_apply_input_reply(fn state ->
-      Breeze.ChildServer.dispatch_input(state.view_pid, %{"mouse" => event})
+      Breeze.ChildServer.dispatch_input(state.view_pid, %{"mouse" => event},
+        live_children: state.children
+      )
     end)
   end
 

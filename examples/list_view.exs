@@ -34,6 +34,7 @@ end
 Breeze.Example.run(
   [
     view: ListViewDemo,
+    mouse: true,
     global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
   ],
   keep_alive: :infinity

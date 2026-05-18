@@ -780,31 +780,47 @@ defmodule Breeze.ChildServer do
     end
   end
 
-  defp process_input(%{"mouse" => mouse} = event, term, _opts) do
+  defp process_input(%{"mouse" => mouse} = event, term, opts) do
     case mouse_target(term, mouse) do
       nil ->
         handle_view_event(term.view, :ignore_me, event, term)
 
       target ->
-        term =
-          if focus_mouse_target?(target, mouse, term) do
-            %{term | focused: target}
-          else
-            term
-          end
+        event = put_mouse_target_fields(term, target, event)
+        live_children = Keyword.get(opts, :live_children, term.children)
 
-        event =
-          event
-          |> Map.put("target", target)
-          |> Map.put("row", mouse_row(term, target, mouse))
-          |> Map.put("col", mouse_col(term, target, mouse))
+        case dispatch_live_mouse_target(term, target, event, live_children) do
+          {:ok, reply} ->
+            reply
 
-        handle_event(:ignore_me, event, term, target)
+          :bubble ->
+            normalize_result(term.view.handle_event(:ignore_me, event, term), term)
+
+          :not_live ->
+            dispatch_mouse_target(event, mouse, target, term)
+        end
     end
   end
 
   defp process_input(key, term, opts) do
     dispatch_key_input(key, term, opts)
+  end
+
+  defp dispatch_mouse_target(event, mouse, target, term) do
+    term =
+      case mouse_focus_target(target, mouse, term) do
+        nil -> term
+        focused -> %{term | focused: focused}
+      end
+
+    handle_event(:ignore_me, event, term, target)
+  end
+
+  defp put_mouse_target_fields(term, target, %{"mouse" => mouse} = event) do
+    event
+    |> Map.put("target", target)
+    |> Map.put("row", mouse_row(term, target, mouse))
+    |> Map.put("col", mouse_col(term, target, mouse))
   end
 
   defp dispatch_key_input(key, term, opts) do
@@ -1232,6 +1248,93 @@ defmodule Breeze.ChildServer do
   defp namespace_child_focus(nil, _child_id), do: nil
   defp namespace_child_focus(focused, child_id), do: child_id <> "::" <> focused
 
+  defp dispatch_live_mouse_target(term, target, event, live_children) do
+    case live_child_for_target(live_children, target) do
+      nil ->
+        :not_live
+
+      {child_id, %{pid: pid}} when is_pid(pid) ->
+        reply =
+          pid
+          |> Breeze.ChildServer.dispatch_input(
+            translate_mouse_event_for_child(term, child_id, event)
+          )
+          |> namespace_mouse_child_reply(child_id, term.focused, live_mouse_focus_event?(event))
+
+        case reply do
+          {:noreply, _focused, true} -> {:ok, reply}
+          {:stop, _focused, _consumed} -> {:ok, reply}
+          _ -> :bubble
+        end
+    end
+  end
+
+  defp live_child_for_target(children, target) when is_map(children) and is_binary(target) do
+    children
+    |> Enum.filter(fn {id, _child} ->
+      target == id or String.starts_with?(target, id <> "::")
+    end)
+    |> Enum.max_by(fn {id, _child} -> String.length(id) end, fn -> nil end)
+  end
+
+  defp live_child_for_target(_children, _target), do: nil
+
+  defp namespace_mouse_child_reply({kind, focused}, child_id, current_focused, focus_event?)
+       when kind in [:noreply, :stop] do
+    {kind, mouse_child_focus(focused, child_id, current_focused, focus_event?)}
+  end
+
+  defp namespace_mouse_child_reply(
+         {kind, focused, consumed},
+         child_id,
+         current_focused,
+         focus_event?
+       )
+       when kind in [:noreply, :stop] do
+    {kind, mouse_child_focus(focused, child_id, current_focused, focus_event?), consumed}
+  end
+
+  defp mouse_child_focus(focused, child_id, current_focused, true),
+    do: namespace_child_focus(focused, child_id) || current_focused
+
+  defp mouse_child_focus(_focused, _child_id, current_focused, false), do: current_focused
+
+  defp live_mouse_focus_event?(%{"mouse" => %{button: :left, action: :press}}), do: true
+  defp live_mouse_focus_event?(_event), do: false
+
+  defp translate_mouse_event_for_child(term, child_id, %{"mouse" => mouse} = event) do
+    case live_child_origin(term, child_id) do
+      %{left: left, top: top} ->
+        mouse =
+          mouse
+          |> Map.put(:x, max(mouse.x - left, 1))
+          |> Map.put(:y, max(mouse.y - top, 1))
+
+        event
+        |> Map.put("mouse", mouse)
+        |> Map.drop(["target", "row", "col"])
+
+      nil ->
+        Map.drop(event, ["target", "row", "col"])
+    end
+  end
+
+  defp live_child_origin(term, child_id) do
+    cond do
+      match?(%Breeze.Viewport{}, Map.get(term.elements, child_id)) ->
+        Map.fetch!(term.elements, child_id)
+
+      match?(%Breeze.Viewport{}, Map.get(term.retained_elements, child_id)) ->
+        Map.fetch!(term.retained_elements, child_id)
+
+      is_map(Map.get(term.mouse_targets, child_id)) ->
+        Map.take(Map.fetch!(term.mouse_targets, child_id), [:left, :top])
+
+      true ->
+        nil
+    end
+  end
+
   defp strip_live_prefix(nil, _live_id), do: nil
 
   defp strip_live_prefix(id, live_id) do
@@ -1597,6 +1700,7 @@ defmodule Breeze.ChildServer do
     y = y - 1
 
     term.mouse_targets
+    |> Enum.map(fn {id, bounds} -> {id, mouse_target_bounds(term, bounds)} end)
     |> Enum.filter(fn {_id, bounds} ->
       is_integer(bounds[:left]) and is_integer(bounds[:right]) and is_integer(bounds[:top]) and
         is_integer(bounds[:bottom]) and x >= bounds.left and x <= bounds.right and
@@ -1612,6 +1716,63 @@ defmodule Breeze.ChildServer do
       nil -> nil
     end
   end
+
+  defp mouse_target_bounds(term, bounds) when is_map(bounds) do
+    bounds
+    |> expand_full_mouse_axis(
+      :width,
+      :content_width,
+      :viewport_width,
+      :left,
+      :right,
+      term_width(term)
+    )
+    |> expand_full_mouse_axis(
+      :height,
+      :content_height,
+      :viewport_height,
+      :top,
+      :bottom,
+      term_height(term)
+    )
+  end
+
+  defp mouse_target_bounds(_term, bounds), do: bounds
+
+  defp expand_full_mouse_axis(
+         bounds,
+         axis,
+         content_axis,
+         viewport_axis,
+         start_axis,
+         end_axis,
+         size
+       ) do
+    start = Map.get(bounds, start_axis)
+
+    if full_mouse_dimension?(bounds, axis, content_axis, viewport_axis) and is_integer(size) and
+         is_integer(start) do
+      extent = max(size - start, 0)
+
+      bounds
+      |> Map.put(axis, extent)
+      |> Map.put(end_axis, start + max(extent - 1, 0))
+    else
+      bounds
+    end
+  end
+
+  defp full_mouse_dimension?(bounds, axis, content_axis, viewport_axis) do
+    Map.get(bounds, axis) in [:full, :screen] or
+      Map.get(bounds, content_axis) in [:full, :screen] or
+      Map.get(bounds, viewport_axis) in [:full, :screen]
+  end
+
+  defp term_width(%{terminal: %Termite.Terminal{size: %{width: width}}}), do: width
+  defp term_width(_term), do: nil
+
+  defp term_height(%{terminal: %Termite.Terminal{size: %{height: height}}}), do: height
+  defp term_height(_term), do: nil
 
   defp mouse_row(term, target, %{y: y}) do
     bounds = Map.fetch!(term.mouse_targets, target)
@@ -1633,11 +1794,20 @@ defmodule Breeze.ChildServer do
 
   defp border_inset(_, _side), do: 0
 
-  defp focus_mouse_target?(target, %{button: :left, action: :press}, term) do
-    target in term.focusables
+  defp mouse_focus_target(target, %{button: :left, action: :press}, term) do
+    cond do
+      target in term.focusables ->
+        target
+
+      owner = get_in(term.focus_meta, [target, :implicit_owner]) ->
+        if owner in term.focusables, do: owner
+
+      true ->
+        nil
+    end
   end
 
-  defp focus_mouse_target?(_target, _mouse, _term), do: false
+  defp mouse_focus_target(_target, _mouse, _term), do: nil
 
   defp profile_label(term, opts) do
     case Keyword.get(opts, :live_prefix) do

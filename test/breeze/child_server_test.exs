@@ -64,6 +64,24 @@ defmodule Breeze.ChildServerTest do
     def handle_event(_, _, term), do: {:noreply, term}
   end
 
+  defmodule FullWidthMouseTargetView do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, assign(term, last_target: "none")}
+
+    def render(assigns) do
+      ~H"""
+      <box id="full" focusable style="width-full height-3 border">{@last_target}</box>
+      """
+    end
+
+    def handle_event(_, %{"target" => target}, term) do
+      {:noreply, assign(term, last_target: target)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
   defmodule KeybindingView do
     use Breeze.View
 
@@ -158,6 +176,21 @@ defmodule Breeze.ChildServerTest do
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert box.content =~ "right"
+  end
+
+  test "mouse targets with full width use the rendered terminal width" do
+    terminal = %Termite.Terminal{size: %{width: 20, height: 5}}
+    {:ok, pid} = Breeze.ChildServer.start(view: FullWidthMouseTargetView, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert {:noreply, "full", true} =
+             Breeze.ChildServer.dispatch_input(pid, %{
+               "mouse" => %{button: :left, action: :press, x: 12, y: 2, modifiers: []}
+             })
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert box.content =~ "full"
   end
 
   test "metadata exposes active keybindings and local handlers dispatch before handle_event/3" do
