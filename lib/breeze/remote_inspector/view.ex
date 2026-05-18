@@ -17,6 +17,7 @@ defmodule Breeze.RemoteInspector.View do
   def quit(_event, term), do: {:stop, term}
 
   def mount(_opts, term) do
+    _ = Breeze.RemoteInspector.ensure_inspector_distribution()
     {:ok, _pid} = Breeze.RemoteInspector.ensure_server()
     :ok = Breeze.RemoteInspector.subscribe(self())
     state = Breeze.RemoteInspector.snapshot()

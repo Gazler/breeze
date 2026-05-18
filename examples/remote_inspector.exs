@@ -1,3 +1,4 @@
+_ = Breeze.RemoteInspector.ensure_inspector_distribution()
 {:ok, _pid} = Breeze.RemoteInspector.ensure_server()
 
 Breeze.Example.run(
