@@ -25,6 +25,7 @@ defmodule Breeze.Server do
     :focused,
     :theme,
     :apply_theme_defaults?,
+    :child_process_flags,
     :clipboard_opts,
     :crash,
     :crash_scrollback?,
@@ -50,6 +51,7 @@ defmodule Breeze.Server do
           | {:theme, Breeze.Theme.t() | map() | keyword() | atom()}
           | {:clipboard, keyword()}
           | {:global_keybindings, list()}
+          | {:child_process_flags, keyword()}
           | {:inspector, boolean() | keyword()}
           | {:debug_push_interval_ms, pos_integer()}
           | {:busy_delay_ms, non_neg_integer()}
@@ -159,6 +161,7 @@ defmodule Breeze.Server do
         theme: theme,
         theme_source: theme_source,
         apply_theme_defaults?: apply_theme_defaults?,
+        process_flags: Keyword.get(opts, :child_process_flags, []),
         server: self(),
         global_keybindings: Keyword.get(opts, :global_keybindings, []),
         invalidate: fn
@@ -195,6 +198,7 @@ defmodule Breeze.Server do
         focused: focused,
         theme: theme,
         apply_theme_defaults?: apply_theme_defaults?,
+        child_process_flags: Keyword.get(opts, :child_process_flags, []),
         clipboard_opts: Keyword.get(opts, :clipboard, []),
         terminal_size_override: terminal_size_override,
         global_keybindings: Keyword.get(opts, :global_keybindings, []),
@@ -531,10 +535,10 @@ defmodule Breeze.Server do
         {:stop, state}
 
       {:noreply, focused} ->
-        {:noreply, Map.put(state, :focused, focused)}
+        {:noreply, state |> Map.put(:focused, focused) |> mark_input_render_after_flush(true)}
 
-      {:noreply, focused, _consumed} ->
-        {:noreply, Map.put(state, :focused, focused)}
+      {:noreply, focused, render?} ->
+        {:noreply, state |> Map.put(:focused, focused) |> mark_input_render_after_flush(render?)}
     end
   end
 
@@ -548,6 +552,11 @@ defmodule Breeze.Server do
     end
   end
 
+  defp mark_input_render_after_flush(state, true),
+    do: update_input(state, render_after_flush?: true)
+
+  defp mark_input_render_after_flush(state, _render?), do: state
+
   defp apply_event_reply(state, {:crash, crash}) do
     {:noreply, enter_crash_state(state, crash)}
   end
@@ -556,18 +565,27 @@ defmodule Breeze.Server do
   defp apply_event_reply(state, {:stop, _focused, _consumed}), do: stop(state)
 
   defp apply_event_reply(state, {:noreply, focused}) do
-    {:noreply, finish_event_reply(state, focused)}
+    {:noreply, finish_event_reply(state, focused, true)}
   end
 
-  defp apply_event_reply(state, {:noreply, focused, _consumed}) do
-    {:noreply, finish_event_reply(state, focused)}
+  defp apply_event_reply(state, {:noreply, focused, render?}) do
+    {:noreply, finish_event_reply(state, focused, render?)}
   end
 
-  defp finish_event_reply(state, focused) do
+  defp finish_event_reply(state, focused, true) do
+    state
+    |> finish_event_reply_state(focused)
+    |> maybe_render_base(:event_reply)
+  end
+
+  defp finish_event_reply(state, focused, _render?) do
+    finish_event_reply_state(state, focused)
+  end
+
+  defp finish_event_reply_state(state, focused) do
     state
     |> update_input(pending_ref: nil, pending_started_at: nil)
     |> Map.put(:focused, focused)
-    |> maybe_render_base(:event_reply)
   end
 
   defp sync_key_action(key, state) do
@@ -846,6 +864,7 @@ defmodule Breeze.Server do
       render_tracking_ref: tracking_ref,
       profile_scope: profile_scope,
       profile_label: inspect(root_view_module(state)),
+      compact_snapshot: true,
       live_view: fn attrs, opts ->
         render_live_child(attrs, opts, state, profile_scope, tracking_ref)
       end
@@ -874,11 +893,17 @@ defmodule Breeze.Server do
   defp maybe_render_after_input(%{input: %{pending_sync_child_render_id: child_id}} = state)
        when is_binary(child_id) do
     state
-    |> update_input(pending_sync_child_render_id: nil)
+    |> update_input(pending_sync_child_render_id: nil, render_after_flush?: false)
     |> maybe_render_invalidated_child(child_id)
   end
 
-  defp maybe_render_after_input(state), do: maybe_render_base(state, :input_flush)
+  defp maybe_render_after_input(%{input: %{render_after_flush?: true}} = state) do
+    state
+    |> update_input(render_after_flush?: false)
+    |> maybe_render_base(:input_flush)
+  end
+
+  defp maybe_render_after_input(state), do: update_input(state, render_after_flush?: false)
 
   defp force_full_redraw(state, cause) do
     state
@@ -1809,6 +1834,7 @@ defmodule Breeze.Server do
              start_opts: state.start_opts || [],
              terminal: state.terminal,
              theme: state.theme,
+             process_flags: state.child_process_flags || [],
              server: self(),
              global_keybindings: state.global_keybindings || [],
              invalidate: fn -> send(session, :child_invalidated) end
@@ -2091,6 +2117,7 @@ defmodule Breeze.Server do
         server: self(),
         terminal: terminal,
         theme: theme,
+        process_flags: state.child_process_flags || [],
         invalidate: invalidate
       )
 

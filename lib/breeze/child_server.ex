@@ -57,6 +57,8 @@ defmodule Breeze.ChildServer do
 
   @impl true
   def init(opts) do
+    apply_process_flags(Keyword.get(opts, :process_flags, []))
+
     view = Keyword.fetch!(opts, :view)
     terminal = Keyword.get(opts, :terminal)
     theme_input = Keyword.get(opts, :theme_source, Keyword.get(opts, :theme))
@@ -111,6 +113,18 @@ defmodule Breeze.ChildServer do
     {:ok, term}
   end
 
+  defp apply_process_flags(flags) when is_list(flags) do
+    Enum.each(flags, fn
+      {flag, value} when flag in [:min_heap_size, :min_bin_vheap_size, :fullsweep_after] ->
+        Process.flag(flag, value)
+
+      _flag ->
+        :ok
+    end)
+  end
+
+  defp apply_process_flags(_flags), do: :ok
+
   @impl true
   def handle_call({:metadata, opts}, _from, term) do
     metadata_term =
@@ -142,11 +156,13 @@ defmodule Breeze.ChildServer do
 
   def handle_call({:render, opts}, _from, term) do
     {term, acc, box, _decorations} = render_term(term, opts)
+    box = maybe_compact_snapshot_box(box, opts)
     {:reply, {:ok, acc, box}, term}
   end
 
   def handle_call({:render_snapshot, opts}, _from, term) do
     {term, acc, box, decorations} = render_term(term, opts)
+    box = maybe_compact_snapshot_box(box, opts)
     {:reply, {:ok, acc, box, decorations}, term}
   end
 
@@ -223,6 +239,14 @@ defmodule Breeze.ChildServer do
 
     notify_invalidate(next_term)
     {:reply, :ok, next_term}
+  end
+
+  defp maybe_compact_snapshot_box(box, opts) do
+    if Keyword.get(opts, :compact_snapshot, false) do
+      %{box | layer_map: %{}}
+    else
+      box
+    end
   end
 
   @impl true
@@ -476,7 +500,11 @@ defmodule Breeze.ChildServer do
     term = sync_theme_assigns(term)
 
     {term, acc, box} =
-      if term.implicit_state != initial_implicit_state or
+      if implicit_state_rerender_needed?(
+           term.implicit_state,
+           initial_implicit_state,
+           term.implicit_meta
+         ) or
            term.implicit_meta != initial_implicit_meta or
            term.focused != initial_focus or
            layout_rerender_needed?(term, previous_elements) or
@@ -589,6 +617,19 @@ defmodule Breeze.ChildServer do
     end
   end
 
+  defp implicit_state_rerender_needed?(next_state, previous_state, meta) do
+    changed_ids =
+      next_state
+      |> Map.keys()
+      |> Kernel.++(Map.keys(previous_state))
+      |> Enum.uniq()
+
+    Enum.any?(changed_ids, fn id ->
+      Map.get(next_state, id) != Map.get(previous_state, id) and
+        get_in(meta, [id, :state_change_requires_rerender]) != false
+    end)
+  end
+
   defp requires_layout_rerender?(term) do
     Enum.any?(term.implicit_meta, fn
       {_id, %{requires_layout_rerender: true}} -> true
@@ -677,7 +718,9 @@ defmodule Breeze.ChildServer do
   end
 
   defp normalize_result({:noreply, next_term}, _term), do: {:noreply, next_term}
+  defp normalize_result({:noreply, next_term, opts}, _term), do: {:noreply, next_term, opts}
   defp normalize_result({:stop, next_term}, _term), do: {:stop, next_term}
+  defp normalize_result({:stop, next_term, opts}, _term), do: {:stop, next_term, opts}
 
   defp process_input(%{"key" => key} = event, term, opts) when key in ["\t", "Tab"] do
     event
@@ -799,6 +842,12 @@ defmodule Breeze.ChildServer do
       view_state == :stop ->
         {:stop, term}
 
+      match?({:stop, opts} when is_list(opts), view_state) ->
+        {:stop, term, elem(view_state, 1)}
+
+      match?({:noreply, opts} when is_list(opts), view_state) and implicit_consumed ->
+        {:noreply, term, elem(view_state, 1)}
+
       implicit_consumed ->
         {:noreply, term}
 
@@ -887,6 +936,12 @@ defmodule Breeze.ChildServer do
     cond do
       view_state == :stop ->
         {:stop, term}
+
+      match?({:stop, opts} when is_list(opts), view_state) ->
+        {:stop, term, elem(view_state, 1)}
+
+      match?({:noreply, opts} when is_list(opts), view_state) and implicit_consumed ->
+        {:noreply, term, elem(view_state, 1)}
 
       implicit_consumed ->
         {:noreply, term}
@@ -1379,6 +1434,24 @@ defmodule Breeze.ChildServer do
     {:reply, {:noreply, next_term.focused, next_term != term}, next_term}
   end
 
+  defp reply_from_input_result({:noreply, next_term, result_opts}, term, _opts)
+       when is_list(result_opts) do
+    next_term =
+      term
+      |> apply_focus_transitions(next_term)
+
+    maybe_probe_system_theme(next_term.theme, next_term.terminal, next_term.server)
+
+    next_term =
+      next_term
+      |> sync_theme_assigns()
+      |> cascade_theme_if_changed(term)
+
+    invalidate? = Keyword.get(result_opts, :invalidate, true)
+    maybe_notify_invalidate(next_term, result_opts)
+    {:reply, {:noreply, next_term.focused, invalidate? and next_term != term}, next_term}
+  end
+
   defp reply_from_input_result({:noreply, focused, consumed}, term, opts) do
     next_term = %{term | focused: focused, allow_unfocused?: is_nil(focused)}
     maybe_notify_invalidate(next_term, opts)
@@ -1394,6 +1467,19 @@ defmodule Breeze.ChildServer do
 
     maybe_notify_invalidate(next_term, opts)
     {:stop, :normal, {:stop, next_term.focused, true}, next_term}
+  end
+
+  defp reply_from_input_result({:stop, next_term, result_opts}, term, _opts)
+       when is_list(result_opts) do
+    next_term =
+      term
+      |> apply_focus_transitions(next_term)
+      |> sync_theme_assigns()
+      |> cascade_theme_if_changed(term)
+
+    invalidate? = Keyword.get(result_opts, :invalidate, true)
+    maybe_notify_invalidate(next_term, result_opts)
+    {:stop, :normal, {:stop, next_term.focused, invalidate?}, next_term}
   end
 
   defp reply_from_input_result({:stop, focused, consumed}, term, opts) do

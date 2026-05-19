@@ -230,33 +230,21 @@ defmodule Breeze.RenderState do
                 term = put_implicit_state(term, id, mod, val)
                 term = apply_implicit_term_options(term, opts)
 
-                {view_state, term} =
-                  case get_in(term.events, [id, :change]) do
-                    nil -> {:noreply, term}
-                    change -> route_change_fun.(term, id, change, event)
-                  end
+                {view_state, term} = route_change(term, id, :change, event, route_change_fun)
 
                 {view_state, true, term}
 
               {{:change, event}, val} ->
                 term = put_implicit_state(term, id, mod, val)
 
-                {view_state, term} =
-                  case get_in(term.events, [id, :change]) do
-                    nil -> {:noreply, term}
-                    change -> route_change_fun.(term, id, change, event)
-                  end
+                {view_state, term} = route_change(term, id, :change, event, route_change_fun)
 
                 {view_state, true, term}
 
               {{:submit, event}, val} ->
                 term = put_implicit_state(term, id, mod, val)
 
-                {view_state, term} =
-                  case get_in(term.events, [id, :submit]) do
-                    nil -> {:noreply, term}
-                    submit -> route_change_fun.(term, id, submit, event)
-                  end
+                {view_state, term} = route_change(term, id, :submit, event, route_change_fun)
 
                 {view_state, true, term}
 
@@ -303,6 +291,22 @@ defmodule Breeze.RenderState do
         acc
     end)
   end
+
+  defp route_change(term, id, type, event, route_change_fun) do
+    case get_in(term.events, [id, type]) do
+      nil -> {:noreply, term}
+      change -> normalize_route_change_result(route_change_fun.(term, id, change, event))
+    end
+  end
+
+  defp normalize_route_change_result({:noreply, term, opts}) when is_list(opts),
+    do: {{:noreply, opts}, term}
+
+  defp normalize_route_change_result({:stop, term, opts}) when is_list(opts),
+    do: {{:stop, opts}, term}
+
+  defp normalize_route_change_result({:noreply, term}), do: {:noreply, term}
+  defp normalize_route_change_result({:stop, term}), do: {:stop, term}
 
   defp add_implicit_item(acc, meta_acc, term, id, mod, items, root_attrs) do
     screen_width = if term.terminal, do: term.terminal.size.width, else: 0

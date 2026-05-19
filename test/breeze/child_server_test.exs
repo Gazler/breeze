@@ -89,6 +89,24 @@ defmodule Breeze.ChildServerTest do
     def handle_event(_, _, term), do: {:noreply, term}
   end
 
+  defmodule InvalidateEventView do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, assign(term, count: 0)}
+
+    def render(assigns) do
+      ~H"""
+      <box>{@count}</box>
+      """
+    end
+
+    def handle_event("defer_render", _event, term) do
+      {:noreply, assign(term, count: term.assigns.count + 1), invalidate: false}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
   test "dispatches mouse input through handle_event/3" do
     {:ok, pid} = Breeze.ChildServer.start(view: MouseView)
 
@@ -97,6 +115,17 @@ defmodule Breeze.ChildServerTest do
                "mouse" => %{button: :left, action: :press, x: 3, y: 4, modifiers: []}
              })
 
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, [])
+    assert box.content == "1"
+  end
+
+  test "dispatch_event/3 supports invalidate false replies from handle_event/3" do
+    {:ok, pid} = Breeze.ChildServer.start(view: InvalidateEventView)
+
+    assert {:noreply, nil, false} =
+             Breeze.ChildServer.dispatch_event(pid, "defer_render", %{})
+
+    assert %{assigns: %{count: 1}} = :sys.get_state(pid)
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, [])
     assert box.content == "1"
   end

@@ -6,7 +6,8 @@ defmodule Breeze.Server.State.Input do
     :pending_started_at,
     :pending_sync_child_render_id,
     queued_input: :queue.new(),
-    flush_scheduled?: false
+    flush_scheduled?: false,
+    render_after_flush?: false
   ]
 end
 

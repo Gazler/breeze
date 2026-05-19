@@ -6,7 +6,7 @@
 [38;5;4m│[0m[48;5;4;38;5;0m>Version                              [0m[38;5;4m▼[0m│corresponding element of [36menumerable[0m.  █
 [38;5;4m└──────────────────────────────────────┘[0m│                                      █
 ┌──────────────────────────────────────┐│For maps, the function expects a      █
-│ all?/1                               ▲│key-value tuple.                      │
+│ all?/1                               ▲│key-value tuple.                      █
 │ all?/2                               █│                                      │
 │ any?/1                               ││[30;43m## Examples                           [0m│
 │ any?/2                               ││                                      │

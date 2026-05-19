@@ -2,6 +2,7 @@ defmodule Breeze.Renderer do
   @moduledoc false
 
   alias BackBreeze.Box
+  alias BackBreeze.VirtualText
   alias Breeze.Style, as: RenderStyle
   alias Breeze.Theme
 
@@ -440,17 +441,37 @@ defmodule Breeze.Renderer do
         final_box
       end
 
+    stored_box = storage_box(final_box)
+
     boxes =
       acc.boxes
-      |> Map.put(acc.id, final_box)
+      |> Map.put(acc.id, stored_box)
       |> then(fn boxes ->
-        if root_id, do: Map.put(boxes, root_id, final_box), else: boxes
+        if root_id, do: Map.put(boxes, root_id, stored_box), else: boxes
       end)
 
     acc = %{acc | focusables: focusables, boxes: boxes}
 
     {acc, final_box}
   end
+
+  defp storage_box(%Box{} = box) do
+    if volatile_box?(box) do
+      %{box | content: storage_content(box.content), children: [], layer_map: %{}}
+    else
+      box
+    end
+  end
+
+  defp storage_content(%VirtualText{cache?: false}), do: ""
+  defp storage_content(content), do: content
+
+  defp volatile_box?(%Box{content: %VirtualText{cache?: false}}), do: true
+
+  defp volatile_box?(%Box{children: children}) when is_list(children),
+    do: Enum.any?(children, &volatile_box?/1)
+
+  defp volatile_box?(_box), do: false
 
   defp parse_modifiers(modifiers, style_flags) when is_list(modifiers) do
     {style_flags, style_modifiers, scroll_modifier} =
