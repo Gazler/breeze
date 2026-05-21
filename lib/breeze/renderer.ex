@@ -65,7 +65,10 @@ defmodule Breeze.Renderer do
         BackBreeze.Box.render_with_dimensions(box, opts)
       end)
 
-    box = maybe_dim_screen_backdrop(box, acc, dimensions, root_children, opts)
+    box =
+      box
+      |> maybe_dim_screen_backdrop(acc, dimensions, root_children, opts)
+      |> replace_terminal_background_marker()
 
     emit_metric(profile_scope, profile_label, :element_count, map_size(acc.elements))
 
@@ -1097,6 +1100,14 @@ defmodule Breeze.Renderer do
 
   defp text_span_list?([%{__struct__: BackBreeze.TextSpan} | _rest]), do: true
   defp text_span_list?(_value), do: false
+
+  defp replace_terminal_background_marker(%Box{content: content} = box) when is_binary(content) do
+    marker = Breeze.Style.terminal_background_color()
+    marker_code = "48;2;#{elem(marker, 0)};#{elem(marker, 1)};#{elem(marker, 2)}"
+    %{box | content: String.replace(content, marker_code, "49")}
+  end
+
+  defp replace_terminal_background_marker(box), do: box
 
   defp profile(nil, _label, _metric, fun), do: fun.()
 

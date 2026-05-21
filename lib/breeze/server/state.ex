@@ -16,6 +16,10 @@ defmodule Breeze.Server.State.Frame do
   defstruct [
     :last_payload,
     :last_lines,
+    :inline_reserved_height,
+    inline_history_height: 0,
+    inline_history_lines: [],
+    inline_history_scrollback: "",
     base_output: "",
     last_overlays: [],
     decorations: [],

@@ -16,6 +16,7 @@ defmodule Breeze.Server do
     :view_pid,
     :view,
     :start_opts,
+    :render_mode,
     :alt_screen?,
     :alt_screen_active?,
     :hide_cursor?,
@@ -42,6 +43,7 @@ defmodule Breeze.Server do
   @type option ::
           {:view, module()}
           | {:start_opts, keyword()}
+          | {:render_mode, :screen | :inline}
           | {:alt_screen, boolean()}
           | {:hide_cursor, boolean()}
           | {:mouse, boolean() | keyword()}
@@ -60,6 +62,7 @@ defmodule Breeze.Server do
   Valid options are:
 
     * `:view` - the view to run. This is required
+    * `:render_mode` - `:screen` for full-screen rendering or `:inline` for a managed inline region. Defaults to `:screen`
     * `:alt_screen` - use the terminal alternate screen on start. Defaults to `true`
     * `:hide_cursor` - hide the cursor on start. Defaults to `true`
     * `:mouse` - enable mouse tracking. Defaults to `false`. Pass `true` for click mode or keyword options for `Termite.Screen.enable_mouse/2`
@@ -110,6 +113,8 @@ defmodule Breeze.Server do
     frame_delay_ms = Keyword.get(opts, :frame_delay_ms, 80)
     debug_push_interval_ms = Keyword.get(opts, :debug_push_interval_ms, 250)
     terminal = Keyword.fetch!(opts, :terminal)
+    render_mode = normalize_render_mode(Keyword.get(opts, :render_mode, :screen))
+    alt_screen? = if render_mode == :inline, do: false, else: Keyword.get(opts, :alt_screen, true)
     theme = Breeze.Theme.new(Keyword.get(opts, :theme), terminal: terminal)
     theme_source = Keyword.get(opts, :theme)
     apply_theme_defaults? = Breeze.Theme.defaults_enabled?(Keyword.get(opts, :theme))
@@ -149,8 +154,9 @@ defmodule Breeze.Server do
         view_pid: view_pid,
         view: view,
         start_opts: start_opts,
-        alt_screen?: Keyword.get(opts, :alt_screen, true),
-        alt_screen_active?: Keyword.get(opts, :alt_screen, true),
+        render_mode: render_mode,
+        alt_screen?: alt_screen?,
+        alt_screen_active?: alt_screen?,
         hide_cursor?: Keyword.get(opts, :hide_cursor, true),
         mouse_mode: Keyword.get(opts, :mouse, false),
         reload_opts:
@@ -403,6 +409,14 @@ defmodule Breeze.Server do
     do: %{state | inspector_state: struct!(state.inspector_state, updates)}
 
   defp update_rendered(state, updates), do: %{state | rendered: struct!(state.rendered, updates)}
+
+  defp normalize_render_mode(:inline), do: :inline
+  defp normalize_render_mode(:screen), do: :screen
+  defp normalize_render_mode(nil), do: :screen
+
+  defp normalize_render_mode(other) do
+    raise ArgumentError, "invalid render_mode #{inspect(other)}. Expected :screen or :inline"
+  end
 
   defp flush_input_batch(state) do
     Input.flush_batch(state, input_handlers())
@@ -707,7 +721,8 @@ defmodule Breeze.Server do
 
     state = %{state | focused: result.focused, theme: result.metadata_theme}
     prep_started_at = System.monotonic_time(:microsecond)
-    {base_output, decorations} = prepare_decorations(result.box.content, decorations, state)
+    {prepared_output, decorations} = prepare_decorations(result.box.content, decorations, state)
+    {state, base_output} = commit_inline_history(state, result.acc, prepared_output)
     prepare_decorations_us = System.monotonic_time(:microsecond) - prep_started_at
     render_base_us = System.monotonic_time(:microsecond) - result.started_at
 
@@ -1069,16 +1084,10 @@ defmodule Breeze.Server do
 
     lines =
       output
-      |> Frame.normalize_lines(state.terminal.size.height)
+      |> normalize_frame_lines(state)
 
-    frame_payload =
-      Frame.build_payload(
-        state.frame.last_lines,
-        lines,
-        state.frame.last_overlays || [],
-        overlays,
-        state.terminal.size.width
-      )
+    {state, scrollback_output} = drain_inline_scrollback(state)
+    frame_payload = build_frame_payload(state, lines, overlays, scrollback_output)
 
     composed_at = System.monotonic_time(:microsecond)
 
@@ -1097,7 +1106,8 @@ defmodule Breeze.Server do
       decorations: decorations,
       last_payload: frame_payload,
       last_lines: lines,
-      last_overlays: overlays
+      last_overlays: overlays,
+      inline_reserved_height: inline_reserved_height(state, lines, scrollback_output)
     )
     |> Debug.put_stat(:last_frame_compose_us, composed_at - started_at)
     |> Debug.put_stat(:last_terminal_write_us, write_duration)
@@ -1106,6 +1116,163 @@ defmodule Breeze.Server do
     |> Debug.put_stat(:overlay_count, length(overlays))
     |> Inspector.push_snapshot_now()
   end
+
+  defp normalize_frame_lines(output, %{render_mode: :inline, terminal: %{size: %{height: height}}}) do
+    output
+    |> :binary.split("\n", [:global])
+    |> then(fn
+      [] -> [""]
+      lines -> lines
+    end)
+    |> Enum.take(max(height, 1))
+  end
+
+  defp normalize_frame_lines(output, state) do
+    Frame.normalize_lines(output, state.terminal.size.height)
+  end
+
+  defp build_frame_payload(%{render_mode: :inline} = state, lines, overlays, scrollback_output) do
+    if scrollback_output == "" do
+      Frame.build_inline_payload(
+        state.frame.last_lines,
+        lines,
+        state.frame.last_overlays || [],
+        overlays,
+        state.terminal.size.width,
+        state.frame.inline_reserved_height
+      )
+    else
+      Frame.build_inline_scrollback_payload(
+        scrollback_output,
+        lines,
+        overlays,
+        state.terminal.size.width,
+        state.frame.inline_reserved_height
+      )
+    end
+  end
+
+  defp build_frame_payload(state, lines, overlays, _scrollback_output) do
+    Frame.build_payload(
+      state.frame.last_lines,
+      lines,
+      state.frame.last_overlays || [],
+      overlays,
+      state.terminal.size.width
+    )
+  end
+
+  defp commit_inline_history(%{render_mode: :inline} = state, acc, content) do
+    case inline_history_height(acc) do
+      nil ->
+        {update_frame(state,
+           inline_history_height: 0,
+           inline_history_lines: [],
+           inline_history_scrollback: ""
+         ), content}
+
+      height ->
+        {history_lines, current_lines} =
+          content
+          |> String.split("\n", trim: false)
+          |> Enum.split(height)
+
+        previous_lines = state.frame.inline_history_lines || []
+        appended_lines = appended_inline_history_lines(previous_lines, history_lines)
+
+        state =
+          update_frame(state,
+            inline_history_height: height,
+            inline_history_lines: history_lines,
+            inline_history_scrollback: inline_history_scrollback(appended_lines)
+          )
+
+        {state, Enum.join(current_lines, "\n")}
+    end
+  end
+
+  defp commit_inline_history(state, _acc, content), do: {state, content}
+
+  defp inline_history_height(acc) do
+    dimensions = Breeze.RenderState.build_dimensions(acc)
+
+    acc.elements
+    |> Enum.sort()
+    |> Enum.find_value(fn {_idx, flags} ->
+      case {Keyword.get(flags, :"breeze-inline-history"), Keyword.get(flags, :id)} do
+        {value, id} when value not in [nil, false] and not is_nil(id) ->
+          dimensions
+          |> Map.get(id, %{})
+          |> Map.get(:height)
+          |> case do
+            height when is_integer(height) and height > 0 -> height
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+    end)
+  end
+
+  defp appended_inline_history_lines([], history_lines), do: history_lines
+
+  defp appended_inline_history_lines(previous_lines, history_lines) do
+    if Enum.take(history_lines, length(previous_lines)) == previous_lines do
+      Enum.drop(history_lines, length(previous_lines))
+    else
+      history_lines
+    end
+  end
+
+  defp inline_history_scrollback([]), do: ""
+
+  defp inline_history_scrollback(lines) do
+    lines
+    |> Enum.join("\n")
+    |> then(&[&1, "\n"])
+    |> IO.iodata_to_binary()
+  end
+
+  defp inline_reserved_height(%{render_mode: :inline}, lines, scrollback_output)
+       when is_binary(scrollback_output) and scrollback_output != "" do
+    length(lines)
+  end
+
+  defp inline_reserved_height(
+         %{render_mode: :inline, frame: %{inline_reserved_height: previous}},
+         lines,
+         _scrollback_output
+       ) do
+    max(previous || 0, length(lines))
+  end
+
+  defp inline_reserved_height(_state, _lines, _scrollback_output), do: nil
+
+  defp drain_inline_scrollback(%{render_mode: :inline} = state) do
+    history_output = state.frame.inline_history_scrollback || ""
+
+    pids =
+      [state.view_pid | Enum.map(state.children, fn {_id, child} -> child.pid end)]
+      |> Enum.filter(&is_pid/1)
+      |> Enum.filter(&Process.alive?/1)
+
+    output =
+      pids
+      |> Enum.map(fn pid ->
+        case safe_call(fn -> Breeze.ChildServer.drain_scrollback(pid) end) do
+          {:ok, output} when is_binary(output) -> output
+          _ -> ""
+        end
+      end)
+      |> IO.iodata_to_binary()
+
+    state = update_frame(state, inline_history_scrollback: "")
+
+    {state, IO.iodata_to_binary([history_output, output])}
+  end
+
+  defp drain_inline_scrollback(state), do: {state, ""}
 
   defp initialize_decorations(decorations) do
     Enum.map(decorations, fn decoration ->
@@ -1335,8 +1502,24 @@ defmodule Breeze.Server do
       |> Enum.flat_map(&Map.get(&1, :current_overlays, []))
       |> Enum.reject(&is_nil/1)
 
-    decoration_overlays ++ Breeze.Inspector.overlays(state)
+    decoration_overlays
+    |> translate_inline_history_overlays(state)
+    |> Kernel.++(Breeze.Inspector.overlays(state))
   end
+
+  defp translate_inline_history_overlays(overlays, %{
+         render_mode: :inline,
+         frame: %{inline_history_height: height}
+       })
+       when is_integer(height) and height > 0 do
+    Enum.flat_map(overlays, fn
+      %{y: y} = overlay when is_integer(y) and y >= height -> [%{overlay | y: y - height}]
+      %{y: y} when is_integer(y) -> []
+      overlay -> [overlay]
+    end)
+  end
+
+  defp translate_inline_history_overlays(overlays, _state), do: overlays
 
   defp normalize_animation_result({:ok, %BackBreeze.Box{} = box, opts}) when is_list(opts) do
     {box, Map.new(opts)}
@@ -1407,7 +1590,7 @@ defmodule Breeze.Server do
     terminal =
       state.terminal
       |> Termite.Screen.disable_mouse()
-      |> Termite.Screen.clear_screen()
+      |> maybe_clear_screen(state)
       |> Termite.Screen.show_cursor()
       |> maybe_exit_alt_screen(state.alt_screen_active?)
 
@@ -1417,6 +1600,9 @@ defmodule Breeze.Server do
 
   defp maybe_exit_alt_screen(terminal, true), do: Termite.Screen.exit_alt_screen(terminal)
   defp maybe_exit_alt_screen(terminal, _active?), do: terminal
+
+  defp maybe_clear_screen(terminal, %{render_mode: :inline}), do: terminal
+  defp maybe_clear_screen(terminal, _state), do: Termite.Screen.clear_screen(terminal)
 
   defp safe_apply_input_reply(state, fun) do
     case safe_call(fn -> fun.(state) end) do

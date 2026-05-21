@@ -9,6 +9,7 @@ defmodule Breeze.InputRouter do
     :server_pid,
     :halt_fun,
     :theme_probe,
+    :render_mode,
     alt_screen?: true,
     enhanced_keyboard?: true,
     global_keybindings: []
@@ -20,7 +21,8 @@ defmodule Breeze.InputRouter do
 
   @impl true
   def init(opts) do
-    alt_screen? = Keyword.get(opts, :alt_screen, true)
+    render_mode = normalize_render_mode(Keyword.get(opts, :render_mode, :screen))
+    alt_screen? = if render_mode == :inline, do: false, else: Keyword.get(opts, :alt_screen, true)
     hide_cursor? = Keyword.get(opts, :hide_cursor, true)
     enhanced_keyboard? = Keyword.get(opts, :enhanced_keyboard, true)
     mouse = Keyword.get(opts, :mouse, false)
@@ -30,7 +32,7 @@ defmodule Breeze.InputRouter do
     terminal = if enhanced_keyboard?, do: enable_enhanced_keyboard(terminal), else: terminal
     terminal = if hide_cursor?, do: Termite.Screen.hide_cursor(terminal), else: terminal
     terminal = enable_mouse(terminal, mouse)
-    terminal = Termite.Screen.clear_screen(terminal)
+    terminal = maybe_clear_screen(terminal, render_mode)
 
     {terminal, deferred_messages} =
       maybe_complete_initial_theme_probe(terminal, Keyword.get(opts, :theme))
@@ -48,6 +50,7 @@ defmodule Breeze.InputRouter do
       reader: reader,
       server_pid: server_pid,
       halt_fun: Keyword.get(opts, :halt_fun, fn -> System.halt() end),
+      render_mode: render_mode,
       alt_screen?: alt_screen?,
       enhanced_keyboard?: enhanced_keyboard?,
       global_keybindings: Keyword.get(opts, :global_keybindings, [])
@@ -296,7 +299,7 @@ defmodule Breeze.InputRouter do
     state.terminal
     |> maybe_disable_enhanced_keyboard(state)
     |> Termite.Screen.disable_mouse()
-    |> Termite.Screen.clear_screen()
+    |> maybe_clear_screen(state.render_mode)
     |> Termite.Screen.show_cursor()
     |> maybe_exit_alt_screen(state)
     |> Termite.Terminal.write("\r")
@@ -308,6 +311,17 @@ defmodule Breeze.InputRouter do
     do: Termite.Screen.exit_alt_screen(terminal)
 
   defp maybe_exit_alt_screen(terminal, _state), do: terminal
+
+  defp maybe_clear_screen(terminal, :inline), do: terminal
+  defp maybe_clear_screen(terminal, _mode), do: Termite.Screen.clear_screen(terminal)
+
+  defp normalize_render_mode(:inline), do: :inline
+  defp normalize_render_mode(:screen), do: :screen
+  defp normalize_render_mode(nil), do: :screen
+
+  defp normalize_render_mode(other) do
+    raise ArgumentError, "invalid render_mode #{inspect(other)}. Expected :screen or :inline"
+  end
 
   defp enable_enhanced_keyboard(terminal) do
     Termite.Screen.enable_enhanced_keyboard(terminal)

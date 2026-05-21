@@ -127,6 +127,7 @@ defmodule Breeze.View do
    * `absolute` - position the elements absolute relative to the parent
    * `border-x` - set the border color where x is a number
    * `bg-x` - set the background color where x is a number
+   * `bg-terminal` - reset the background color to the terminal default
    * `text-x` - set the foreground color where x is a number
 
   ## Implicits
@@ -669,6 +670,35 @@ defmodule Breeze.View do
 
   def assign(assigns, values) when is_map(assigns) do
     Map.merge(assigns, Map.new(values))
+  end
+
+  @doc """
+  Queue output to be written to the terminal scrollback in inline render mode.
+  """
+  def append_scrollback(%{pending_scrollback: pending} = term, output) do
+    %{term | pending_scrollback: [IO.iodata_to_binary(output) | pending]}
+  end
+
+  @doc """
+  Render a view/component and queue it to be written to the terminal scrollback in inline render mode.
+  """
+  def append_scrollback(term, view, assigns, opts \\ []) when is_atom(view) do
+    output =
+      Breeze.Renderer.render_to_string(
+        view,
+        Map.new(assigns),
+        Keyword.merge(
+          [
+            terminal: term.terminal,
+            theme: term.theme,
+            theme_source: term.theme_source || term.theme,
+            apply_theme_defaults: false
+          ],
+          opts
+        )
+      )
+
+    append_scrollback(term, [output, "\n"])
   end
 
   def focus(term, value) do

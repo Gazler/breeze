@@ -25,7 +25,7 @@ defmodule Breeze.Implicit.TextareaTest do
           textarea-placeholder="Ask anything"
           textarea-prefix="› "
           br-change="message_changed"
-          style="width-full height-4"
+          style="width-full height-6"
         />
       </box>
       """
@@ -102,13 +102,46 @@ defmodule Breeze.Implicit.TextareaTest do
   end
 
   test "init returns normalized state and cursor animation metadata" do
-    assert {:ok, %{cursor: 0, value: "", placeholder: nil, preferred_column: nil}, meta} =
+    assert {:ok,
+            %{
+              cursor: 0,
+              value: "",
+              placeholder: nil,
+              autogrow?: true,
+              min_height: nil,
+              preferred_column: nil
+            }, meta} =
              Textarea.init([], %{id: "composer"}, %{})
 
     assert meta[:rerender_every] == 500
     assert meta[:active_when_focused] == true
     assert meta[:captures_printable_keys] == true
     assert meta[:requires_layout_rerender] == true
+  end
+
+  test "init records the rendered height as the autogrow minimum" do
+    assert {:ok, %{autogrow?: true, min_height: 3}, _meta} =
+             Textarea.init([], %{class: "width-20 height-3", id: "composer"}, %{})
+
+    assert {:ok, %{autogrow?: false, min_height: 3}, _meta} =
+             Textarea.init(
+               [],
+               %{class: "width-20 height-3", id: "composer", "textarea-autogrow": false},
+               %{}
+             )
+  end
+
+  test "autogrow returns a height modifier when content exceeds the initial height" do
+    assert {:ok, state, _meta} =
+             Textarea.init(
+               [],
+               %{class: "width-20 height-3", "textarea-value": "one\ntwo\nthree"},
+               %{}
+             )
+
+    layout = %Breeze.Viewport{width: 20, height: 3, viewport_width: 20, viewport_height: 1}
+
+    assert [style: "height-5"] = Textarea.handle_modifiers(:root, [layout_element: layout], state)
   end
 
   test "enter inserts a newline" do

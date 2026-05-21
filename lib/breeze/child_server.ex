@@ -23,6 +23,10 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, {:render_snapshot, opts})
   end
 
+  def drain_scrollback(pid) do
+    GenServer.call(pid, :drain_scrollback)
+  end
+
   def dispatch_input(pid, input, opts \\ []) do
     GenServer.call(pid, {:input, input, opts})
   end
@@ -126,6 +130,15 @@ defmodule Breeze.ChildServer do
        implicit_state: metadata_term.implicit_state,
        implicit_meta: metadata_term.implicit_meta
      }, term}
+  end
+
+  def handle_call(:drain_scrollback, _from, term) do
+    output =
+      term.pending_scrollback
+      |> Enum.reverse()
+      |> IO.iodata_to_binary()
+
+    {:reply, output, %{term | pending_scrollback: []}}
   end
 
   def handle_call(:layout_snapshot, _from, term) do

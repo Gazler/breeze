@@ -10,6 +10,8 @@ defmodule Breeze.Implicit.Textarea do
           cursor: non_neg_integer(),
           placeholder: String.t() | nil,
           submit_on_enter?: boolean(),
+          autogrow?: boolean(),
+          min_height: pos_integer() | nil,
           preferred_column: non_neg_integer() | nil
         }
 
@@ -43,6 +45,8 @@ defmodule Breeze.Implicit.Textarea do
       cursor: cursor,
       placeholder: Map.get(root_attrs, :"textarea-placeholder"),
       submit_on_enter?: submit_on_enter?(root_attrs),
+      autogrow?: autogrow?(root_attrs),
+      min_height: initial_height(root_attrs),
       preferred_column: nil
     }
 
@@ -136,7 +140,10 @@ defmodule Breeze.Implicit.Textarea do
 
   def handle_event(_, _, state), do: {:noreply, state}
 
-  def handle_modifiers(:root, _flags, state), do: placeholder_modifiers(state)
+  def handle_modifiers(:root, flags, state) do
+    placeholder_modifiers(state) ++ autogrow_modifiers(flags, state)
+  end
+
   def handle_modifiers(:child, _flags, state), do: placeholder_modifiers(state)
 
   def animate(
@@ -203,6 +210,54 @@ defmodule Breeze.Implicit.Textarea do
   end
 
   defp truthy?(value), do: value in [true, "true", ""]
+
+  defp autogrow?(attrs), do: Map.get(attrs, :"textarea-autogrow", true) not in [false, "false"]
+
+  defp initial_height(attrs) do
+    attrs
+    |> Map.get(:class, "")
+    |> to_string()
+    |> String.split(" ", trim: true)
+    |> Enum.reduce(nil, fn
+      "height-" <> value, _acc -> parse_height(value)
+      _token, acc -> acc
+    end)
+  end
+
+  defp parse_height(value) do
+    case Integer.parse(value) do
+      {height, ""} when height > 0 -> height
+      _ -> nil
+    end
+  end
+
+  defp autogrow_modifiers(_flags, %{autogrow?: false}), do: []
+
+  defp autogrow_modifiers(flags, %{min_height: min_height} = state) do
+    with %{width: width, height: height, viewport_width: viewport_width, viewport_height: viewport_height}
+         when is_integer(width) and is_integer(height) and is_integer(viewport_width) and
+                is_integer(viewport_height) <- Keyword.get(flags, :layout_element),
+         true <- viewport_width > 0,
+         true <- viewport_height > 0 do
+      line_count =
+        source_content(state)
+        |> wrapped_line_count(state, viewport_width)
+
+      chrome_height = max(height - viewport_height, 0)
+      content_height = max(line_count, 1)
+      next_height = max(min_height || height, content_height + chrome_height)
+
+      if next_height != height, do: [style: "height-#{next_height}"], else: []
+    else
+      _ ->
+        if is_integer(min_height), do: [style: "height-#{min_height}"], else: []
+    end
+  end
+
+  defp wrapped_line_count(content, state, width) do
+    {lines, _cursor_row, _cursor_x} = wrap_lines(content, state, width)
+    max(length(lines), 1)
+  end
 
   defp source_content(%{value: "", placeholder: placeholder})
        when is_binary(placeholder) and placeholder != "" do

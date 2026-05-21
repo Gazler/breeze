@@ -71,9 +71,9 @@ defmodule Breeze.Storybook.Stories.Blocks.TextareaStory do
   defp textarea_height(value) do
     value
     |> line_count()
-    |> Kernel.+(2)
-    |> min(7)
-    |> max(4)
+    |> Kernel.+(4)
+    |> min(9)
+    |> max(5)
   end
 
   defp line_count(value) do

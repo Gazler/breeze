@@ -60,6 +60,16 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule TerminalBackgroundExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-8 height-2 bg-terminal text">Hi</box>
+      """
+    end
+  end
+
   defmodule StructStyleExample do
     use Breeze.View
 
@@ -470,6 +480,13 @@ defmodule Breeze.RendererTest do
       assert box.style.foreground_color == {38, 139, 210}
       assert box.style.background_color == {0, 43, 54}
       assert box.style.border_color == {88, 110, 117}
+    end
+
+    test "bg-terminal resets rendered background to the terminal default" do
+      output = Renderer.render_to_string(TerminalBackgroundExample, %{})
+
+      assert output =~ "\e[49;"
+      refute output =~ "\e[48;2;1;3;37m"
     end
 
     test "theme: true enables default semantic text, background, and border colors" do

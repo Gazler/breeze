@@ -39,6 +39,58 @@ defmodule Breeze.Server.Frame do
     end
   end
 
+  def build_inline_payload(
+        prev_lines,
+        lines,
+        prev_overlays,
+        overlays,
+        screen_width,
+        reserved_height
+      ) do
+    reserved_height = max(reserved_height || 0, 0)
+    next_height = max(length(lines), 1)
+    paint_height = max(reserved_height, next_height)
+
+    cond do
+      prev_lines == lines and prev_overlays == overlays and reserved_height >= next_height ->
+        ""
+
+      reserved_height == 0 ->
+        IO.iodata_to_binary([
+          reserve_inline_rows(paint_height),
+          inline_rewrite_payload(lines, overlays, screen_width, paint_height, restore?: false)
+        ])
+
+      next_height > reserved_height ->
+        IO.iodata_to_binary([
+          restore_cursor(),
+          extend_inline_rows(next_height - reserved_height),
+          inline_rewrite_payload(lines, overlays, screen_width, next_height, restore?: false)
+        ])
+
+      true ->
+        inline_rewrite_payload(lines, overlays, screen_width, paint_height, restore?: true)
+    end
+  end
+
+  def build_inline_scrollback_payload(
+        scrollback,
+        lines,
+        overlays,
+        screen_width,
+        reserved_height
+      )
+      when is_binary(scrollback) do
+    reserved_height = max(reserved_height || 0, 0)
+    next_height = max(length(lines), 1)
+
+    IO.iodata_to_binary([
+      move_to_inline_scrollback_start(reserved_height),
+      normalize_scrollback(scrollback),
+      inline_write_payload(lines, overlays, screen_width, next_height)
+    ])
+  end
+
   def invalidate_patched_rows(nil, _viewport), do: nil
 
   def invalidate_patched_rows(lines, %{top: top, height: height})
@@ -87,6 +139,152 @@ defmodule Breeze.Server.Frame do
     overlay_output = Breeze.TerminalOverlay.render_overlays(overlays)
     IO.iodata_to_binary(["\e[2J\e[H", output, overlay_output])
   end
+
+  defp inline_rewrite_payload(lines, overlays, screen_width, reserved_height, opts) do
+    rows = lines ++ List.duplicate("", max(reserved_height - length(lines), 0))
+
+    [
+      if(Keyword.get(opts, :restore?, false), do: restore_cursor(), else: ""),
+      inline_move_to_top(reserved_height),
+      inline_rows_payload(rows, screen_width),
+      inline_overlay_payload(overlays, reserved_height),
+      save_cursor()
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  defp inline_write_payload(lines, overlays, screen_width, reserved_height) do
+    rows = lines ++ List.duplicate("", max(reserved_height - length(lines), 0))
+
+    [
+      inline_rows_payload(rows, screen_width),
+      inline_overlay_payload(overlays, reserved_height),
+      save_cursor()
+    ]
+    |> IO.iodata_to_binary()
+  end
+
+  defp reserve_inline_rows(count) when count > 1, do: String.duplicate("\r\n", count - 1)
+  defp reserve_inline_rows(_count), do: ""
+
+  defp extend_inline_rows(count) when count > 0, do: String.duplicate("\r\n", count)
+  defp extend_inline_rows(_count), do: ""
+
+  defp inline_move_to_top(count) when count > 1, do: "\e[#{count - 1}F"
+  defp inline_move_to_top(_count), do: "\r"
+
+  defp move_to_inline_scrollback_start(reserved_height) when reserved_height > 0 do
+    [restore_cursor(), inline_move_to_top(reserved_height)]
+  end
+
+  defp move_to_inline_scrollback_start(_reserved_height), do: ""
+
+  defp normalize_scrollback(""), do: ""
+
+  defp normalize_scrollback(scrollback) do
+    scrollback =
+      scrollback
+      |> String.replace("\r\n", "\n")
+      |> trim_scrollback_padding()
+      |> String.replace("\n", "\r\n")
+
+    if String.ends_with?(scrollback, "\r\n"), do: scrollback, else: scrollback <> "\r\n"
+  end
+
+  defp trim_scrollback_padding(scrollback) do
+    scrollback
+    |> String.split("\n", trim: false)
+    |> Enum.map(&String.trim_trailing(&1, " "))
+    |> Enum.reject(fn line -> strip_ansi(line) == "" end)
+    |> Enum.join("\n")
+  end
+
+  defp strip_ansi(line) do
+    String.replace(line, ~r/\e\[[0-9;?]*[ -\/]*[@-~]/, "")
+  end
+
+  defp inline_rows_payload(lines, screen_width) do
+    lines
+    |> Enum.with_index()
+    |> Enum.map(fn {line, index} ->
+      inline_row_payload(line, screen_width, index == length(lines) - 1)
+    end)
+    |> IO.iodata_to_binary()
+  end
+
+  defp inline_row_payload(line, screen_width, last?) do
+    line =
+      if visible_width(line) > screen_width do
+        truncate_visible(line, screen_width)
+      else
+        line
+      end
+
+    next_row = if last?, do: "\e[K\r", else: "\e[K\r\n"
+    ["\e[?7l", line, "\e[?7h", next_row]
+  end
+
+  defp inline_overlay_payload(overlays, reserved_height) do
+    overlays
+    |> Enum.reject(&is_nil/1)
+    |> Enum.reject(&(Map.get(&1, :visible?) == false))
+    |> Enum.reject(fn overlay -> Map.get(overlay, :y, 0) >= reserved_height end)
+    |> Enum.map(&inline_overlay(&1, reserved_height))
+    |> IO.iodata_to_binary()
+  end
+
+  defp inline_overlay(%{x: x, y: y, content: content} = overlay, reserved_height)
+       when is_binary(content) do
+    [
+      inline_move_to_row(x, y, reserved_height),
+      if(Map.get(overlay, :no_wrap, false), do: "\e[?7l", else: ""),
+      if(Map.get(overlay, :clear_line, false), do: "\e[2K", else: ""),
+      content,
+      if(Map.get(overlay, :no_wrap, false), do: "\e[?7h", else: ""),
+      inline_move_to_bottom(y, reserved_height)
+    ]
+  end
+
+  defp inline_overlay(%{x: x, y: y, char: char} = overlay, reserved_height) do
+    [
+      inline_move_to_row(x, y, reserved_height),
+      cursor_open_code(overlay),
+      char,
+      Termite.Style.reset_code(),
+      inline_move_to_bottom(y, reserved_height)
+    ]
+  end
+
+  defp inline_overlay(_overlay, _reserved_height), do: ""
+
+  defp inline_move_to_row(x, y, reserved_height) do
+    up = max(reserved_height - y - 1, 0)
+    right = max(x, 0)
+    ["\e[#{up}F", if(right > 0, do: "\e[#{right}C", else: "")]
+  end
+
+  defp inline_move_to_bottom(y, reserved_height) do
+    down = max(reserved_height - y - 1, 0)
+    ["\r", if(down > 0, do: "\e[#{down}E", else: "")]
+  end
+
+  defp save_cursor, do: "\e7"
+  defp restore_cursor, do: "\e8"
+
+  defp cursor_open_code(overlay) do
+    style =
+      Termite.Style.ansi256()
+      |> maybe_put_foreground(Map.get(overlay, :foreground_color, 0))
+      |> maybe_put_background(Map.get(overlay, :background_color, 11))
+
+    Termite.Style.open_code(style)
+  end
+
+  defp maybe_put_foreground(style, nil), do: style
+  defp maybe_put_foreground(style, color), do: Termite.Style.foreground(style, color)
+
+  defp maybe_put_background(style, nil), do: style
+  defp maybe_put_background(style, color), do: Termite.Style.background(style, color)
 
   defp changed_base_rows(prev_lines, lines) do
     lines
@@ -192,6 +390,25 @@ defmodule Breeze.Server.Frame do
 
   defp visible_width(line) when is_binary(line) do
     BackBreeze.Utils.string_length(line)
+  end
+
+  defp truncate_visible(_line, width) when width <= 0 do
+    ""
+  end
+
+  defp truncate_visible(line, width) do
+    line
+    |> String.graphemes()
+    |> Enum.reduce_while({"", 0}, fn grapheme, {acc, used} ->
+      next = BackBreeze.Utils.string_length(grapheme)
+
+      if used + next > width do
+        {:halt, {acc, used}}
+      else
+        {:cont, {acc <> grapheme, used + next}}
+      end
+    end)
+    |> elem(0)
   end
 
   defp overlay_patch_payload(overlays, changed_rows) do

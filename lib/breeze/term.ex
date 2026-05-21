@@ -30,6 +30,7 @@ defmodule Breeze.Term do
     rendered_boxes: %{},
     mouse_targets: %{},
     children: %{},
+    pending_scrollback: [],
     frame_delay_ms: 16,
     render_timer: nil,
     apply_theme_defaults?: false

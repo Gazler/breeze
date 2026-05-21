@@ -3,10 +3,15 @@ defmodule Breeze.Style do
 
   alias Breeze.Theme
 
+  @terminal_background_color {1, 3, 37}
+
   @type state :: %{class: list(), style: list()}
 
   @spec empty() :: state()
   def empty, do: %{class: [], style: []}
+
+  @doc false
+  def terminal_background_color, do: @terminal_background_color
 
   @spec put_class(state(), term()) :: state()
   def put_class(style_state, value) do
@@ -328,6 +333,9 @@ defmodule Breeze.Style do
 
   defp apply_style("bg", {style, attrs}, theme),
     do: {BackBreeze.Style.background_color(style, Theme.resolve_color(theme, :background)), attrs}
+
+  defp apply_style("bg-terminal", {style, attrs}, _theme),
+    do: {BackBreeze.Style.background_color(style, @terminal_background_color), attrs}
 
   defp apply_style("bg-mute-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :bg_mute, normalize_percent(value))}

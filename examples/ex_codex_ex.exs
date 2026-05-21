@@ -2,70 +2,60 @@ defmodule ExCodexEx do
   use Breeze.View
   import Breeze.Blocks
 
+  alias Breeze.History
   alias Breeze.Theme
 
   @initial_prompt ""
 
   def mount(_opts, term) do
+    history =
+      History.new()
+      |> History.append("system-ready", %{
+        role: :system,
+        text: "ExCodexEx is ready in /workspace/app."
+      })
+      |> History.append("agent-ready", %{role: :agent, text: "Type a task and press Enter."})
+
     {:ok,
      term
      |> Breeze.View.put_theme(Theme.builtin(:nebula))
      |> focus("composer")
      |> assign(
+       history: history,
        prompt: @initial_prompt,
        prompt_cursor: String.length(@initial_prompt),
        run_count: 0,
-       status: "idle",
-       screen_height: screen_height(term),
-       transcript: initial_transcript()
+       status: "idle"
      )}
   end
 
   def render(assigns) do
-    assigns =
-      assign(assigns,
-        prompt_height: prompt_height(assigns.prompt),
-        composer_height: composer_height(assigns.prompt),
-        scrollback_height:
-          scrollback_height(assigns.screen_height, prompt_height(assigns.prompt)),
-        transcript_entries: transcript_entries(assigns.transcript)
-      )
-
     ~H"""
-    <box class="width-screen height-screen bg overflow-hidden">
-      <.scroll
-        id="scrollback"
-        scroll-autoscroll="bottom"
-        class={"width-full height-#{@scrollback_height} overflow-scroll bg padding-left-2 padding-right-2 padding-top-1 padding-bottom-1"}
-      >
-        <box :for={entry <- @transcript_entries} class="width-full padding-bottom-1">
-          <.textarea
-            :if={entry.role == :user}
-            id={entry.id}
-            textarea-value={entry.text}
-            textarea-prefix="› "
-            disabled
-            class={"width-full height-#{entry.height} bg-surface border-none padding-left-0 padding-top-0 padding-bottom-0"}
-          />
-          <box :if={entry.role != :user} class={entry.class}>{entry.text}</box>
+    <.inline_history id="conversation" history={@history}>
+      <:entry>
+        <.transcript_entry id={id} entry={entry}/>
+      </:entry>
+      <:current>
+        <box class="width-screen">
+          <box class="width-full bg-panel padding-left-2 padding-right-2">
+            <.textarea
+              id="composer"
+              textarea-value={@prompt}
+              textarea-cursor={@prompt_cursor}
+              textarea-placeholder="Ask ExCodexEx to change the codebase"
+              textarea-prefix="› "
+              textarea-submit-on-enter
+              br-change="prompt_changed"
+              br-submit="prompt_submitted"
+              class="width-full height-3 bg-panel border-none padding-left-0 padding-top-1 padding-bottom-1"
+            />
+          </box>
+          <box class="width-full height-1 text-muted padding-left-2">
+            try: add a retry button to the posting example
+          </box>
         </box>
-      </.scroll>
-      <box
-        class={"fixed left-0 bottom-0 width-screen height-#{@prompt_height} bg-panel padding-left-2 padding-right-2 padding-top-1"}
-      >
-        <.textarea
-          id="composer"
-          textarea-value={@prompt}
-          textarea-cursor={@prompt_cursor}
-          textarea-placeholder="Ask ExCodexEx to change the codebase"
-          textarea-prefix="› "
-          textarea-submit-on-enter
-          br-change="prompt_changed"
-          br-submit="prompt_submitted"
-          class={"width-full height-#{@composer_height} bg-panel border-none padding-left-0 padding-top-0 padding-bottom-0"}
-        />
-      </box>
-    </box>
+      </:current>
+    </.inline_history>
     """
   end
 
@@ -85,18 +75,16 @@ defmodule ExCodexEx do
 
   def handle_info(:finish_run, term) do
     {:noreply,
-     assign(term,
-       status: "complete",
-       transcript:
-         term.assigns.transcript ++
-           [
-             {:agent, "Patched the dashboard focus loop and refreshed the tests."},
-             {:system, "Verification passed: mix test test/breeze/agent_dashboard_test.exs"}
-           ]
-     )}
+     term
+     |> append_transcript(:agent, "Patched the dashboard focus loop and refreshed the tests.")
+     |> append_transcript(
+       :system,
+       "Verification passed: mix test test/breeze/agent_dashboard_test.exs"
+     )
+     |> assign(status: "complete")}
   end
 
-  def handle_info(:resize, term), do: {:noreply, assign(term, screen_height: screen_height(term))}
+  def handle_info(:resize, term), do: {:noreply, term}
   def handle_info(_, term), do: {:noreply, term}
 
   defp run_agent(term) do
@@ -113,80 +101,59 @@ defmodule ExCodexEx do
     Process.send_after(self(), :finish_run, 700)
 
     {:noreply,
-     assign(term,
+     term
+     |> append_transcript(:user, prompt)
+     |> append_transcript(
+       :agent,
+       "I am reading the dashboard, applying a focused patch, and running tests."
+     )
+     |> assign(
        run_count: term.assigns.run_count + 1,
        prompt: "",
        prompt_cursor: 0,
-       status: "running",
-       transcript:
-         term.assigns.transcript ++
-           [
-             {:user, prompt},
-             {:agent, "I am reading the dashboard, applying a focused patch, and running tests."}
-           ]
+       status: "running"
      )
      |> focus("composer")}
   end
 
-  defp prompt_height(value) do
-    value
-    |> String.split("\n", trim: false)
-    |> length()
-    |> Kernel.+(2)
-    |> min(8)
-    |> max(4)
+  defp append_transcript(term, role, text) do
+    id = "history-#{term.assigns.run_count}-#{role}-#{System.unique_integer([:positive])}"
+    entry = %{role: role, text: text}
+    history = History.append(term.assigns.history, id, entry)
+    assign(term, history: history)
   end
 
-  defp composer_height(value), do: max(prompt_height(value) - 1, 3)
+  def transcript_entry(assigns) do
+    assigns =
+      assign(assigns,
+        role: assigns.entry.role,
+        text: assigns.entry.text
+      )
 
-  defp scrollback_height(screen_height, prompt_height) do
-    max(screen_height - prompt_height, 1)
-  end
-
-  defp screen_height(%{terminal: %{size: %{height: height}}}) when is_integer(height), do: height
-  defp screen_height(_term), do: 24
-
-  defp transcript_entries([]) do
-    [%{id: "empty", role: :system, text: "No messages yet.", class: "text-muted", height: 1}]
-  end
-
-  defp transcript_entries(messages) do
-    messages
-    |> Enum.with_index()
-    |> Enum.map(fn {{role, text}, index} ->
-      %{
-        id: "scrollback-#{role}-#{index}",
-        role: role,
-        text: text,
-        class: transcript_class(role),
-        height: transcript_textarea_height(text)
-      }
-    end)
-  end
-
-  defp transcript_class(:system), do: "text-muted"
-  defp transcript_class(_role), do: "text"
-
-  defp transcript_textarea_height(text) do
-    text
-    |> String.split("\n", trim: false)
-    |> length()
-    |> Kernel.+(2)
-    |> min(8)
-    |> max(3)
-  end
-
-  defp initial_transcript do
-    [
-      {:system, "ExCodexEx is ready in /workspace/app."},
-      {:agent, "Type a task and press Enter."}
-    ]
+    ~H"""
+    <box class="padding-bottom-1">
+      <box :if={@role == :user} class="width-full height-1 bg-terminal">
+      </box>
+      <.textarea
+        :if={@role == :user}
+        id={@id}
+        textarea-value={@text}
+        textarea-prefix="› "
+        disabled
+        class="width-full height-auto bg border-none padding-left-0 padding-top-1 padding-bottom-1"
+      />
+      <box :if={@role == :user} class="width-full height-1 bg-terminal">
+      </box>
+      <box :if={@role == :agent} class="width-full bg-terminal text">{@text}</box>
+      <box :if={@role == :system} class="width-full bg-terminal text-muted">{@text}</box>
+    </box>
+    """
   end
 end
 
 server_opts = [
   view: ExCodexEx,
-  alt_screen: false,
+  render_mode: :inline,
   reload: true,
   theme: Breeze.Theme.builtin(:nebula),
   hide_cursor: true,

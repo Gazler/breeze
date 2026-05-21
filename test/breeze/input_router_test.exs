@@ -156,6 +156,104 @@ defmodule Breeze.InputRouterTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule InlineScrollbackView do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok,
+       Breeze.View.append_scrollback(term, Breeze.InputRouterTest.InlineScrollbackEntry, %{
+         text: "hello scrollback"
+       })}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-1">prompt</box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule InlineScrollbackEntry do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-1">{@text}</box>
+      """
+    end
+  end
+
+  defmodule InlineShrinkView do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok, assign(term, rows: ["tall one", "tall two", "tall three"])}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box class={"width-screen height-#{length(@rows)}"}>
+        <box :for={row <- @rows} class="width-full height-1">{row}</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "s"}, term) do
+      {:noreply,
+       term
+       |> Breeze.View.append_scrollback("history\n")
+       |> assign(rows: ["small"])}
+    end
+
+    def handle_event(_, %{"key" => "u"}, term) do
+      {:noreply, assign(term, rows: ["updated"])}
+    end
+
+    def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule InlineDeclarativeHistoryView do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term) do
+      {:ok,
+       assign(term,
+         history: Breeze.History.new(first: %{text: "first"}),
+         prompt: "prompt"
+       )}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <.inline_history id="test-history" history={@history}>
+        <:entry>
+          <box class="width-screen height-1">{entry.text}</box>
+        </:entry>
+        <:current>
+          <box class="width-screen height-1">{@prompt}</box>
+        </:current>
+      </.inline_history>
+      """
+    end
+
+    def handle_event(_, %{"key" => "a"}, term) do
+      history = Breeze.History.append(term.assigns.history, :second, %{text: "second"})
+      {:noreply, assign(term, history: history)}
+    end
+
+    def handle_event(_, %{"key" => "p"}, term), do: {:noreply, assign(term, prompt: "updated")}
+    def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   test "stop global keys are handled even while the app server is blocked" do
     parent = self()
 
@@ -352,6 +450,138 @@ defmodule Breeze.InputRouterTest do
 
     refute String.contains?(payload, "\e[?1049h")
     refute String.contains?(payload, "\e[?1049l")
+  end
+
+  test "render_mode inline skips alternate screen and full-screen clears" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: InlineScrollbackView,
+        render_mode: :inline,
+        hide_cursor: false,
+        terminal_opts: [adapter: RecordingAdapter, owner: parent],
+        halt_fun: fn -> send(parent, :halted) end,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    ref = Process.monitor(pid)
+    assert_receive {:terminal_started, ^pid, reader}
+
+    initial_payload =
+      wait_until(fn ->
+        payload = drain_terminal_writes() |> IO.iodata_to_binary()
+
+        if payload =~ "hello scrollback" and payload =~ "prompt" do
+          payload
+        else
+          false
+        end
+      end)
+
+    refute initial_payload =~ "\e[?1049h"
+    refute initial_payload =~ "\e[2J"
+
+    send(pid, {reader, {:data, "q"}})
+    assert_receive :halted
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+
+    stop_payload = drain_terminal_writes() |> IO.iodata_to_binary()
+    refute stop_payload =~ "\e[?1049l"
+    refute stop_payload =~ "\e[2J"
+  end
+
+  test "render_mode inline resets reserved height after scrollback shrinks the live region" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: InlineShrinkView,
+        render_mode: :inline,
+        hide_cursor: false,
+        terminal_opts: [adapter: RecordingAdapter, owner: parent],
+        halt_fun: fn -> send(parent, :halted) end
+      )
+
+    ref = Process.monitor(pid)
+    assert_receive {:terminal_started, ^pid, reader}
+
+    wait_until(fn ->
+      payload = drain_terminal_writes() |> IO.iodata_to_binary()
+      if payload =~ "tall three", do: payload, else: false
+    end)
+
+    send(pid, {reader, {:data, "s"}})
+
+    wait_until(fn ->
+      payload = drain_terminal_writes() |> IO.iodata_to_binary()
+      if payload =~ "history" and payload =~ "small", do: payload, else: false
+    end)
+
+    send(pid, {reader, {:data, "u"}})
+
+    update_payload =
+      wait_until(fn ->
+        payload = drain_terminal_writes() |> IO.iodata_to_binary()
+        if payload =~ "updated", do: payload, else: false
+      end)
+
+    refute update_payload =~ "\e[2F"
+
+    send(pid, {reader, {:data, "q"}})
+    assert_receive :halted
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+  end
+
+  test "render_mode inline commits declarative history and leaves current region live" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: InlineDeclarativeHistoryView,
+        render_mode: :inline,
+        hide_cursor: false,
+        terminal_opts: [adapter: RecordingAdapter, owner: parent],
+        halt_fun: fn -> send(parent, :halted) end
+      )
+
+    ref = Process.monitor(pid)
+    assert_receive {:terminal_started, ^pid, reader}
+
+    initial_payload =
+      wait_until(fn ->
+        payload = drain_terminal_writes() |> IO.iodata_to_binary()
+        if payload =~ "first" and payload =~ "prompt", do: payload, else: false
+      end)
+
+    assert initial_payload =~ "first"
+    assert initial_payload =~ "prompt"
+
+    send(pid, {reader, {:data, "a"}})
+
+    append_payload =
+      wait_until(fn ->
+        payload = drain_terminal_writes() |> IO.iodata_to_binary()
+        if payload =~ "second" and payload =~ "prompt", do: payload, else: false
+      end)
+
+    assert append_payload =~ "second"
+    refute append_payload =~ "first"
+
+    send(pid, {reader, {:data, "p"}})
+
+    update_payload =
+      wait_until(fn ->
+        payload = drain_terminal_writes() |> IO.iodata_to_binary()
+        if payload =~ "updated", do: payload, else: false
+      end)
+
+    refute update_payload =~ "first"
+    refute update_payload =~ "second"
+
+    send(pid, {reader, {:data, "q"}})
+    assert_receive :halted
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
   end
 
   test "stop global keys do not halt when a focused implicit captures printable input" do

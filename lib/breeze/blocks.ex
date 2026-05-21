@@ -22,6 +22,7 @@ defmodule Breeze.Blocks do
 
   use Breeze.View
   alias BackBreeze.Ucwidth
+  alias Breeze.History
 
   attr :keybindings, :list, default: []
   attr :class, :string, default: nil
@@ -50,6 +51,29 @@ defmodule Breeze.Blocks do
       class={@class || "inline width-full overflow-hidden padding-left-2 padding-right-1"}
     >
       <box :for={%{class: class, content: content} <- @parts} class={class}>{content}</box>
+    </box>
+    """
+  end
+
+  slot :entry, required: true
+  slot :current, required: true
+
+  def inline_history(assigns) do
+    assigns =
+      assigns
+      |> assign(id: Map.get(assigns, :id, "history"))
+      |> assign(entries: History.entries(Map.get(assigns, :history)))
+
+    ~H"""
+    <box class="width-full">
+      <box id={"#{@id}-history"} breeze-inline-history={@id} class="width-full">
+        <box :for={entry <- @entries} class="width-full">
+          {render_slot(@entry, %{entry: entry.value, id: entry.id})}
+        </box>
+      </box>
+      <box id={"#{@id}-current"} breeze-inline-current={@id} class="width-full">
+        {render_slot(@current)}
+      </box>
     </box>
     """
   end
@@ -551,6 +575,7 @@ defmodule Breeze.Blocks do
   attr :"textarea-placeholder", :string, default: nil
   attr :"textarea-prefix", :string, default: nil
   attr :"textarea-submit-on-enter", :boolean, default: false
+  attr :"textarea-autogrow", :boolean, default: true
   attr :disabled, :boolean, default: false
   attr :rest, :global
 
@@ -588,6 +613,7 @@ defmodule Breeze.Blocks do
         textarea-cursor={assigns[:"textarea-cursor"]}
         textarea-placeholder={assigns[:"textarea-placeholder"]}
         textarea-submit-on-enter={assigns[:"textarea-submit-on-enter"]}
+        textarea-autogrow={assigns[:"textarea-autogrow"]}
         {@rest}
       >
         {@textarea_value}
@@ -967,7 +993,7 @@ defmodule Breeze.Blocks do
 
   defp textarea_class(assigns, nil) do
     merge_class(
-      "input border-rounded border-stroke bg-panel text mute-text-22 focus:text focus:mute-text-0 focus:border-primary placeholder:mute-text-16 padding-left-1 padding-right-1 height-5 overflow-hidden",
+      textarea_base_class(),
       class_override(assigns)
     )
   end
@@ -975,7 +1001,7 @@ defmodule Breeze.Blocks do
   defp textarea_class(assigns, prefix) do
     base_class =
       merge_class(
-        "input border-rounded border-stroke bg-panel text mute-text-22 focus:text focus:mute-text-0 focus:border-primary placeholder:mute-text-16 padding-left-1 padding-right-1 height-5 overflow-hidden",
+        textarea_base_class(),
         class_override(assigns)
       )
 
@@ -992,7 +1018,7 @@ defmodule Breeze.Blocks do
   defp textarea_prefix_class(assigns, prefix) do
     base_class =
       merge_class(
-        "input border-rounded border-stroke bg-panel text mute-text-22 focus:text focus:mute-text-0 focus:border-primary placeholder:mute-text-16 padding-left-1 padding-right-1 height-5 overflow-hidden",
+        textarea_base_class(),
         class_override(assigns)
       )
 
@@ -1005,6 +1031,10 @@ defmodule Breeze.Blocks do
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join(" ")
+  end
+
+  defp textarea_base_class do
+    "input border-rounded border-stroke bg-panel text mute-text-22 focus:text focus:mute-text-0 focus:border-primary placeholder:mute-text-16 padding-left-1 padding-right-1 padding-top-1 padding-bottom-1 height-5 overflow-hidden"
   end
 
   defp textarea_prefix_offsets(class, style) do
