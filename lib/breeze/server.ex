@@ -126,6 +126,12 @@ defmodule Breeze.Server do
     GenServer.call(pid, :inspector_snapshot)
   end
 
+  @doc false
+  @spec inspector_render_tree(pid(), keyword()) :: map()
+  def inspector_render_tree(pid, opts \\ []) do
+    GenServer.call(pid, {:inspector_render_tree, opts})
+  end
+
   @spec subscribe_debug(pid(), pid()) :: :ok
   def subscribe_debug(pid, subscriber) do
     GenServer.cast(pid, {:subscribe_debug, subscriber})
@@ -134,6 +140,12 @@ defmodule Breeze.Server do
   @spec subscribe_inspector(pid(), pid()) :: :ok
   def subscribe_inspector(pid, subscriber) do
     GenServer.cast(pid, {:subscribe_inspector, subscriber})
+  end
+
+  @doc false
+  @spec select_inspector(pid(), String.t()) :: :ok
+  def select_inspector(pid, id) when is_pid(pid) and is_binary(id) do
+    GenServer.cast(pid, {:select_inspector, id})
   end
 
   @impl true
@@ -150,6 +162,7 @@ defmodule Breeze.Server do
     theme = Breeze.Theme.new(Keyword.get(opts, :theme), terminal: terminal)
     theme_source = Keyword.get(opts, :theme)
     apply_theme_defaults? = Breeze.Theme.defaults_enabled?(Keyword.get(opts, :theme))
+    inspector_enabled? = inspector_enabled?(Keyword.get(opts, :inspector, false))
 
     session = self()
 
@@ -162,6 +175,7 @@ defmodule Breeze.Server do
         theme_source: theme_source,
         apply_theme_defaults?: apply_theme_defaults?,
         process_flags: Keyword.get(opts, :child_process_flags, []),
+        render_tree?: inspector_enabled?,
         server: self(),
         global_keybindings: Keyword.get(opts, :global_keybindings, []),
         invalidate: fn
@@ -229,6 +243,10 @@ defmodule Breeze.Server do
     {:reply, Breeze.Inspector.snapshot(state), state}
   end
 
+  def handle_call({:inspector_render_tree, opts}, _from, state) do
+    {:reply, Breeze.Inspector.render_tree(state, opts), state}
+  end
+
   def handle_call(:focused_implicit_meta, _from, state) do
     {:reply, focused_implicit_meta(state), state}
   end
@@ -258,6 +276,20 @@ defmodule Breeze.Server do
       )
 
     {:noreply, Inspector.push_snapshot_now(state)}
+  end
+
+  def handle_cast({:select_inspector, id}, state) when is_binary(id) do
+    state =
+      if Breeze.Inspector.enabled?(state) do
+        state
+        |> update_inspector(selected_id: id, hovered_id: id)
+        |> Breeze.Inspector.sync_selected_id()
+        |> maybe_render_base(:remote_inspector_select)
+      else
+        state
+      end
+
+    {:noreply, state}
   end
 
   @impl true
@@ -441,6 +473,8 @@ defmodule Breeze.Server do
 
   defp update_inspector(state, updates),
     do: %{state | inspector_state: struct!(state.inspector_state, updates)}
+
+  defp inspector_enabled?(config), do: config not in [false, nil]
 
   defp update_rendered(state, updates), do: %{state | rendered: struct!(state.rendered, updates)}
 
@@ -861,6 +895,7 @@ defmodule Breeze.Server do
       implicit_state: %{},
       terminal: state.terminal,
       theme: state.theme,
+      render_tree?: Breeze.Inspector.enabled?(state),
       render_tracking_ref: tracking_ref,
       profile_scope: profile_scope,
       profile_label: inspect(root_view_module(state)),
@@ -990,6 +1025,7 @@ defmodule Breeze.Server do
              terminal: ctx.terminal,
              theme: state.theme,
              live_prefix: ctx.full_id,
+             render_tree?: Breeze.Inspector.enabled?(state),
              render_tracking_ref: tracking_ref,
              profile_scope: profile_scope,
              profile_label: "#{ctx.full_id} #{inspect(child.view)}",
@@ -1104,6 +1140,7 @@ defmodule Breeze.Server do
              terminal: ctx.terminal,
              theme: ctx.state.theme,
              live_prefix: ctx.child_id,
+             render_tree?: Breeze.Inspector.enabled?(ctx.state),
              render_tracking_ref: ctx.tracking_ref,
              profile_scope: ctx.profile_scope,
              profile_label: "#{ctx.child_id} #{inspect(ctx.view)}",
@@ -1836,6 +1873,7 @@ defmodule Breeze.Server do
              theme: state.theme,
              process_flags: state.child_process_flags || [],
              server: self(),
+             render_tree?: Breeze.Inspector.enabled?(state),
              global_keybindings: state.global_keybindings || [],
              invalidate: fn -> send(session, :child_invalidated) end
            )
@@ -2118,6 +2156,7 @@ defmodule Breeze.Server do
         terminal: terminal,
         theme: theme,
         process_flags: state.child_process_flags || [],
+        render_tree?: Breeze.Inspector.enabled?(state),
         invalidate: invalidate
       )
 

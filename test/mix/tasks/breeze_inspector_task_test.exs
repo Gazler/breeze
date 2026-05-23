@@ -1,12 +1,14 @@
 defmodule Mix.Tasks.BreezeInspectorTaskTest do
   use ExUnit.Case, async: true
 
-  test "run opts enable reload and disable nested inspector" do
+  test "run opts enable reload and remote inspector self-inspection" do
     assert Mix.Tasks.Breeze.Inspector.run_opts() == [
              view: Breeze.RemoteInspector.View,
              reload: true,
+             theme: :system,
              mouse: true,
-             inspector: false
+             global_keybindings: Breeze.RemoteInspector.View.global_keybindings(),
+             inspector: true
            ]
   end
 

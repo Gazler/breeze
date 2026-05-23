@@ -3,6 +3,18 @@ defmodule Breeze.RemoteInspector.View do
 
   use Breeze.View
   import Breeze.Blocks
+  alias BackBreeze.TextSpan
+
+  @render_tree_limit 600
+
+  def global_keybindings do
+    [
+      {"q", "Quit", &__MODULE__.quit/2},
+      {"F4", "Inspector"}
+    ]
+  end
+
+  def quit(_event, term), do: {:stop, term}
 
   def mount(_opts, term) do
     {:ok, _pid} = Breeze.RemoteInspector.ensure_server()
@@ -15,21 +27,32 @@ defmodule Breeze.RemoteInspector.View do
        latest_source: state.latest_source,
        active_source: state.latest_source,
        panel_tab: "overview",
+       render_tree_kind: "rendered",
+       render_tree_expanded: %{},
+       render_trees: %{},
        screen: term.terminal.size
-     )}
+     )
+     |> put_tree_keybindings()
+     |> refresh_active_render_tree()}
   end
 
   def render(assigns) do
     active = active_entry(assigns)
+    active_source = active_source(assigns)
+    render_tree_kind = render_tree_kind(assigns)
+    panel_tab = Map.get(assigns, :panel_tab, "overview")
+    breeze = assigns |> Map.get(:breeze, %{}) |> Map.put_new(:keybindings, [])
     now = System.system_time(:millisecond)
+    active_render_tree = active_render_tree(assigns, active_source, active, render_tree_kind)
 
     assigns =
       Map.merge(assigns, %{
         active: active,
+        active_source: active_source,
         now: now,
         screen_text: format_screen(assigns.screen),
         latest_source_text: format_source(assigns.latest_source),
-        source_entries: source_entries(assigns.snapshots, Map.get(assigns, :active_source)),
+        source_entries: source_entries(assigns.snapshots, active_source),
         active_source_text: if(active, do: format_source(active.source), else: "-"),
         active_server_text: if(active, do: format_server(active.snapshot), else: "-"),
         active_theme_text: if(active, do: format_theme(active.snapshot.theme), else: "-"),
@@ -69,83 +92,108 @@ defmodule Breeze.RemoteInspector.View do
         active_fragment_text: if(active, do: fragment_line(active.snapshot.selected), else: "-"),
         active_fragment_render:
           if(active, do: fragment_render_line(active.snapshot.selected, assigns.screen), else: ""),
-        panel_tab: Map.get(assigns, :panel_tab, "overview")
+        active_render_tree: active_render_tree,
+        active_render_tree_nodes: if(active, do: render_tree_nodes(active_render_tree), else: []),
+        active_render_tree_selected:
+          if(active, do: render_tree_selected(active_render_tree, active.snapshot), else: nil),
+        active_render_tree_expanded:
+          if(active, do: render_tree_expanded(active_render_tree), else: []),
+        render_tree_kind: render_tree_kind,
+        breeze: breeze,
+        panel_tab: panel_tab
       })
 
     ~H"""
-    <box class="width-screen height-screen bg padding-1">
-      <box class="inline width-full height-full overflow-hidden">
-        <.sidebar
-          active={@active}
-          screen_text={@screen_text}
-          snapshots={@snapshots}
-          latest_source_text={@latest_source_text}
-          active_selected_text={@active_selected_text}
-          active_hovered_text={@active_hovered_text}
-          active_focused_text={@active_focused_text}
-          active_focusables_text={@active_focusables_text}
-          active_component_module_text={@active_component_module_text}
-          active_component_function_text={@active_component_function_text}
-          source_entries={@source_entries}
-        />
-        <box class="width-full height-full padding-left-1 overflow-hidden">
-          <.tabs
-            id="remote-inspector-tabs"
-            selected={@panel_tab}
-            highlight="primary"
-            br-change="tab_changed"
-            class="width-full height-full border-rounded"
-            item_class="width-13"
-          >
-            <:tab value="overview" label="Overview">
-              <.overview_tab
-                scroll_id="remote-inspector-tabs-panel-overview"
-                active={@active}
-                active_source_text={@active_source_text}
-                active_theme_text={@active_theme_text}
-                active_status_text={@active_status_text}
-                active_counts_text={@active_counts_text}
-                active_layout_text={@active_layout_text}
-                active_box_text={@active_box_text}
-                active_component_text={@active_component_text}
-                active_class_text={@active_class_text}
-                active_style_input_text={@active_style_input_text}
-                active_color_text={@active_color_text}
-                show_fg_swatch={@show_fg_swatch?}
-                show_bg_swatch={@show_bg_swatch?}
-                fg_swatch_style={@fg_swatch_style}
-                bg_swatch_style={@bg_swatch_style}
-                active_fragment_text={@active_fragment_text}
-                active_fragment_render={@active_fragment_render}
-              />
-            </:tab>
-            <:tab value="layout" label="Element">
-              <.layout_tab
-                scroll_id="remote-inspector-tabs-panel-layout"
-                active={@active}
-                layout_data={@active_layout_data}
-                flag_rows={@active_flag_rows}
-                active_focus_text={@active_focus_text}
-                active_selected_focus_text={@active_selected_focus_text}
-              />
-            </:tab>
-            <:tab value="theme" label="Theme">
-              <.theme_tab
-                scroll_id="remote-inspector-tabs-panel-theme"
-                active={@active}
-                active_theme_text={@active_theme_text}
-                rows={@active_theme_rows}
-              />
-            </:tab>
-            <:tab value="implicit" label="Implicit">
-              <.implicit_tab
-                scroll_id="remote-inspector-tabs-panel-implicit"
-                active={@active}
-                active_implicit_text={@active_implicit_text}
-                active_implicit_detail_text={@active_implicit_detail_text}
-              />
-            </:tab>
-          </.tabs>
+    <box class="width-screen height-screen bg">
+      <box class="grid grid-cols-1 grid-rows-2 width-full height-full overflow-hidden">
+        <box class="inline width-full height-full overflow-hidden">
+          <.sidebar
+            active={@active}
+            screen_text={@screen_text}
+            snapshots={@snapshots}
+            latest_source_text={@latest_source_text}
+            active_selected_text={@active_selected_text}
+            active_hovered_text={@active_hovered_text}
+            active_focused_text={@active_focused_text}
+            active_focusables_text={@active_focusables_text}
+            active_component_module_text={@active_component_module_text}
+            active_component_function_text={@active_component_function_text}
+            source_entries={@source_entries}
+          />
+          <box class="width-full bg height-full padding-left-1 overflow-hidden">
+            <.tabs
+              id="remote-inspector-tabs"
+              selected={@panel_tab}
+              highlight="primary"
+              br-change="tab_changed"
+              class="width-full height-full border-rounded bg"
+              item_class="width-9"
+            >
+              <:tab value="tree" label="Tree">
+                <.tree_tab
+                  active={@active}
+                  nodes={@active_render_tree_nodes}
+                  selected={@active_render_tree_selected}
+                  expanded={@active_render_tree_expanded}
+                  kind={@render_tree_kind}
+                />
+              </:tab>
+              <:tab value="overview" label="Overview">
+                <.overview_tab
+                  scroll_id="remote-inspector-tabs-panel-overview"
+                  active={@active}
+                  active_source_text={@active_source_text}
+                  active_theme_text={@active_theme_text}
+                  active_status_text={@active_status_text}
+                  active_counts_text={@active_counts_text}
+                  active_layout_text={@active_layout_text}
+                  active_box_text={@active_box_text}
+                  active_component_text={@active_component_text}
+                  active_class_text={@active_class_text}
+                  active_style_input_text={@active_style_input_text}
+                  active_color_text={@active_color_text}
+                  show_fg_swatch={@show_fg_swatch?}
+                  show_bg_swatch={@show_bg_swatch?}
+                  fg_swatch_style={@fg_swatch_style}
+                  bg_swatch_style={@bg_swatch_style}
+                  active_fragment_text={@active_fragment_text}
+                  active_fragment_render={@active_fragment_render}
+                />
+              </:tab>
+              <:tab value="layout" label="Element">
+                <.layout_tab
+                  scroll_id="remote-inspector-tabs-panel-layout"
+                  active={@active}
+                  layout_data={@active_layout_data}
+                  flag_rows={@active_flag_rows}
+                  active_focus_text={@active_focus_text}
+                  active_selected_focus_text={@active_selected_focus_text}
+                />
+              </:tab>
+              <:tab value="theme" label="Theme">
+                <.theme_tab
+                  scroll_id="remote-inspector-tabs-panel-theme"
+                  active={@active}
+                  active_theme_text={@active_theme_text}
+                  rows={@active_theme_rows}
+                />
+              </:tab>
+              <:tab value="implicit" label="Implicit">
+                <.implicit_tab
+                  scroll_id="remote-inspector-tabs-panel-implicit"
+                  active={@active}
+                  active_implicit_text={@active_implicit_text}
+                  active_implicit_detail_text={@active_implicit_detail_text}
+                />
+              </:tab>
+            </.tabs>
+          </box>
+        </box>
+        <box class="height-1 width-full overflow-hidden bg-emphasize-12">
+          <.keybinding_bar
+            keybindings={@breeze.keybindings}
+            class="inline width-full height-1 overflow-hidden bg-emphasize-12 padding-left-1 padding-right-1"
+          />
         </box>
       </box>
     </box>
@@ -166,9 +214,8 @@ defmodule Breeze.RemoteInspector.View do
 
   def sidebar(assigns) do
     ~H"""
-    <box class="width-32 height-full border-rounded overflow-hidden bg-panel padding-right-1">
+    <box class="width-32 height-full border-rounded overflow-hidden bg padding-right-1">
       <box class="width-full bold text-primary">Remote Inspector</box>
-      <box class="width-full text-muted">Press q to quit.</box>
       <box class="width-full text-muted">screen={@screen_text}</box>
       <box class="width-full text-muted">sources={map_size(@snapshots)}</box>
       <box class="width-full text-muted">latest={@latest_source_text}</box>
@@ -234,6 +281,35 @@ defmodule Breeze.RemoteInspector.View do
           <box class="width-full">
           </box>
         </box>
+      </box>
+    </box>
+    """
+  end
+
+  attr :active, :any, required: true
+  attr :nodes, :list, required: true
+  attr :selected, :any, required: true
+  attr :expanded, :list, required: true
+  attr :kind, :string, required: true
+
+  def tree_tab(assigns) do
+    ~H"""
+    <box class="width-full height-full padding-top-1">
+      <box :if={!is_nil(@active)} class="width-full text-muted">tree={@kind}</box>
+      <.tree
+        :if={!is_nil(@active) and @nodes != []}
+        id="remote-inspector-render-tree"
+        nodes={@nodes}
+        selected={@selected}
+        expanded={@expanded}
+        collapsed_prefix="▸"
+        expanded_prefix="▾"
+        virtual
+        br-change="render_tree_changed"
+        class="width-full height-full bg"
+      />
+      <box :if={is_nil(@active) or @nodes == []} class="width-full text-muted">
+        Waiting for render tree...
       </box>
     </box>
     """
@@ -457,12 +533,16 @@ defmodule Breeze.RemoteInspector.View do
       ) do
     active_source = normalize_active_source(term.assigns.active_source, snapshots, latest_source)
 
-    {:noreply,
-     assign(term,
-       snapshots: snapshots,
-       latest_source: latest_source,
-       active_source: active_source
-     )}
+    term =
+      term
+      |> assign(
+        snapshots: snapshots,
+        latest_source: latest_source,
+        active_source: active_source
+      )
+      |> refresh_active_render_tree()
+
+    {:noreply, term}
   end
 
   def handle_info(:resize, term) do
@@ -470,20 +550,344 @@ defmodule Breeze.RemoteInspector.View do
   end
 
   def handle_event("tab_changed", %{value: value}, term) do
-    {:noreply, assign(term, panel_tab: value)}
+    {:noreply,
+     term
+     |> assign(panel_tab: value)
+     |> put_tree_keybindings()
+     |> refresh_active_render_tree(force: value == "tree")}
   end
 
   def handle_event("tab_changed", %{"value" => value}, term) do
-    {:noreply, assign(term, panel_tab: value)}
+    {:noreply,
+     term
+     |> assign(panel_tab: value)
+     |> put_tree_keybindings()
+     |> refresh_active_render_tree(force: value == "tree")}
   end
 
-  def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
+  def handle_event("render_tree_changed", payload, term) do
+    selected = payload_value(payload, :value)
+    expanded = normalize_expanded(payload_value(payload, :expanded))
+    active_source = active_source(term.assigns)
+    active = active_entry(term.assigns)
+    kind = render_tree_kind(term.assigns)
+    current_tree = active_render_tree(term.assigns, active_source, active, kind)
+    selection_changed? = render_tree_selection_changed?(current_tree, active, selected)
+
+    expansion_changed? =
+      render_tree_expansion_changed?(term.assigns, active_source, kind, expanded)
+
+    if selection_changed? or expansion_changed? do
+      select_remote_element(active, selected)
+
+      render_tree_expanded =
+        if active_source && is_list(expanded) do
+          term.assigns
+          |> Map.get(:render_tree_expanded, %{})
+          |> Map.put(render_tree_cache_key(active_source, kind), expanded)
+        else
+          Map.get(term.assigns, :render_tree_expanded, %{})
+        end
+
+      term =
+        term
+        |> assign(render_tree_expanded: render_tree_expanded)
+        |> refresh_active_render_tree(selected_id: selected, force: true)
+
+      {:noreply, term}
+    else
+      {:noreply, term}
+    end
+  end
+
+  def handle_event(_, %{"key" => key}, term) when key in ["t", "T"] do
+    {:noreply, toggle_tree_panel(term)}
+  end
+
+  def handle_event(_, %{"key" => "q"}, term), do: quit(%{"key" => "q"}, term)
   def handle_event(_, _, term), do: {:noreply, term}
 
+  defp active_source(assigns),
+    do: Map.get(assigns, :active_source) || Map.get(assigns, :latest_source)
+
   defp active_entry(%{snapshots: snapshots, latest_source: latest_source} = assigns) do
-    active_source = Map.get(assigns, :active_source)
-    Map.get(snapshots, active_source || latest_source)
+    Map.get(snapshots, active_source(assigns) || latest_source)
   end
+
+  defp payload_value(payload, key) when is_map(payload) do
+    Map.get(payload, key) || Map.get(payload, Atom.to_string(key))
+  end
+
+  defp payload_value(_payload, _key), do: nil
+
+  defp normalize_expanded(nil), do: nil
+  defp normalize_expanded(expanded) when is_list(expanded), do: expanded
+  defp normalize_expanded(expanded), do: List.wrap(expanded)
+
+  defp put_tree_keybindings(term) do
+    put_local_keybindings(term, tree_keybindings(term.assigns))
+  end
+
+  defp tree_keybindings(%{panel_tab: "tree"} = assigns) do
+    [
+      {"t", tree_keybinding_label(render_tree_kind(assigns)),
+       fn _event, term ->
+         {:noreply, toggle_tree_panel(term)}
+       end}
+    ]
+  end
+
+  defp tree_keybindings(_assigns), do: []
+
+  defp tree_keybinding_label("code"), do: "Rendered tree"
+  defp tree_keybinding_label(_kind), do: "Code tree"
+
+  defp toggle_tree_panel(term) do
+    next_kind =
+      if Map.get(term.assigns, :panel_tab) == "tree" do
+        next_render_tree_kind(render_tree_kind(term.assigns))
+      else
+        render_tree_kind(term.assigns)
+      end
+
+    term
+    |> assign(panel_tab: "tree", render_tree_kind: next_kind)
+    |> put_tree_keybindings()
+    |> refresh_active_render_tree(force: true)
+  end
+
+  defp render_tree_kind(%{render_tree_kind: kind}), do: normalize_render_tree_kind(kind)
+  defp render_tree_kind(_assigns), do: "rendered"
+
+  defp normalize_render_tree_kind(kind) when kind in [:code, "code"], do: "code"
+  defp normalize_render_tree_kind(_kind), do: "rendered"
+
+  defp next_render_tree_kind("rendered"), do: "code"
+  defp next_render_tree_kind(_kind), do: "rendered"
+
+  defp render_tree_kind_atom("code"), do: :code
+  defp render_tree_kind_atom(_kind), do: :rendered
+
+  defp render_tree_cache_key(source, "rendered"), do: source
+  defp render_tree_cache_key(source, kind), do: {source, kind}
+
+  defp render_tree_selection_changed?(_tree, _active, selected) when not is_binary(selected),
+    do: false
+
+  defp render_tree_selection_changed?(tree, active, selected) do
+    current =
+      case tree do
+        %{selected_id: selected_id} -> selected_id
+        _ -> get_in(active || %{}, [:snapshot, :selected_id])
+      end
+
+    selected != current
+  end
+
+  defp render_tree_expansion_changed?(_assigns, _source, _kind, expanded)
+       when not is_list(expanded),
+       do: false
+
+  defp render_tree_expansion_changed?(assigns, source, kind, expanded) do
+    current =
+      assigns
+      |> Map.get(:render_tree_expanded, %{})
+      |> Map.get(render_tree_cache_key(source, kind), [])
+
+    expanded != current
+  end
+
+  defp select_remote_element(_active, selected) when not is_binary(selected), do: :ok
+
+  defp select_remote_element(%{snapshot: %{source: %{server_pid: pid}}}, selected)
+       when is_pid(pid) do
+    Breeze.Server.select_inspector(pid, selected)
+  end
+
+  defp select_remote_element(%{source: %{pid: pid}}, selected) when is_pid(pid) do
+    Breeze.Server.select_inspector(pid, selected)
+  end
+
+  defp select_remote_element(_active, _selected), do: :ok
+
+  defp refresh_active_render_tree(term, opts \\ []) do
+    if Keyword.get(opts, :force, false) or Map.get(term.assigns, :panel_tab) == "tree" do
+      active_source = active_source(term.assigns)
+      active = active_entry(term.assigns)
+      kind = render_tree_kind(term.assigns)
+
+      case fetch_render_tree(active, term.assigns, active_source, kind, opts) do
+        nil ->
+          term
+
+        tree ->
+          cache_key = render_tree_cache_key(active_source, kind)
+
+          render_trees =
+            term.assigns
+            |> Map.get(:render_trees, %{})
+            |> Map.put(cache_key, tree)
+
+          render_tree_expanded =
+            term.assigns
+            |> Map.get(:render_tree_expanded, %{})
+            |> Map.put(cache_key, Map.get(tree, :expanded, []))
+
+          assign(term, render_trees: render_trees, render_tree_expanded: render_tree_expanded)
+      end
+    else
+      term
+    end
+  end
+
+  defp fetch_render_tree(nil, _assigns, _source, _kind, _opts), do: nil
+  defp fetch_render_tree(_active, _assigns, nil, _kind, _opts), do: nil
+
+  defp fetch_render_tree(active, assigns, source, kind, opts) do
+    expanded =
+      opts[:expanded] ||
+        assigns
+        |> Map.get(:render_tree_expanded, %{})
+        |> Map.get(render_tree_cache_key(source, kind), [])
+
+    selected_id = opts[:selected_id] || active.snapshot.selected_id
+
+    case source_server_pid(active) do
+      pid when is_pid(pid) ->
+        Breeze.Server.inspector_render_tree(pid,
+          expanded: expanded,
+          selected_id: selected_id,
+          kind: render_tree_kind_atom(kind),
+          limit: @render_tree_limit
+        )
+
+      _ ->
+        snapshot_render_tree(active.snapshot, kind)
+    end
+  catch
+    :exit, _reason -> snapshot_render_tree(active.snapshot, kind)
+  end
+
+  defp source_server_pid(%{snapshot: %{source: %{server_pid: pid}}}) when is_pid(pid), do: pid
+  defp source_server_pid(%{source: %{pid: pid}}) when is_pid(pid), do: pid
+  defp source_server_pid(_active), do: nil
+
+  defp active_render_tree(assigns, source, active, kind) do
+    assigns
+    |> Map.get(:render_trees, %{})
+    |> Map.get(render_tree_cache_key(source, kind))
+    |> case do
+      nil -> if(active, do: snapshot_render_tree(active.snapshot, kind), else: nil)
+      tree -> tree
+    end
+  end
+
+  defp snapshot_render_tree(snapshot, kind)
+  defp snapshot_render_tree(_snapshot, "code"), do: nil
+
+  defp snapshot_render_tree(%{render_tree: tree, selected_id: selected_id}, _kind)
+       when is_map(tree) do
+    %{
+      nodes: [tree],
+      selected_id: selected_id,
+      expanded: default_render_tree_expanded(tree, selected_id),
+      limit: @render_tree_limit,
+      truncated?: false
+    }
+  end
+
+  defp snapshot_render_tree(_snapshot, _kind), do: nil
+
+  defp render_tree_nodes(%{nodes: nodes}) when is_list(nodes) do
+    Enum.map(nodes, &colorize_render_tree_node/1)
+  end
+
+  defp render_tree_nodes(_tree), do: []
+
+  defp colorize_render_tree_node(%{} = node) do
+    node
+    |> Map.update(:label, Map.get(node, :id, ""), fn label ->
+      case Map.get(node, :label_parts) do
+        parts when is_list(parts) -> render_tree_label_spans(parts)
+        _ -> label
+      end
+    end)
+    |> Map.update(:children, [], fn children ->
+      children
+      |> List.wrap()
+      |> Enum.map(&colorize_render_tree_node/1)
+    end)
+  end
+
+  defp colorize_render_tree_node(node), do: node
+
+  defp render_tree_label_spans(parts) do
+    parts
+    |> Enum.map(fn part ->
+      TextSpan.new(to_string(Map.get(part, :text, "")), render_tree_label_style(part))
+    end)
+    |> Enum.reject(&(&1.text == ""))
+  end
+
+  defp render_tree_label_style(%{token: :punctuation}), do: %{foreground_color: 8}
+  defp render_tree_label_style(%{token: :tag}), do: %{foreground_color: 14}
+  defp render_tree_label_style(%{token: :id}), do: %{foreground_color: 11}
+  defp render_tree_label_style(%{token: :anonymous_id}), do: %{foreground_color: 8}
+  defp render_tree_label_style(%{token: :class}), do: %{foreground_color: 10}
+  defp render_tree_label_style(%{token: :component}), do: %{foreground_color: 8}
+  defp render_tree_label_style(%{token: :separator}), do: %{}
+
+  defp render_tree_label_style(%{token: :swatch} = part) do
+    %{}
+    |> put_swatch_color(:foreground_color, Map.get(part, :foreground_color))
+    |> put_swatch_color(:background_color, Map.get(part, :background_color))
+  end
+
+  defp render_tree_label_style(_part), do: %{}
+
+  defp put_swatch_color(style, _key, nil), do: style
+  defp put_swatch_color(style, key, color), do: Map.put(style, key, color)
+
+  defp render_tree_selected(%{selected_id: selected_id}, _snapshot), do: selected_id
+  defp render_tree_selected(_tree, snapshot), do: Map.get(snapshot, :selected_id)
+
+  defp render_tree_expanded(%{expanded: expanded}) when is_list(expanded), do: expanded
+  defp render_tree_expanded(_tree), do: []
+
+  defp default_render_tree_expanded(nil, _selected_id), do: []
+
+  defp default_render_tree_expanded(tree, selected_id) do
+    case render_tree_path(tree, selected_id) do
+      [] ->
+        expandable_tree_id(tree)
+
+      path ->
+        expanded = Enum.drop(path, -1)
+
+        case expanded do
+          [] -> expandable_tree_id(tree)
+          _ -> expanded
+        end
+    end
+  end
+
+  defp expandable_tree_id(%{id: id, children: [_ | _]}), do: [id]
+  defp expandable_tree_id(_tree), do: []
+
+  defp render_tree_path(_tree, selected_id) when not is_binary(selected_id), do: []
+
+  defp render_tree_path(%{id: selected_id}, selected_id), do: [selected_id]
+
+  defp render_tree_path(%{id: id, children: children}, selected_id) when is_list(children) do
+    Enum.find_value(children, [], fn child ->
+      case render_tree_path(child, selected_id) do
+        [] -> nil
+        path -> [id | path]
+      end
+    end)
+  end
+
+  defp render_tree_path(_tree, _selected_id), do: []
 
   defp label(nil, fallback), do: fallback || "-"
 

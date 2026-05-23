@@ -28,8 +28,10 @@ defmodule Mix.Tasks.Breeze.Inspector do
     [
       view: Breeze.RemoteInspector.View,
       reload: true,
+      theme: :system,
       mouse: true,
-      inspector: false
+      global_keybindings: Breeze.RemoteInspector.View.global_keybindings(),
+      inspector: true
     ]
   end
 

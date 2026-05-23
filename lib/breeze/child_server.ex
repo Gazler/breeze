@@ -95,6 +95,7 @@ defmodule Breeze.ChildServer do
       theme: theme,
       theme_source: theme_input,
       apply_theme_defaults?: apply_theme_defaults?,
+      render_tree?: Keyword.get(opts, :render_tree?, false) == true,
       global_keybindings: global_keybindings,
       assigns: initial_assigns,
       external_assigns: external_assigns
@@ -449,6 +450,7 @@ defmodule Breeze.ChildServer do
       |> Keyword.put(:theme, theme)
       |> Keyword.put(:theme_source, term.theme_source || term.theme)
       |> Keyword.put(:apply_theme_defaults, term.apply_theme_defaults?)
+      |> Keyword.put(:render_tree?, Keyword.get(opts, :render_tree?, term.render_tree?))
 
     profile_scope = Keyword.get(opts, :profile_scope)
     profile_label = profile_label(term, opts)
@@ -1114,6 +1116,7 @@ defmodule Breeze.ChildServer do
         theme_source: term.theme_source,
         global_keybindings: term.global_keybindings,
         apply_theme_defaults?: term.apply_theme_defaults?,
+        render_tree?: term.render_tree?,
         invalidate: invalidate
       )
 
@@ -1135,6 +1138,7 @@ defmodule Breeze.ChildServer do
                  terminal: terminal,
                  theme: term.theme,
                  theme_source: term.theme_source || term.theme,
+                 render_tree?: Keyword.get(child_opts, :render_tree?, term.render_tree?),
                  live_prefix: full_prefix
                ) do
             {:ok, child_acc, child_box, _decorations} ->

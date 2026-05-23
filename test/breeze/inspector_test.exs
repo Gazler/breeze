@@ -2,7 +2,50 @@ defmodule Breeze.InspectorTest do
   use ExUnit.Case, async: true
 
   alias Breeze.Inspector
+  alias Breeze.Server.State
   alias Breeze.Viewport
+
+  defmodule RenderTreeView do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box id="root" class="panel">
+        <box id="field" focusable class="input text-primary bg-panel">Field</box>
+        <box id="variant" class="selected:text-primary selected:bg-panel">Variant</box>
+        <box id="nested" class="label">
+          <box id="leaf" class="text-primary bg-panel">Leaf</box>
+        </box>
+      </box>
+      """
+    end
+  end
+
+  defmodule ComponentTreeView do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box id="root">
+        <.input id="url" input-value="abc"/>
+        <box id="plain">Plain</box>
+      </box>
+      """
+    end
+  end
+
+  defmodule StyleMapTreeView do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box id="root" style={%{foreground_color: {235, 219, 178}, background_color: {40, 40, 40}}}>
+        Styled
+      </box>
+      """
+    end
+  end
 
   test "toggle uses configured keys and clears hover state while re-syncing selection" do
     state =
@@ -66,6 +109,281 @@ defmodule Breeze.InspectorTest do
 
     assert snapshot.selected_id == "field"
     assert snapshot.selected.actual_id == "field"
+  end
+
+  test "renderer only builds render tree data when requested" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    {acc, _box} =
+      Breeze.Renderer.render(RenderTreeView, %{},
+        terminal: terminal,
+        theme: true,
+        theme_source: true
+      )
+
+    refute Map.has_key?(acc, :render_tree)
+
+    {acc, _box} =
+      Breeze.Renderer.render(RenderTreeView, %{},
+        terminal: terminal,
+        theme: true,
+        theme_source: true,
+        render_tree?: true
+      )
+
+    assert is_map(acc.render_tree)
+  end
+
+  test "render tree handles style maps with tuple colors" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    theme = Breeze.Theme.default(terminal: terminal)
+
+    {acc, _box} =
+      Breeze.Renderer.render(StyleMapTreeView, %{},
+        terminal: terminal,
+        theme: theme,
+        theme_source: theme,
+        render_tree?: true
+      )
+
+    state =
+      %Breeze.Server{
+        terminal: terminal,
+        view: StyleMapTreeView,
+        theme: theme,
+        inspector_state: %State.Inspector{config: true, selected_id: "root"},
+        rendered: %State.Rendered{}
+      }
+      |> Breeze.Server.Inspector.merge_render_data(acc, %{})
+
+    tree = Inspector.render_tree(state, expanded: ["root"], selected_id: "root", limit: 10)
+
+    assert [%{id: "root", label_parts: label_parts}] = tree.nodes
+
+    assert %{
+             text: "●",
+             token: :swatch,
+             role: :foreground,
+             foreground_color: {235, 219, 178},
+             background_color: nil
+           } in label_parts
+
+    assert %{
+             text: "●",
+             token: :swatch,
+             role: :background,
+             foreground_color: {40, 40, 40},
+             background_color: nil
+           } in label_parts
+  end
+
+  test "snapshot advertises render tree availability and queries a bounded tree window" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    theme =
+      Breeze.Theme.new(%{
+        name: "tree-test",
+        defaults: %{foreground_color: {9, 9, 9}, background_color: {0, 0, 0}},
+        palette: %{primary: {1, 2, 3}, panel: {4, 5, 6}},
+        extras: %{}
+      })
+
+    {acc, _box} =
+      Breeze.Renderer.render(RenderTreeView, %{},
+        terminal: terminal,
+        theme: theme,
+        theme_source: true,
+        render_tree?: true
+      )
+
+    state =
+      %Breeze.Server{
+        terminal: terminal,
+        view: RenderTreeView,
+        theme: theme,
+        inspector_state: %State.Inspector{config: true, selected_id: "leaf"},
+        rendered: %State.Rendered{}
+      }
+      |> Breeze.Server.Inspector.merge_render_data(acc, %{})
+
+    snapshot = Inspector.snapshot(state)
+
+    assert snapshot.selected_id == "leaf"
+    assert snapshot.render_tree?
+    refute Map.has_key?(snapshot, :render_tree)
+
+    tree = Inspector.render_tree(state, expanded: ["root"], selected_id: "leaf", limit: 10)
+
+    assert [
+             %{
+               id: "root",
+               label: root_label,
+               children: [
+                 %{id: "field", label: field_label, label_parts: field_label_parts, children: []},
+                 %{
+                   id: "variant",
+                   label: variant_label,
+                   label_parts: variant_label_parts,
+                   children: []
+                 },
+                 %{
+                   id: "nested",
+                   children: [
+                     %{
+                       id: "leaf",
+                       label: leaf_label,
+                       label_parts: leaf_label_parts,
+                       children: []
+                     }
+                   ]
+                 }
+               ]
+             }
+           ] = tree.nodes
+
+    assert root_label =~ "<box#root.panel>"
+    assert field_label =~ "#field"
+    assert field_label =~ ".input"
+    assert field_label =~ ".input.text-primary●.bg-panel●>"
+
+    assert %{
+             text: "●",
+             token: :swatch,
+             role: :foreground,
+             foreground_color: {1, 2, 3},
+             background_color: nil
+           } in field_label_parts
+
+    assert %{
+             text: "●",
+             token: :swatch,
+             role: :background,
+             foreground_color: {4, 5, 6},
+             background_color: nil
+           } in field_label_parts
+
+    assert variant_label =~ ".selected:text-primary●.selected:bg-panel●>"
+
+    assert %{
+             text: "●",
+             token: :swatch,
+             role: :foreground,
+             foreground_color: {1, 2, 3},
+             background_color: nil
+           } in variant_label_parts
+
+    assert %{
+             text: "●",
+             token: :swatch,
+             role: :background,
+             foreground_color: {4, 5, 6},
+             background_color: nil
+           } in variant_label_parts
+
+    assert leaf_label =~ ".text-primary●.bg-panel●>"
+
+    assert %{
+             text: "●",
+             token: :swatch,
+             role: :foreground,
+             foreground_color: {1, 2, 3},
+             background_color: nil
+           } in leaf_label_parts
+
+    assert %{
+             text: "●",
+             token: :swatch,
+             role: :background,
+             foreground_color: {4, 5, 6},
+             background_color: nil
+           } in leaf_label_parts
+
+    assert %{label_parts: [%{text: "<", token: :punctuation}, %{text: "box", token: :tag} | _]} =
+             hd(tree.nodes)
+
+    refute Enum.any?(hd(tree.nodes).label_parts, &match?(%{token: :swatch}, &1))
+
+    assert "nested" in tree.expanded
+
+    tree = Inspector.render_tree(state, expanded: ["root"], selected_id: "field", limit: 10)
+
+    assert [
+             %{
+               children: [
+                 %{id: "field"},
+                 %{id: "variant"},
+                 %{id: "nested", expandable?: true, children: []}
+               ]
+             }
+           ] = tree.nodes
+  end
+
+  test "render tree can expose a code tree view with component labels" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    theme = Breeze.Theme.default(terminal: terminal)
+
+    {acc, _box} =
+      Breeze.Renderer.render(ComponentTreeView, %{},
+        terminal: terminal,
+        theme: theme,
+        theme_source: theme,
+        render_tree?: true
+      )
+
+    state =
+      %Breeze.Server{
+        terminal: terminal,
+        view: ComponentTreeView,
+        theme: theme,
+        inspector_state: %State.Inspector{config: true, selected_id: "url"},
+        rendered: %State.Rendered{}
+      }
+      |> Breeze.Server.Inspector.merge_render_data(acc, %{})
+
+    snapshot = Inspector.snapshot(state)
+
+    assert snapshot.render_tree?
+    assert snapshot.render_tree_kinds == [:rendered, :code]
+
+    rendered_tree =
+      Inspector.render_tree(state, expanded: ["root"], selected_id: "url", limit: 10)
+
+    code_tree =
+      Inspector.render_tree(state, kind: :code, expanded: ["root"], selected_id: "url", limit: 10)
+
+    assert rendered_tree.kind == :rendered
+    assert code_tree.kind == :code
+
+    assert [
+             %{
+               id: "root",
+               children: [
+                 %{id: "url", label: rendered_label, label_parts: rendered_label_parts},
+                 %{id: "plain"}
+               ]
+             }
+           ] = rendered_tree.nodes
+
+    assert [
+             %{
+               id: "root",
+               children: [
+                 %{id: "url", label: code_label, label_parts: code_label_parts, tree_kind: :code},
+                 %{id: "plain", label: plain_label}
+               ],
+               tree_kind: :code
+             }
+           ] = code_tree.nodes
+
+    assert rendered_label =~ "<box#url"
+    assert rendered_label =~ "Breeze.Blocks.input"
+    assert code_label =~ "<Breeze.Blocks.input#url"
+    assert plain_label =~ "<box#plain"
+
+    assert %{text: "box", token: :tag} in rendered_label_parts
+    assert %{text: " Breeze.Blocks.input", token: :component} in rendered_label_parts
+    assert %{text: "Breeze.Blocks.input", token: :tag} in code_label_parts
+    refute Enum.any?(code_label_parts, &match?(%{token: :component}, &1))
   end
 
   test "select_at cycles overlapping targets from inner to outer elements" do

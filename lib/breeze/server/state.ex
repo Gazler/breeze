@@ -52,6 +52,9 @@ defmodule Breeze.Server.State.Rendered do
 
   defstruct boxes: %{},
             elements: %{},
+            render_tree: nil,
+            render_tree_meta: %{},
+            code_tree_meta: %{},
             viewports: %{},
             mouse_targets: %{},
             flags: %{},

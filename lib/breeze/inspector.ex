@@ -135,12 +135,43 @@ defmodule Breeze.Inspector do
         focusables: focusable_ids,
         focus_memory: Map.get(state, :focus_memory, %{})
       },
+      render_tree?: not is_nil(rendered_field(state, :render_tree, :rendered_render_tree)),
+      render_tree_kinds: render_tree_kinds(state),
       toggle_key: toggle_key(state),
       move_key: move_key(state),
       panel_position: panel_position(state),
       focused_entry: selected_snapshot(state, Map.get(state, :focused)),
       hovered: selected_snapshot(state, hovered_id),
       selected: selected_snapshot(state, selected_id)
+    }
+  end
+
+  def render_tree(state, opts \\ []) do
+    tree = rendered_field(state, :render_tree, :rendered_render_tree)
+    kind = normalize_render_tree_kind(Keyword.get(opts, :kind, :rendered))
+    tree_meta = render_tree_meta_for_kind(state, kind)
+
+    selected_id =
+      Keyword.get(opts, :selected_id) ||
+        inspector_field(state, :selected_id, :inspector_selected_id)
+
+    limit = opts |> Keyword.get(:limit, 600) |> normalize_render_tree_limit()
+
+    expanded =
+      tree
+      |> render_tree_expanded(tree_meta, Keyword.get(opts, :expanded, []), selected_id)
+      |> Enum.uniq()
+
+    {node, _remaining, truncated?} =
+      prune_render_tree(tree, tree_meta, MapSet.new(expanded), limit)
+
+    %{
+      kind: kind,
+      nodes: if(is_nil(node), do: [], else: [node]),
+      selected_id: selected_id,
+      expanded: expanded,
+      limit: limit,
+      truncated?: truncated?
     }
   end
 
@@ -306,6 +337,148 @@ defmodule Breeze.Inspector do
     end)
     |> Enum.map(fn {id, _flags} -> id end)
     |> Enum.sort()
+  end
+
+  defp normalize_render_tree_limit(limit) when is_integer(limit) and limit > 0 do
+    min(limit, 2_000)
+  end
+
+  defp normalize_render_tree_limit(_limit), do: 600
+
+  defp normalize_render_tree_kind(kind) when kind in [:code, "code"], do: :code
+  defp normalize_render_tree_kind(_kind), do: :rendered
+
+  defp render_tree_meta_for_kind(state, :code) do
+    rendered_field(state, :code_tree_meta, :rendered_code_tree_meta)
+  end
+
+  defp render_tree_meta_for_kind(state, _kind) do
+    rendered_field(state, :render_tree_meta, :rendered_render_tree_meta)
+  end
+
+  defp render_tree_kinds(state) do
+    if is_nil(rendered_field(state, :render_tree, :rendered_render_tree)) do
+      []
+    else
+      [:rendered, :code]
+    end
+  end
+
+  defp render_tree_expanded(nil, _tree_meta, _expanded, _selected_id), do: []
+
+  defp render_tree_expanded(tree, tree_meta, expanded, selected_id) do
+    explicit = List.wrap(expanded)
+
+    selected_path =
+      tree
+      |> render_tree_path(tree_meta, selected_id)
+      |> Enum.drop(-1)
+
+    expanded =
+      case explicit ++ selected_path do
+        [] -> expandable_tree_id(tree, tree_meta)
+        ids -> ids
+      end
+
+    Enum.filter(expanded, &is_binary/1)
+  end
+
+  defp expandable_tree_id(%{idx: idx, children: [_ | _]}, tree_meta) do
+    case Map.get(tree_meta, idx) do
+      %{id: id} when is_binary(id) -> [id]
+      _ -> []
+    end
+  end
+
+  defp expandable_tree_id(_tree, _tree_meta), do: []
+
+  defp render_tree_path(_tree, _tree_meta, selected_id) when not is_binary(selected_id), do: []
+
+  defp render_tree_path(%{idx: idx, children: children}, tree_meta, selected_id)
+       when is_list(children) do
+    id = tree_meta |> Map.get(idx, %{}) |> Map.get(:id)
+
+    if id == selected_id do
+      [selected_id]
+    else
+      render_tree_child_path(id, children, tree_meta, selected_id)
+    end
+  end
+
+  defp render_tree_path(_tree, _tree_meta, _selected_id), do: []
+
+  defp render_tree_child_path(id, children, tree_meta, selected_id) do
+    Enum.find_value(children, [], fn child ->
+      case render_tree_path(child, tree_meta, selected_id) do
+        [] -> nil
+        path -> [id | path]
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp prune_render_tree(nil, _tree_meta, _expanded, limit), do: {nil, limit, false}
+
+  defp prune_render_tree(_tree, _tree_meta, _expanded, remaining) when remaining <= 0,
+    do: {nil, remaining, true}
+
+  defp prune_render_tree(%{idx: idx, tag: tag} = tree, tree_meta, expanded, remaining) do
+    meta = render_tree_node_meta(idx, tag, tree_meta)
+    id = Map.get(meta, :id)
+    children = Map.get(tree, :children, [])
+    expandable? = children != []
+    remaining = remaining - 1
+
+    {children, remaining, truncated?} =
+      if MapSet.member?(expanded, id) do
+        prune_render_tree_children(children, tree_meta, expanded, remaining, [])
+      else
+        {[], remaining, false}
+      end
+
+    node = meta |> Map.put(:children, children) |> Map.put(:expandable?, expandable?)
+
+    {node, remaining, truncated?}
+  end
+
+  defp prune_render_tree(_tree, _tree_meta, _expanded, remaining), do: {nil, remaining, false}
+
+  defp render_tree_node_meta(idx, tag, tree_meta) do
+    Map.get(tree_meta, idx, %{
+      id: "__inspector__" <> Integer.to_string(idx),
+      actual_id: nil,
+      inspector_idx: idx,
+      label: "<#{tag}>",
+      label_parts: [%{text: "<#{tag}>", token: :tag}],
+      tag: to_string(tag),
+      flags: %{},
+      bounds: %{}
+    })
+  end
+
+  defp prune_render_tree_children([], _tree_meta, _expanded, remaining, acc) do
+    {Enum.reverse(acc), remaining, false}
+  end
+
+  defp prune_render_tree_children(_children, _tree_meta, _expanded, remaining, acc)
+       when remaining <= 0 do
+    {Enum.reverse(acc), remaining, true}
+  end
+
+  defp prune_render_tree_children([child | rest], tree_meta, expanded, remaining, acc) do
+    case prune_render_tree(child, tree_meta, expanded, remaining) do
+      {nil, remaining, true} ->
+        {Enum.reverse(acc), remaining, true}
+
+      {nil, remaining, false} ->
+        prune_render_tree_children(rest, tree_meta, expanded, remaining, acc)
+
+      {node, remaining, true} ->
+        {Enum.reverse([node | acc]), remaining, true}
+
+      {node, remaining, false} ->
+        prune_render_tree_children(rest, tree_meta, expanded, remaining, [node | acc])
+    end
   end
 
   defp active_trapped_scope_id(state, focusable_ids) do
