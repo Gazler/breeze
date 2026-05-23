@@ -276,6 +276,12 @@ defmodule Breeze.ChildServer do
     {:noreply, term}
   end
 
+  def handle_info({:breeze_flash_timeout, id, token}, term) do
+    next_term = Breeze.View.__expire_flash__(term, id, token)
+    notify_invalidate(next_term)
+    {:noreply, next_term}
+  end
+
   def handle_info(message, term) do
     term = maybe_put_terminal(term, term.terminal)
 

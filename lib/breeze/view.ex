@@ -114,6 +114,7 @@ defmodule Breeze.View do
   The following styles are supported:
 
    * `border` - add a line border to the box
+   * `border-square` - add a square block border to the box
    * `bold` - make the text bold
    * `italic` - make the text italic
    * `inverse` - reverse the foreground-background
@@ -312,6 +313,7 @@ defmodule Breeze.View do
     helper_captures = pop_template_helper_captures(env)
     component_spec_names = Enum.map(component_specs, & &1.name)
     local_components = Enum.uniq(component_spec_names ++ local_component_names(env, components))
+    public_components = Enum.filter(local_components, &Module.defines?(env.module, {&1, 1}, :def))
 
     helper_definitions =
       helper_captures
@@ -378,7 +380,7 @@ defmodule Breeze.View do
       unquote_splicing(local_component_definitions)
       unquote_splicing(imported_component_definitions)
 
-      def __breeze_components__, do: unquote(local_components)
+      def __breeze_components__, do: unquote(public_components)
 
       def __breeze_component__(name, _assigns) do
         raise UndefinedFunctionError, module: __MODULE__, function: name, arity: 1
@@ -804,6 +806,41 @@ defmodule Breeze.View do
     Map.merge(assigns, Map.new(values))
   end
 
+  @doc """
+  Append a flash message to `assigns.breeze.flash`.
+
+  The resulting flash assign is a stack-friendly list consumed by
+  `Breeze.Blocks.flash_group/1`.
+
+      term
+      |> put_flash(:info, "Saved", max: 3, duration: 5_000)
+      |> put_flash(:error, "Publish failed", id: "publish-error", highlight: "error")
+
+  The left highlight strip can be customized with `:highlight` or `:color`.
+  It accepts Breeze semantic color names, ANSI color indexes, RGB tuples, and
+  `"#rgb"`/`"#rrggbb"` hex strings.
+  """
+  @spec put_flash(map(), atom() | String.t(), term(), keyword() | map()) :: map()
+  def put_flash(term_or_assigns, kind, message, opts \\ []) do
+    update_flash(term_or_assigns, &Breeze.Flash.put(&1, kind, message, opts))
+  end
+
+  @doc """
+  Clear flash messages from `assigns.breeze.flash`.
+
+  Without a second argument all flash messages are removed. With a second
+  argument, messages matching that kind or id are removed.
+  """
+  @spec clear_flash(map(), atom() | String.t() | nil) :: map()
+  def clear_flash(term_or_assigns, kind_or_id \\ nil) do
+    update_flash(term_or_assigns, &Breeze.Flash.clear(&1, kind_or_id))
+  end
+
+  @doc false
+  def __expire_flash__(term_or_assigns, id, token) do
+    update_flash(term_or_assigns, &Breeze.Flash.expire(&1, id, token))
+  end
+
   def focus(term, value) do
     %{term | focused: value, allow_unfocused?: is_nil(value)}
   end
@@ -963,4 +1000,36 @@ defmodule Breeze.View do
       end
     end)
   end
+
+  defp update_flash(%{assigns: assigns} = term, fun) when is_map(assigns) do
+    breeze = flash_breeze_assign(assigns)
+
+    flash =
+      breeze
+      |> Map.get(:flash)
+      |> fun.()
+      |> schedule_flash_timers(term)
+
+    %{term | assigns: Map.put(assigns, :breeze, Map.put(breeze, :flash, flash))}
+  end
+
+  defp update_flash(assigns, fun) when is_map(assigns) do
+    breeze = flash_breeze_assign(assigns)
+    Map.put(assigns, :breeze, Map.put(breeze, :flash, fun.(Map.get(breeze, :flash))))
+  end
+
+  defp flash_breeze_assign(assigns) do
+    case Map.get(assigns, :breeze) do
+      breeze when is_map(breeze) -> breeze
+      _ -> %{}
+    end
+  end
+
+  defp schedule_flash_timers(flash, %{view: view}) when not is_nil(view) do
+    Breeze.Flash.schedule_visible(flash, fn message, duration ->
+      Process.send_after(self(), message, duration)
+    end)
+  end
+
+  defp schedule_flash_timers(flash, _term), do: flash
 end
