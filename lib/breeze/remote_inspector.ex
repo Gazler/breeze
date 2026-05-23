@@ -31,6 +31,52 @@ defmodule Breeze.RemoteInspector do
     end
   end
 
+  def ensure_app_distribution(opts \\ []) do
+    opts
+    |> Keyword.put_new_lazy(:name, fn -> default_distribution_name(:app, opts) end)
+    |> ensure_distribution()
+  end
+
+  def ensure_inspector_distribution(opts \\ []) do
+    opts
+    |> Keyword.put_new(:name, :inspector)
+    |> ensure_distribution()
+  end
+
+  def ensure_distribution(opts) when is_list(opts) do
+    if Node.alive?() do
+      :ok
+    else
+      name = opts |> Keyword.fetch!(:name) |> normalize_distribution_name()
+      type = Keyword.get(opts, :type, Keyword.get(opts, :name_type, :shortnames))
+      key = {__MODULE__, :distribution_attempt, name, type}
+
+      case Process.get(key) do
+        nil ->
+          result = start_distribution(name, type)
+          unless result == :ok, do: Process.put(key, result)
+          result
+
+        result ->
+          result
+      end
+    end
+  end
+
+  def default_distribution_name(role, opts \\ [])
+
+  def default_distribution_name(:inspector, _opts), do: :inspector
+
+  def default_distribution_name(:app, opts) do
+    opts
+    |> Keyword.get(:view)
+    |> application_for_module()
+    |> case do
+      app when is_atom(app) and not is_nil(app) -> app
+      _ -> :app
+    end
+  end
+
   def register_app(pid) when is_pid(pid) do
     ensure_registry_started()
     :pg.join(@app_group, pid)
@@ -61,6 +107,8 @@ defmodule Breeze.RemoteInspector do
   def publish(%{enabled?: false}), do: :ok
 
   def publish(snapshot) when is_map(snapshot) do
+    _ = ensure_app_distribution(view: Map.get(snapshot, :root_view))
+
     case ensure_remote_server_pid() do
       pid when is_pid(pid) ->
         Server.publish(pid, self(), snapshot)
@@ -122,6 +170,22 @@ defmodule Breeze.RemoteInspector do
   end
 
   defp default_inspector_node(_current_node), do: nil
+
+  defp application_for_module(module) when is_atom(module),
+    do: Application.get_application(module)
+
+  defp application_for_module(_module), do: nil
+
+  defp normalize_distribution_name(name) when is_atom(name), do: name
+  defp normalize_distribution_name(name) when is_binary(name), do: String.to_atom(name)
+
+  defp start_distribution(name, type) do
+    case Node.start(name, type) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+      {:error, _reason} = error -> error
+    end
+  end
 
   def ensure_registry_started do
     case Process.whereis(:pg) do

@@ -164,6 +164,10 @@ defmodule Breeze.Server do
     apply_theme_defaults? = Breeze.Theme.defaults_enabled?(Keyword.get(opts, :theme))
     inspector_enabled? = inspector_enabled?(Keyword.get(opts, :inspector, false))
 
+    if inspector_enabled? do
+      _ = Breeze.RemoteInspector.ensure_app_distribution(view: view)
+    end
+
     session = self()
 
     {:ok, view_pid} =
