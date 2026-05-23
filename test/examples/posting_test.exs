@@ -288,6 +288,55 @@ defmodule PostingTest do
     assert url_row =~ "posts好好好好好好"
   end
 
+  test "server accepts a multi-grapheme wide-character paste in the url row" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: Posting,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      not is_nil(state.frame.base_output)
+    end)
+
+    drain_terminal_writes()
+
+    send(pid, {reader, {:data, "こんにちは"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      term = :sys.get_state(state.view_pid)
+
+      not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input) and
+        String.ends_with?(term.assigns.url, "こんにちは")
+    end)
+
+    state = :sys.get_state(pid)
+    row = state.frame.base_output |> String.split("\n") |> Enum.at(3)
+
+    assert visible(row) =~ "postsこんにちは"
+    assert BackBreeze.Utils.string_length(row) == terminal.size.width
+
+    blank_panel_row =
+      state.frame.base_output
+      |> String.split("\n")
+      |> Enum.find(&(visible(&1) =~ "│                                    ││"))
+
+    assert blank_panel_row
+    assert blank_panel_row =~ "\e[48;2;40;40;40;38;2;235;219;178m"
+    refute blank_panel_row =~ "│                                    ││"
+
+    payload = drain_terminal_writes() |> IO.iodata_to_binary()
+    assert payload =~ "postsこんにちは"
+
+    Process.exit(pid, :normal)
+  end
+
   test "inspector is opt-in and stays disabled by default" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader

@@ -46,6 +46,14 @@ defmodule Breeze.Server.Input do
     handlers.handle_mouse.(event, state)
   end
 
+  defp process_batched_input(
+         {:key, %{"__batched_printable__" => true} = event},
+         state,
+         handlers
+       ) do
+    handlers.handle_sync_or_deferred.({:key, event}, state)
+  end
+
   defp process_batched_input({:key, key}, state, handlers) do
     if handlers.batchable_printable?.(key, state) do
       {key, state} = coalesce_printable_keys_from_queue(key, state, handlers)

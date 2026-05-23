@@ -169,20 +169,18 @@ defmodule Breeze.Server.Frame do
 
   defp write_row_payload(row, line, screen_width) do
     visible_width = visible_width(line)
+    row_position = ["\e[", Integer.to_string(row + 1), ";1H"]
+    line_payload = row_line_payload(line, row_position)
 
     if visible_width >= screen_width do
       [
-        "\e[",
-        Integer.to_string(row + 1),
-        ";1H",
-        line
+        row_position,
+        line_payload
       ]
     else
       [
-        "\e[",
-        Integer.to_string(row + 1),
-        ";1H",
-        line,
+        row_position,
+        line_payload,
         "\e[",
         Integer.to_string(row + 1),
         ";",
@@ -194,6 +192,43 @@ defmodule Breeze.Server.Frame do
 
   defp visible_width(line) when is_binary(line) do
     BackBreeze.Utils.string_length(line)
+  end
+
+  defp row_line_payload(line, row_position) do
+    if wide_glyph_line?(line) do
+      [wide_background_line(line), row_position, line]
+    else
+      line
+    end
+  end
+
+  defp wide_glyph_line?(line) do
+    line
+    |> BackBreeze.Utils.strip_escape_chars()
+    |> String.graphemes()
+    |> Enum.any?(&(BackBreeze.Ucwidth.width(&1) > 1))
+  end
+
+  defp wide_background_line(line), do: do_wide_background_line(line, [])
+
+  defp do_wide_background_line("", acc), do: IO.iodata_to_binary(Enum.reverse(acc))
+
+  defp do_wide_background_line(<<"\e[", rest::binary>>, acc) do
+    case :binary.match(rest, "m") do
+      {index, 1} ->
+        <<params::binary-size(index), "m", rest::binary>> = rest
+        do_wide_background_line(rest, [["\e[", params, "m"] | acc])
+
+      :nomatch ->
+        do_wide_background_text(<<"\e[", rest::binary>>, acc)
+    end
+  end
+
+  defp do_wide_background_line(line, acc), do: do_wide_background_text(line, acc)
+
+  defp do_wide_background_text(<<codepoint::utf8, rest::binary>>, acc) do
+    width = codepoint |> BackBreeze.Ucwidth.width_codepoint() |> max(0)
+    do_wide_background_line(rest, [String.duplicate(" ", width) | acc])
   end
 
   defp overlay_patch_payload(overlays, changed_rows) do
