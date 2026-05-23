@@ -12,6 +12,8 @@ defmodule Breeze.Renderer do
   end
 
   def render_tree(mod, assigns, opts \\ []) do
+    assigns = put_breeze_render_context(assigns, opts)
+
     opts =
       Keyword.put_new(
         opts,
@@ -32,6 +34,8 @@ defmodule Breeze.Renderer do
   end
 
   def render(mod, assigns, opts \\ []) do
+    assigns = put_breeze_render_context(assigns, opts)
+
     opts =
       Keyword.put_new(
         opts,
@@ -72,6 +76,29 @@ defmodule Breeze.Renderer do
 
     {Map.put(acc, :dimensions, dimensions), box}
   end
+
+  defp put_breeze_render_context(assigns, opts) when is_map(assigns) do
+    Map.update(assigns, :breeze, render_context(opts), fn
+      breeze when is_map(breeze) -> Map.merge(breeze, render_context(opts))
+      _ -> render_context(opts)
+    end)
+  end
+
+  defp put_breeze_render_context(assigns, _opts), do: assigns
+
+  defp render_context(opts) do
+    %{
+      terminal: terminal_context(Keyword.get(opts, :terminal)),
+      implicit_state: Keyword.get(opts, :implicit_state, %{}),
+      implicit_meta: Keyword.get(opts, :implicit_meta, %{})
+    }
+  end
+
+  defp terminal_context(%{size: %{width: width, height: height}}) do
+    %{width: width, height: height}
+  end
+
+  defp terminal_context(_terminal), do: nil
 
   defp build_from_tree_nodes(children, opts) do
     {acc, box} =
@@ -544,10 +571,23 @@ defmodule Breeze.Renderer do
   end
 
   defp intrinsic_inline_width(children, content) do
-    content_width = BackBreeze.Utils.string_length(content || "")
+    content_width = intrinsic_content_width(content)
     child_width = Enum.reduce(children, 0, &(&2 + intrinsic_box_width(&1)))
     max(content_width + child_width, 0)
   end
+
+  defp intrinsic_content_width(nil), do: 0
+
+  defp intrinsic_content_width(content) when is_binary(content),
+    do: BackBreeze.Utils.string_length(content)
+
+  defp intrinsic_content_width(%{__struct__: BackBreeze.VirtualText} = content),
+    do: content |> BackBreeze.TextLayout.source_metrics() |> elem(1)
+
+  defp intrinsic_content_width([%{__struct__: BackBreeze.TextSpan} | _rest] = content),
+    do: content |> BackBreeze.TextLayout.source_metrics() |> elem(1)
+
+  defp intrinsic_content_width(_content), do: 0
 
   defp intrinsic_box_width(%Box{style: %{width: width}}) when is_integer(width), do: width
 
@@ -561,7 +601,7 @@ defmodule Breeze.Renderer do
       |> Enum.map(&intrinsic_box_width/1)
       |> Enum.max(fn -> 0 end)
 
-    max(BackBreeze.Utils.string_length(content || ""), child_width)
+    max(intrinsic_content_width(content), child_width)
   end
 
   defp merge_live_acc(acc, child_acc) do

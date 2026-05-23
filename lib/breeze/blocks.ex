@@ -286,6 +286,469 @@ defmodule Breeze.Blocks do
 
   defp list_variant_item_class(_), do: nil
 
+  attr :id, :string, required: true
+  attr :nodes, :list, default: []
+  attr :selected, :any, default: nil
+  attr :expanded, :any, default: nil
+  attr :default_expanded, :any, default: []
+  attr :loop, :boolean, default: true
+  attr :virtual, :boolean, default: false
+  attr :virtual_overscan, :integer, default: 24
+  attr :offset, :integer, default: nil
+  attr :virtual_window, :integer, default: nil
+  attr :collapsed_prefix, :string, default: ">"
+  attr :expanded_prefix, :string, default: "⌄"
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :rest, :global
+
+  slot :item
+  slot :empty
+
+  def tree(assigns) do
+    visible_expanded = rendered_tree_expanded(assigns)
+    controlled_expanded? = not is_nil(visible_expanded)
+    rows = normalize_tree_rows(assigns.nodes, visible_expanded, assigns)
+
+    prefix_width =
+      [
+        assigns.collapsed_prefix,
+        assigns.expanded_prefix,
+        " "
+      ]
+      |> Enum.map(&tree_prefix_width/1)
+      |> Enum.max()
+      |> max(1)
+
+    item_visual_defaults = "selected:bg-primary selected:text-bg"
+
+    assigns =
+      assigns
+      |> assign(rows: rows)
+      |> assign(implicit_rows: implicit_tree_rows(rows))
+      |> assign(controlled_expanded?: controlled_expanded?)
+      |> assign(prefix_width: prefix_width)
+      |> assign(
+        class:
+          merge_class(
+            "border width-full height-8 overflow-scroll scrollbar-arrows focus:border-primary focus:scrollbar-primary",
+            class_override(assigns)
+          )
+      )
+      |> assign(
+        item_class:
+          merge_class(
+            "inline width-full height-1 overflow-hidden",
+            item_visual_defaults
+          )
+      )
+      |> assign(prefix_cell_class: "inline width-#{prefix_width} height-1 overflow-hidden")
+      |> assign(label_class: merge_class("inline height-1 overflow-hidden", item_visual_defaults))
+
+    {render_rows, top_spacer, bottom_spacer, windowed?} = tree_render_window(rows, assigns)
+
+    assigns =
+      assigns
+      |> assign(render_rows: render_rows)
+      |> assign(top_spacer: top_spacer)
+      |> assign(bottom_spacer: bottom_spacer)
+      |> assign(tree_offset: if(windowed?, do: top_spacer, else: assigns.offset))
+
+    ~H"""
+    <box
+      id={@id}
+      implicit={Breeze.Implicit.Tree}
+      tree-loop={@loop}
+      tree-selected={@selected}
+      tree-expanded={@expanded}
+      tree-default-expanded={@default_expanded}
+      tree-offset={@tree_offset}
+      tree-rows={@implicit_rows}
+      tree-scroll-padding={1}
+      focusable
+      class={@class}
+      style={Breeze.Blocks.inline_style(assigns)}
+      {@rest}
+    >
+      <box :if={@rows == [] and @empty != []} class="width-full height-1 text-muted">
+        {render_slot(@empty)}
+      </box>
+      <box :if={@top_spacer > 0} class={"width-full height-#{@top_spacer} overflow-hidden"}>
+      </box>
+      <box
+        :for={row <- @render_rows}
+        value={row.value}
+        tree-node
+        tree-depth={row.depth}
+        tree-parent={row.parent}
+        tree-parents={row.parents}
+        tree-expandable={row.expandable?}
+        focus-with-owner
+        class={@item_class}
+      >
+        <box
+          :if={row.indent_width > 0}
+          tree-node-part
+          selected-with-owner
+          class={"inline width-#{row.indent_width} height-1 overflow-hidden"}
+        >
+        </box>
+        <box
+          :if={@controlled_expanded?}
+          tree-node-part
+          selected-with-owner
+          class={@prefix_cell_class}
+        >
+          {row.prefix}
+        </box>
+        <box
+          :if={!@controlled_expanded?}
+          tree-node-part
+          selected-with-owner
+          class={@prefix_cell_class}
+        >
+          <box tree-collapsed-prefix selected-with-owner class={@prefix_cell_class}>
+            {@collapsed_prefix}
+          </box>
+          <box tree-expanded-prefix selected-with-owner class={@prefix_cell_class}>
+            {@expanded_prefix}
+          </box>
+          <box tree-leaf-prefix selected-with-owner class={@prefix_cell_class}>{" "}</box>
+        </box>
+        <box :if={@item == []} tree-node-part selected-with-owner class={@label_class}>
+          {row.label}
+        </box>
+        <box :if={@item != []} tree-node-part selected-with-owner class={@label_class}>
+          {render_slot(@item, row)}
+        </box>
+      </box>
+      <box :if={@bottom_spacer > 0} class={"width-full height-#{@bottom_spacer} overflow-hidden"}>
+      </box>
+    </box>
+    """
+  end
+
+  defp tree_render_window(rows, assigns) do
+    total = length(rows)
+
+    with window_size when is_integer(window_size) <-
+           tree_window_size(assigns),
+         offset when is_integer(offset) <- tree_window_offset(rows, assigns, window_size),
+         true <- total > window_size do
+      render_rows = Enum.slice(rows, offset, window_size)
+      bottom_spacer = max(total - offset - length(render_rows), 0)
+
+      {render_rows, offset, bottom_spacer, true}
+    else
+      _ -> {rows, 0, 0, false}
+    end
+  end
+
+  defp tree_window_size(assigns) do
+    explicit = normalize_tree_window_size(assigns.virtual_window)
+
+    cond do
+      is_integer(explicit) ->
+        explicit
+
+      assigns.virtual in [true, "true", "1", ""] ->
+        inferred_tree_window_size(assigns)
+
+      true ->
+        nil
+    end
+  end
+
+  defp inferred_tree_window_size(assigns) do
+    overscan = normalize_tree_overscan(assigns.virtual_overscan)
+
+    height =
+      Breeze.Style.resolve_dimensions(Map.get(assigns, :class), inline_style(assigns)).height
+
+    visible_rows =
+      case height do
+        height when is_integer(height) and height > 0 ->
+          height
+
+        height when height in [:full, :screen] ->
+          assigns
+          |> caller_terminal_height()
+          |> case do
+            height when is_integer(height) and height > 0 -> height
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    if is_integer(visible_rows), do: max(visible_rows + overscan, 1)
+  end
+
+  defp normalize_tree_overscan(value) when is_integer(value), do: max(value, 0)
+
+  defp normalize_tree_overscan(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {value, ""} -> max(value, 0)
+      _ -> 24
+    end
+  end
+
+  defp normalize_tree_overscan(_value), do: 24
+
+  defp caller_terminal_height(assigns) do
+    get_in(assigns, [:__breeze_caller_assigns__, :breeze, :terminal, :height])
+  end
+
+  defp normalize_tree_window_size(size) when is_integer(size) and size > 0, do: size
+
+  defp normalize_tree_window_size(size) when is_binary(size) do
+    case Integer.parse(size) do
+      {size, ""} when size > 0 -> size
+      _ -> nil
+    end
+  end
+
+  defp normalize_tree_window_size(_size), do: nil
+
+  defp tree_window_offset(_rows, _assigns, window_size) when window_size <= 0, do: nil
+
+  defp tree_window_offset(rows, assigns, window_size) do
+    total = length(rows)
+
+    assigns
+    |> explicit_or_implicit_tree_offset()
+    |> case do
+      offset when is_integer(offset) ->
+        normalize_tree_window_offset(offset, total)
+
+      _ ->
+        selected = explicit_or_implicit_tree_selected(assigns)
+        selected_index = Enum.find_index(rows, &(&1.value == selected))
+
+        case selected_index do
+          index when is_integer(index) ->
+            normalize_tree_window_offset(index - div(window_size, 2), total)
+
+          _ ->
+            0
+        end
+    end
+  end
+
+  defp normalize_tree_window_offset(_offset, total) when total <= 0, do: nil
+
+  defp normalize_tree_window_offset(offset, total) when is_integer(offset) do
+    offset
+    |> max(0)
+    |> min(total - 1)
+  end
+
+  defp normalize_tree_window_offset(offset, total) when is_binary(offset) do
+    case Integer.parse(offset) do
+      {offset, ""} -> normalize_tree_window_offset(offset, total)
+      _ -> nil
+    end
+  end
+
+  defp normalize_tree_window_offset(_offset, _total), do: nil
+
+  defp explicit_or_implicit_tree_offset(assigns) do
+    case assigns.offset do
+      nil -> get_in(tree_implicit_state(assigns), [:offset])
+      offset -> offset
+    end
+  end
+
+  defp explicit_or_implicit_tree_selected(assigns) do
+    case assigns.selected do
+      nil -> get_in(tree_implicit_state(assigns), [:selected])
+      selected -> selected
+    end
+  end
+
+  defp implicit_tree_rows(rows) do
+    Enum.map(rows, fn row ->
+      %{
+        value: row.value,
+        parent: row.parent,
+        parents: row.parents,
+        expandable?: row.expandable?,
+        depth: row.depth
+      }
+    end)
+  end
+
+  defp normalize_tree_rows(nodes, visible_expanded, assigns) do
+    nodes
+    |> List.wrap()
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {node, index} ->
+      normalize_tree_node(node, assigns, visible_expanded, nil, [], 0, [index])
+    end)
+  end
+
+  defp normalize_tree_node(node, assigns, visible_expanded, parent, parents, depth, path) do
+    value = tree_node_value(node, path)
+    label = tree_node_label(node, value)
+    children = tree_node_children(node)
+    expandable? = tree_node_expandable(node, children != [])
+
+    row = %{
+      value: value,
+      label: label,
+      node: node,
+      prefix: tree_row_prefix(value, expandable?, visible_expanded, assigns),
+      parent: parent,
+      parents: parents,
+      depth: depth,
+      indent_width: depth * 2,
+      expandable?: expandable?
+    }
+
+    child_rows =
+      if render_tree_children?(visible_expanded, value) do
+        children
+        |> Enum.with_index()
+        |> Enum.flat_map(fn {child, index} ->
+          normalize_tree_node(
+            child,
+            assigns,
+            visible_expanded,
+            value,
+            parents ++ [value],
+            depth + 1,
+            path ++ [index]
+          )
+        end)
+      else
+        []
+      end
+
+    [row | child_rows]
+  end
+
+  defp tree_node_value(node, path), do: tree_node_lookup(node, :id, path)
+
+  defp tree_node_label(node, value) do
+    node
+    |> tree_node_lookup(:label, value)
+    |> normalize_tree_label()
+  end
+
+  defp normalize_tree_label(%{__struct__: BackBreeze.VirtualText} = value), do: value
+  defp normalize_tree_label([%{__struct__: BackBreeze.TextSpan} | _rest] = value), do: value
+  defp normalize_tree_label(value), do: to_string(value)
+
+  defp tree_node_children(node) do
+    node
+    |> tree_node_lookup(:children, [])
+    |> normalize_tree_children()
+  end
+
+  defp tree_node_expandable(node, default) do
+    node
+    |> tree_node_lookup(:expandable?, default)
+    |> normalize_tree_expandable()
+  end
+
+  defp tree_row_prefix(_value, false, _visible_expanded, _assigns), do: " "
+
+  defp tree_row_prefix(value, true, %MapSet{} = visible_expanded, assigns) do
+    if MapSet.member?(visible_expanded, value),
+      do: assigns.expanded_prefix,
+      else: assigns.collapsed_prefix
+  end
+
+  defp tree_row_prefix(_value, _expandable?, _visible_expanded, _assigns), do: nil
+
+  defp normalize_tree_children(children) when is_list(children), do: children
+  defp normalize_tree_children(_children), do: []
+
+  defp normalize_tree_expandable(value), do: value in [true, "true", "1", ""]
+
+  defp controlled_tree_expanded(assigns) do
+    if not is_nil(assigns.expanded) do
+      tree_value_set(assigns.expanded)
+    else
+      nil
+    end
+  end
+
+  defp rendered_tree_expanded(assigns) do
+    cond do
+      not is_nil(controlled_tree_expanded(assigns)) ->
+        controlled_tree_expanded(assigns)
+
+      tree_virtual?(assigns) ->
+        case get_in(tree_implicit_state(assigns), [:expanded]) do
+          %MapSet{} = expanded -> expanded
+          expanded when not is_nil(expanded) -> tree_value_set(expanded)
+          _ -> tree_value_set(assigns.default_expanded)
+        end
+
+      true ->
+        nil
+    end
+  end
+
+  defp tree_virtual?(assigns) do
+    assigns.virtual in [true, "true", "1", ""] or
+      not is_nil(normalize_tree_window_size(assigns.virtual_window))
+  end
+
+  defp tree_implicit_state(assigns) do
+    id = assigns.id
+
+    with id when not is_nil(id) <- id,
+         {Breeze.Implicit.Tree, state} <-
+           get_in(assigns, [:__breeze_caller_assigns__, :breeze, :implicit_state, id]) do
+      state
+    else
+      _ -> nil
+    end
+  end
+
+  defp render_tree_children?(nil, _value), do: true
+  defp render_tree_children?(%MapSet{} = expanded, value), do: MapSet.member?(expanded, value)
+
+  defp tree_value_set(%MapSet{} = values), do: values
+  defp tree_value_set(values) when is_list(values), do: MapSet.new(values)
+
+  defp tree_value_set(values) when is_map(values) do
+    values
+    |> Enum.filter(fn {_key, value} -> value in [true, "true", "1", ""] end)
+    |> Enum.map(fn {key, _value} -> key end)
+    |> MapSet.new()
+  end
+
+  defp tree_value_set(value), do: MapSet.new([value])
+
+  defp tree_node_lookup(node, key, default) when is_map(node) do
+    cond do
+      Map.has_key?(node, key) -> Map.get(node, key)
+      Map.has_key?(node, to_string(key)) -> Map.get(node, to_string(key))
+      true -> Map.get(node, key_to_existing_atom(key), default)
+    end
+  end
+
+  defp tree_node_lookup(node, key, default) when is_list(node) do
+    if Keyword.keyword?(node) do
+      cond do
+        Keyword.has_key?(node, key) -> Keyword.get(node, key)
+        Keyword.has_key?(node, to_string(key)) -> Keyword.get(node, to_string(key))
+        true -> Keyword.get(node, key_to_existing_atom(key), default)
+      end
+    else
+      default
+    end
+  end
+
+  defp tree_node_lookup(_node, _key, default), do: default
+
+  defp tree_prefix_width(prefix) when is_binary(prefix), do: max(Ucwidth.width(prefix), 0)
+  defp tree_prefix_width(_prefix), do: 0
+
   defp size_class(axis, :full), do: "#{axis}-full"
   defp size_class(axis, size) when is_integer(size), do: "#{axis}-#{size}"
 

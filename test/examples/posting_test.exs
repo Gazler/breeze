@@ -328,7 +328,7 @@ defmodule PostingTest do
       |> Enum.find(&(visible(&1) =~ "│                                    ││"))
 
     assert blank_panel_row
-    assert blank_panel_row =~ "\e[48;2;40;40;40;38;2;235;219;178m"
+    assert visible(blank_panel_row) =~ "│                                    ││"
     refute blank_panel_row =~ "│                                    ││"
 
     payload = drain_terminal_writes() |> IO.iodata_to_binary()

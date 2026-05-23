@@ -174,6 +174,167 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule TreeExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    @nodes [
+      %{
+        id: "root",
+        label: "breeze",
+        children: [
+          %{
+            id: "src",
+            label: "src",
+            children: [
+              %{id: "lib", label: "lib"}
+            ]
+          },
+          %{id: "mix", label: "mix.exs"}
+        ]
+      }
+    ]
+
+    def mount(_opts, term) do
+      {:ok, term |> focus("files") |> assign(selected: "root", expanded: ["root"])}
+    end
+
+    def render(assigns) do
+      assigns = assign(assigns, nodes: @nodes)
+
+      ~H"""
+      <.tree
+        id="files"
+        nodes={@nodes}
+        selected={@selected}
+        expanded={@expanded}
+        br-change="change"
+        style="width-20 height-6"
+      />
+      """
+    end
+
+    def handle_event("change", %{value: value, expanded: expanded}, term),
+      do: {:noreply, assign(term, selected: value, expanded: expanded)}
+
+    def handle_event("change", %{value: value}, term),
+      do: {:noreply, assign(term, selected: value)}
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule VirtualTreeExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    @nodes Enum.map(0..9, fn index ->
+             label = "file-#{index}"
+             %{id: label, label: label}
+           end)
+
+    def mount(_opts, term) do
+      {:ok, term |> focus("files") |> assign(selected: "file-3")}
+    end
+
+    def render(assigns) do
+      assigns = assign(assigns, nodes: @nodes)
+
+      ~H"""
+      <.tree
+        id="files"
+        nodes={@nodes}
+        selected={@selected}
+        virtual_window={2}
+        br-change="change"
+        style="width-20 height-4"
+      />
+      """
+    end
+
+    def handle_event("change", %{value: value}, term),
+      do: {:noreply, assign(term, selected: value)}
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule VirtualUncontrolledTreeExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    @nodes [
+      %{
+        id: "root",
+        label: "root",
+        children: [
+          %{id: "src", label: "src", children: [%{id: "lib", label: "lib"}]},
+          %{id: "mix", label: "mix.exs"}
+        ]
+      }
+    ]
+
+    def mount(_opts, term), do: {:ok, term |> focus("files") |> assign(selected: "root")}
+
+    def render(assigns) do
+      assigns = assign(assigns, nodes: @nodes)
+
+      ~H"""
+      <.tree
+        id="files"
+        nodes={@nodes}
+        selected={@selected}
+        default_expanded={["root"]}
+        virtual_window={4}
+        br-change="change"
+        style="width-20 height-6"
+      />
+      """
+    end
+
+    def handle_event("change", %{value: value}, term),
+      do: {:noreply, assign(term, selected: value)}
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule EmptyTreeExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term |> focus("files")}
+
+    def render(assigns) do
+      ~H"""
+      <.tree id="files" nodes={[]} style="width-20 height-4"/>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule EmptyTreeSlotExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term |> focus("files")}
+
+    def render(assigns) do
+      ~H"""
+      <.tree id="files" nodes={[]} style="width-20 height-4">
+        <:empty>
+          <box class="text-accent">Nothing here</box>
+        </:empty>
+      </.tree>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule TableExample do
     use Breeze.View
     import Breeze.Blocks
@@ -375,6 +536,73 @@ defmodule Breeze.BlocksTest do
     refute box.content =~ ">Three"
     assert box.content =~ " One"
     assert box.content =~ " Two"
+  end
+
+  test "tree renders visible rows with collapsed and expanded prefixes" do
+    {:ok, pid} = ChildServer.start(view: TreeExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    assert box.content =~ "⌄breeze"
+    assert box.content =~ ">src"
+    assert box.content =~ " mix.exs"
+    refute box.content =~ "lib"
+  end
+
+  test "tree expands selected rows through the implicit lifecycle" do
+    {:ok, pid} = ChildServer.start(view: TreeExample, start_opts: [])
+
+    {:ok, _acc, _box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    assert {:noreply, "files", true} = ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "files", true} = ChildServer.dispatch_input(pid, "Enter")
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    assert box.content =~ "⌄src"
+    assert box.content =~ "lib"
+  end
+
+  test "tree virtual window derives the row slice from selection" do
+    {:ok, pid} = ChildServer.start(view: VirtualTreeExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    assert box.content =~ "file-2"
+    assert box.content =~ "file-3"
+    refute box.content =~ "file-1"
+    refute box.content =~ "file-4"
+    refute box.content =~ "file-5"
+  end
+
+  test "tree virtual window can use implicit-owned expanded state" do
+    {:ok, pid} = ChildServer.start(view: VirtualUncontrolledTreeExample, start_opts: [])
+
+    {:ok, _acc, _box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    assert {:noreply, "files", true} = ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "files", true} = ChildServer.dispatch_input(pid, "Enter")
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    assert box.content =~ "⌄src"
+    assert box.content =~ "lib"
+  end
+
+  test "tree renders no empty content by default" do
+    {:ok, pid} = ChildServer.start(view: EmptyTreeExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    refute box.content =~ "No items"
+  end
+
+  test "tree supports an empty slot" do
+    {:ok, pid} = ChildServer.start(view: EmptyTreeSlotExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    assert box.content =~ "Nothing here"
   end
 
   test "table renders headers, rows, and selectable cells" do
