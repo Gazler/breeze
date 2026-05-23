@@ -32,6 +32,7 @@ defmodule Breeze.Term do
     children: %{},
     frame_delay_ms: 16,
     render_timer: nil,
+    render_tree?: false,
     apply_theme_defaults?: false
   ]
 end

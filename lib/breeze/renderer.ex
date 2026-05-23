@@ -25,12 +25,12 @@ defmodule Breeze.Renderer do
 
     rendered = mod.render(assigns)
 
-    [{_tag, _, root_children}] =
+    [{root_tag, _, root_children}] =
       rendered
       |> Breeze.Template.render_to_tree(assigns)
 
-    opts = maybe_attach_live_viewports(root_children, opts)
-    build_from_tree_nodes(root_children, opts)
+    opts = maybe_attach_live_viewports(root_tag, root_children, opts)
+    build_from_tree_nodes(root_tag, root_children, opts)
   end
 
   def render(mod, assigns, opts \\ []) do
@@ -53,16 +53,16 @@ defmodule Breeze.Renderer do
         mod.render(assigns)
       end)
 
-    [{_tag, _, root_children}] =
+    [{root_tag, _, root_children}] =
       profile(profile_scope, profile_label, :template_tree_us, fn ->
         Breeze.Template.render_to_tree(rendered, assigns)
       end)
 
-    opts = maybe_attach_live_viewports(root_children, opts)
+    opts = maybe_attach_live_viewports(root_tag, root_children, opts)
 
     {acc, box} =
       profile(profile_scope, profile_label, :build_tree_us, fn ->
-        build_from_tree_nodes(root_children, opts)
+        build_from_tree_nodes(root_tag, root_children, opts)
       end)
 
     %{box: box, dimensions: dimensions} =
@@ -100,7 +100,7 @@ defmodule Breeze.Renderer do
 
   defp terminal_context(_terminal), do: nil
 
-  defp build_from_tree_nodes(children, opts) do
+  defp build_from_tree_nodes(root_tag, children, opts) do
     {acc, box} =
       build_tree(
         children,
@@ -115,15 +115,98 @@ defmodule Breeze.Renderer do
           boxes: %{},
           ids: [],
           flags: [],
-          live_dimensions: %{}
+          live_dimensions: %{},
+          render_tree?: render_tree_enabled?(opts),
+          render_tree_nodes: %{},
+          render_tree_children: %{},
+          render_tree_root: 0
         },
-        opts
+        opts,
+        0,
+        root_tag
       )
 
     acc = %{acc | elements: Map.put(acc.elements, acc.id, acc.flags)}
     ids = Enum.reverse(acc.ids)
     focusables = Enum.reverse(acc.focusables) |> then(&Enum.filter(ids, fn id -> id in &1 end))
-    {%{acc | ids: ids, focusables: focusables}, box}
+    acc = %{acc | ids: ids, focusables: focusables}
+
+    acc =
+      if acc.render_tree? do
+        acc
+        |> Map.put(:render_tree, assemble_render_tree(acc))
+        |> Map.drop([:render_tree?, :render_tree_nodes, :render_tree_children, :render_tree_root])
+      else
+        Map.drop(acc, [
+          :render_tree?,
+          :render_tree_nodes,
+          :render_tree_children,
+          :render_tree_root
+        ])
+      end
+
+    {acc, box}
+  end
+
+  defp render_tree_enabled?(opts), do: Keyword.get(opts, :render_tree?, false) == true
+
+  defp put_render_tree_node(%{render_tree?: true} = acc, idx, tag) do
+    update_in(acc, [:render_tree_nodes], &Map.put(&1 || %{}, idx, %{idx: idx, tag: tag}))
+  end
+
+  defp put_render_tree_node(acc, _idx, _tag), do: acc
+
+  defp put_render_tree_child(%{render_tree?: true} = acc, parent_id, child_ref) do
+    update_in(acc, [:render_tree_children], fn children ->
+      Map.update(children || %{}, parent_id, [child_ref], &(&1 ++ [child_ref]))
+    end)
+  end
+
+  defp put_render_tree_child(acc, _parent_id, _child_ref), do: acc
+
+  defp assemble_render_tree(%{render_tree_root: root} = acc) do
+    assemble_render_tree(root, acc.render_tree_nodes, acc.render_tree_children)
+  end
+
+  defp assemble_render_tree(idx, nodes, children) do
+    case Map.get(nodes, idx) do
+      nil ->
+        nil
+
+      node ->
+        child_nodes =
+          children
+          |> Map.get(idx, [])
+          |> Enum.flat_map(fn
+            {:id, child_id} ->
+              case assemble_render_tree(child_id, nodes, children) do
+                nil -> []
+                child -> [child]
+              end
+
+            {:tree, child} when is_map(child) ->
+              [child]
+
+            _other ->
+              []
+          end)
+
+        Map.put(node, :children, child_nodes)
+    end
+  end
+
+  defp shift_render_tree(nil, _offset), do: nil
+
+  defp shift_render_tree(%{idx: idx} = node, offset) do
+    children =
+      node
+      |> Map.get(:children, [])
+      |> Enum.map(&shift_render_tree(&1, offset))
+      |> Enum.reject(&is_nil/1)
+
+    node
+    |> Map.put(:idx, idx + offset)
+    |> Map.put(:children, children)
   end
 
   defp build_tree(
@@ -133,11 +216,24 @@ defmodule Breeze.Renderer do
          style_state,
          flags,
          acc,
-         opts
+         opts,
+         current_id,
+         tag
        ) do
     acc = %{acc | flags: Keyword.put(acc.flags, :style_input, style)}
     flags = Keyword.put(flags, :style_input, style)
-    build_tree(rest, box, children, RenderStyle.put_style(style_state, style), flags, acc, opts)
+
+    build_tree(
+      rest,
+      box,
+      children,
+      RenderStyle.put_style(style_state, style),
+      flags,
+      acc,
+      opts,
+      current_id,
+      tag
+    )
   end
 
   defp build_tree(
@@ -147,11 +243,24 @@ defmodule Breeze.Renderer do
          style_state,
          flags,
          acc,
-         opts
+         opts,
+         current_id,
+         tag
        ) do
     acc = %{acc | flags: Keyword.put(acc.flags, :class, class)}
     flags = Keyword.put(flags, :class, class)
-    build_tree(rest, box, children, RenderStyle.put_class(style_state, class), flags, acc, opts)
+
+    build_tree(
+      rest,
+      box,
+      children,
+      RenderStyle.put_class(style_state, class),
+      flags,
+      acc,
+      opts,
+      current_id,
+      tag
+    )
   end
 
   defp build_tree(
@@ -161,11 +270,24 @@ defmodule Breeze.Renderer do
          style_state,
          flags,
          acc,
-         opts
+         opts,
+         current_id,
+         tag
        ) do
     ids = [box_id | acc.ids]
     acc = %{acc | ids: ids, flags: Keyword.put(acc.flags, :id, box_id)}
-    build_tree(rest, box, children, style_state, Keyword.put(flags, :id, box_id), acc, opts)
+
+    build_tree(
+      rest,
+      box,
+      children,
+      style_state,
+      Keyword.put(flags, :id, box_id),
+      acc,
+      opts,
+      current_id,
+      tag
+    )
   end
 
   defp build_tree(
@@ -175,7 +297,9 @@ defmodule Breeze.Renderer do
          style_state,
          flags,
          acc,
-         opts
+         opts,
+         current_id,
+         tag
        ) do
     mod =
       case mod do
@@ -184,7 +308,18 @@ defmodule Breeze.Renderer do
       end
 
     acc = %{acc | flags: Keyword.put(acc.flags, :implicit, mod)}
-    build_tree(rest, box, children, style_state, Keyword.put(flags, :implicit, mod), acc, opts)
+
+    build_tree(
+      rest,
+      box,
+      children,
+      style_state,
+      Keyword.put(flags, :implicit, mod),
+      acc,
+      opts,
+      current_id,
+      tag
+    )
   end
 
   defp build_tree(
@@ -194,7 +329,9 @@ defmodule Breeze.Renderer do
          style_state,
          flags,
          acc,
-         opts
+         opts,
+         current_id,
+         tag
        ) do
     acc = %{acc | flags: Keyword.put(acc.flags, :content, content)}
 
@@ -205,7 +342,9 @@ defmodule Breeze.Renderer do
       style_state,
       Keyword.put(flags, :content, content),
       acc,
-      opts
+      opts,
+      current_id,
+      tag
     )
   end
 
@@ -216,11 +355,24 @@ defmodule Breeze.Renderer do
          style_state,
          flags,
          acc,
-         opts
+         opts,
+         current_id,
+         tag
        ) do
     flag = String.to_atom(flag)
     acc = %{acc | flags: Keyword.put(acc.flags, flag, value)}
-    build_tree(rest, box, children, style_state, Keyword.put(flags, flag, value), acc, opts)
+
+    build_tree(
+      rest,
+      box,
+      children,
+      style_state,
+      Keyword.put(flags, flag, value),
+      acc,
+      opts,
+      current_id,
+      tag
+    )
   end
 
   defp build_tree(
@@ -230,45 +382,68 @@ defmodule Breeze.Renderer do
          style_state,
          flags,
          acc,
-         opts
+         opts,
+         current_id,
+         tag
        ) do
     attr = String.to_atom(attr)
     acc = %{acc | flags: Keyword.put(acc.flags, attr, true)}
-    build_tree(rest, box, children, style_state, Keyword.put(flags, attr, true), acc, opts)
+
+    build_tree(
+      rest,
+      box,
+      children,
+      style_state,
+      Keyword.put(flags, attr, true),
+      acc,
+      opts,
+      current_id,
+      tag
+    )
   end
 
-  defp build_tree([content | rest], box, children, style_state, flags, acc, opts)
+  defp build_tree([content | rest], box, children, style_state, flags, acc, opts, current_id, tag)
        when is_binary(content) do
     box = %{box | content: String.trim_trailing(content, "\n  ")}
-    build_tree(rest, box, children, style_state, flags, acc, opts)
+    build_tree(rest, box, children, style_state, flags, acc, opts, current_id, tag)
   end
 
-  defp build_tree([content | rest], box, children, style_state, flags, acc, opts)
+  defp build_tree([content | rest], box, children, style_state, flags, acc, opts, current_id, tag)
        when is_map(content) do
     if virtual_text_surface?(content) do
       box = %{box | content: content}
-      build_tree(rest, box, children, style_state, flags, acc, opts)
+      build_tree(rest, box, children, style_state, flags, acc, opts, current_id, tag)
     else
       children = children ++ [content]
-      build_tree(rest, box, children, style_state, flags, acc, opts)
+      build_tree(rest, box, children, style_state, flags, acc, opts, current_id, tag)
     end
   end
 
-  defp build_tree([content | rest], box, children, style_state, flags, acc, opts)
+  defp build_tree([content | rest], box, children, style_state, flags, acc, opts, current_id, tag)
        when is_list(content) do
     if text_span_list?(content) do
       box = %{box | content: content}
-      build_tree(rest, box, children, style_state, flags, acc, opts)
+      build_tree(rest, box, children, style_state, flags, acc, opts, current_id, tag)
     else
       children = children ++ [content]
-      build_tree(rest, box, children, style_state, flags, acc, opts)
+      build_tree(rest, box, children, style_state, flags, acc, opts, current_id, tag)
     end
   end
 
-  defp build_tree([{:live, attrs} | rest], box, children, style_state, flags, acc, opts) do
+  defp build_tree(
+         [{:live, attrs} | rest],
+         box,
+         children,
+         style_state,
+         flags,
+         acc,
+         opts,
+         current_id,
+         tag
+       ) do
     {acc, child} =
       if Keyword.get(opts, :live_placeholder, false) do
-        build_live_placeholder(attrs, flags, acc, opts)
+        build_live_placeholder(attrs, flags, acc, opts, current_id)
       else
         case Keyword.get(opts, :live_view) do
           fun when is_function(fun, 2) ->
@@ -284,12 +459,14 @@ defmodule Breeze.Renderer do
 
             case fun.(attrs, child_opts) do
               {:rendered, prefix, child_acc, child_box} ->
-                {merge_live_acc(acc, namespace_live_acc(child_acc, prefix, child_opts)),
-                 child_box}
+                child_acc = namespace_live_acc(child_acc, prefix, child_opts)
+
+                {merge_live_acc(acc, child_acc, current_id), child_box}
 
               {:rendered, prefix, child_acc, child_box, child_dimensions} ->
-                {merge_live_acc(acc, namespace_live_acc(child_acc, prefix, child_opts)),
-                 child_box}
+                child_acc = namespace_live_acc(child_acc, prefix, child_opts)
+
+                {merge_live_acc(acc, child_acc, current_id), child_box}
                 |> then(fn {merged_acc, rendered_box} ->
                   {
                     %{
@@ -313,10 +490,21 @@ defmodule Breeze.Renderer do
       end
 
     children = if child, do: [child | children], else: children
-    build_tree(rest, box, children, style_state, flags, acc, opts)
+    build_tree(rest, box, children, style_state, flags, acc, opts, current_id, tag)
   end
 
-  defp build_tree([{:box, _, nodes} | rest], box, children, style_state, flags, acc, opts) do
+  defp build_tree(
+         [{child_tag, _, nodes} | rest],
+         box,
+         children,
+         style_state,
+         flags,
+         acc,
+         opts,
+         current_id,
+         tag
+       )
+       when is_atom(child_tag) do
     child_flags =
       []
       |> inherit_implicit_owner(flags)
@@ -325,20 +513,34 @@ defmodule Breeze.Renderer do
       |> inherit_focus_within_path(flags)
       |> inherit_selected_with_owner(opts)
 
-    acc = %{
-      acc
-      | flags: child_flags,
-        id: acc.id + 1,
-        elements: Map.put(acc.elements, acc.id, acc.flags)
-    }
+    child_id = acc.id + 1
+
+    acc =
+      %{
+        acc
+        | flags: child_flags,
+          id: child_id,
+          elements: Map.put(acc.elements, acc.id, acc.flags)
+      }
+      |> put_render_tree_child(current_id, {:id, child_id})
 
     {acc, child} =
-      build_tree(nodes, %BackBreeze.Box{}, [], RenderStyle.empty(), child_flags, acc, opts)
+      build_tree(
+        nodes,
+        %BackBreeze.Box{},
+        [],
+        RenderStyle.empty(),
+        child_flags,
+        acc,
+        opts,
+        child_id,
+        child_tag
+      )
 
-    build_tree(rest, box, [child | children], style_state, flags, acc, opts)
+    build_tree(rest, box, [child | children], style_state, flags, acc, opts, current_id, tag)
   end
 
-  defp build_tree([], box, children, style_state, flags, acc, opts) do
+  defp build_tree([], box, children, style_state, flags, acc, opts, current_id, tag) do
     render_opts = opts
     %{focusables: focusables} = acc
     implicit_state = Keyword.get(opts, :implicit_state, %{})
@@ -477,7 +679,11 @@ defmodule Breeze.Renderer do
         if root_id, do: Map.put(boxes, root_id, stored_box), else: boxes
       end)
 
-    acc = %{acc | focusables: focusables, boxes: boxes}
+    acc =
+      acc
+      |> Map.put(:focusables, focusables)
+      |> Map.put(:boxes, boxes)
+      |> put_render_tree_node(current_id, tag)
 
     {acc, final_box}
   end
@@ -604,16 +810,20 @@ defmodule Breeze.Renderer do
     max(intrinsic_content_width(content), child_width)
   end
 
-  defp merge_live_acc(acc, child_acc) do
+  defp merge_live_acc(acc, child_acc, parent_id) do
     child_offset = acc.id + 1
     child_last_id = max_key(child_acc.elements)
+
+    child_tree =
+      if Map.get(acc, :render_tree?, false),
+        do: shift_render_tree(Map.get(child_acc, :render_tree), child_offset)
 
     elements =
       Enum.reduce(child_acc.elements, acc.elements, fn {id, flags}, elements ->
         Map.put(elements, child_offset + id, flags)
       end)
 
-    %{
+    acc = %{
       acc
       | id: child_offset + child_last_id + 1,
         elements: elements,
@@ -622,15 +832,20 @@ defmodule Breeze.Renderer do
         focusables: Enum.reverse(child_acc.focusables) ++ acc.focusables,
         live_dimensions: Map.get(acc, :live_dimensions, %{})
     }
+
+    case child_tree do
+      nil -> acc
+      tree -> put_render_tree_child(acc, parent_id, {:tree, tree})
+    end
   end
 
-  defp maybe_attach_live_viewports(root_children, opts) do
+  defp maybe_attach_live_viewports(root_tag, root_children, opts) do
     case Keyword.get(opts, :live_view) do
       fun when is_function(fun, 2) ->
         placeholder_opts = Keyword.put(opts, :live_placeholder, true)
 
         {placeholder_acc, placeholder_box} =
-          build_from_tree_nodes(root_children, placeholder_opts)
+          build_from_tree_nodes(root_tag, root_children, placeholder_opts)
 
         %{dimensions: dimensions} =
           BackBreeze.Box.render_with_dimensions(placeholder_box, placeholder_opts)
@@ -654,22 +869,36 @@ defmodule Breeze.Renderer do
     end
   end
 
-  defp build_live_placeholder(attrs, flags, acc, opts) do
+  defp build_live_placeholder(attrs, flags, acc, opts, current_id) do
     live_flags =
       [__live_placeholder__: true]
       |> inherit_implicit_owner(flags)
       |> inherit_focus_scope_path(flags)
 
-    acc = %{
-      acc
-      | flags: live_flags,
-        id: acc.id + 1,
-        elements: Map.put(acc.elements, acc.id, acc.flags)
-    }
+    child_id = acc.id + 1
+
+    acc =
+      %{
+        acc
+        | flags: live_flags,
+          id: child_id,
+          elements: Map.put(acc.elements, acc.id, acc.flags)
+      }
+      |> put_render_tree_child(current_id, {:id, child_id})
 
     nodes = live_placeholder_nodes(attrs, opts)
 
-    build_tree(nodes, %BackBreeze.Box{}, [], RenderStyle.empty(), live_flags, acc, opts)
+    build_tree(
+      nodes,
+      %BackBreeze.Box{},
+      [],
+      RenderStyle.empty(),
+      live_flags,
+      acc,
+      opts,
+      child_id,
+      :box
+    )
   end
 
   defp live_placeholder_nodes(attrs, opts) do

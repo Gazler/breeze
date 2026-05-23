@@ -32,6 +32,43 @@ defmodule Breeze.RemoteInspectorTest do
     end
   end
 
+  defmodule SelectCaptureServer do
+    use GenServer
+
+    def start_link(parent) do
+      GenServer.start_link(__MODULE__, parent)
+    end
+
+    def init(parent), do: {:ok, parent}
+
+    def handle_cast({:select_inspector, id}, parent) do
+      send(parent, {:selected_inspector, id})
+      {:noreply, parent}
+    end
+
+    def handle_call({:inspector_render_tree, opts}, _from, parent) do
+      send(parent, {:inspector_render_tree, opts})
+      kind = Keyword.get(opts, :kind, :rendered)
+      child_label = if kind == :code, do: "<Breeze.Blocks.input#child>", else: "<box#child>"
+
+      {:reply,
+       %{
+         kind: kind,
+         nodes: [
+           %{
+             id: "root",
+             label: "<box#root>",
+             children: [%{id: "child", label: child_label, children: []}]
+           }
+         ],
+         selected_id: Keyword.get(opts, :selected_id),
+         expanded: Keyword.get(opts, :expanded, []),
+         limit: Keyword.get(opts, :limit),
+         truncated?: false
+       }, parent}
+    end
+  end
+
   test "remote inspector view renders rich snapshot details" do
     theme =
       Breeze.Theme.new(%{
@@ -50,6 +87,42 @@ defmodule Breeze.RemoteInspectorTest do
       last_interaction_at: 456,
       theme: theme,
       source: %{node: :app@host, server_pid: self(), view_pid: self()},
+      render_tree: %{
+        id: "root",
+        label: "<box#root.panel>",
+        children: [
+          %{
+            id: "url",
+            label: "<box#url.input> Breeze.Blocks.input",
+            label_parts: [
+              %{text: "<", token: :punctuation},
+              %{text: "box", token: :tag},
+              %{text: "#url", token: :id},
+              %{text: ".input", token: :class},
+              %{text: ".text-primary", token: :class},
+              %{
+                text: "●",
+                token: :swatch,
+                role: :foreground,
+                foreground_color: {1, 2, 3},
+                background_color: nil
+              },
+              %{text: ".bg-panel", token: :class},
+              %{
+                text: "●",
+                token: :swatch,
+                role: :background,
+                foreground_color: {4, 5, 6},
+                background_color: nil
+              },
+              %{text: ">", token: :punctuation},
+              %{text: " Breeze.Blocks.input", token: :component}
+            ],
+            children: []
+          },
+          %{id: "method", label: "<box#method>", children: []}
+        ]
+      },
       counts: %{elements: 12, focusables: 3, mouse_targets: 9, children: 1},
       focus: %{active_scope: "modal", focusables: ["url"], focus_memory: %{__root__: "url"}},
       selected_id: "url",
@@ -153,6 +226,25 @@ defmodule Breeze.RemoteInspectorTest do
         terminal: %Termite.Terminal{size: %{width: 80, height: 40}}
       )
 
+    tree_output =
+      Breeze.Renderer.render_to_string(
+        Breeze.RemoteInspector.View,
+        %{
+          snapshots: %{
+            {:app@host, "#PID<0.1.0>"} => %{
+              source: %{node: :app@host, pid: self()},
+              snapshot: snapshot,
+              updated_at: 1_000
+            }
+          },
+          latest_source: {:app@host, "#PID<0.1.0>"},
+          panel_tab: "tree",
+          screen: %{width: 140, height: 32}
+        },
+        theme: true,
+        terminal: %Termite.Terminal{size: %{width: 140, height: 40}}
+      )
+
     assert output =~ "Remote Inspector"
     assert output =~ "theme=demo mode=custom dark=true"
     assert output =~ "counts=elements=12 focusables=3"
@@ -185,12 +277,28 @@ defmodule Breeze.RemoteInspectorTest do
     assert theme_output =~ "foreground_color #010203"
     assert theme_output =~ "border_color"
     assert theme_output =~ "7"
+    assert tree_output =~ "Tree"
+    assert tree_output =~ "<box#root.panel>"
+
+    stripped_tree_output = Regex.replace(~r/\e\[[0-9;]*m/, tree_output, "")
+
+    assert stripped_tree_output =~ "<box#url.input.text-primary●.bg-panel●> Breeze.Blocks.input"
+    assert tree_output =~ "●"
+    assert tree_output =~ "38;2;1;2;3"
+    assert tree_output =~ "38;2;4;5;6"
   end
 
   test "remote inspector tab changes accept implicit tab payloads" do
     term = %Breeze.Term{
       view: Breeze.RemoteInspector.View,
-      assigns: %{panel_tab: "overview"}
+      assigns: %{
+        panel_tab: "overview",
+        snapshots: %{},
+        latest_source: nil,
+        active_source: nil,
+        render_tree_expanded: %{},
+        render_trees: %{}
+      }
     }
 
     assert {:noreply, %{assigns: %{panel_tab: "layout"}}} =
@@ -200,12 +308,184 @@ defmodule Breeze.RemoteInspectorTest do
                term
              )
 
+    assert {:noreply, %{assigns: %{panel_tab: "tree"}, local_keybindings: tree_keybindings}} =
+             Breeze.RemoteInspector.View.handle_event(
+               "tab_changed",
+               %{value: "tree"},
+               term
+             )
+
+    assert [%{key: "t", label: "Code tree"}] = Breeze.Keybindings.visible(tree_keybindings)
+
     assert {:noreply, %{assigns: %{panel_tab: "focus"}}} =
              Breeze.RemoteInspector.View.handle_event(
                "tab_changed",
                %{"value" => "focus"},
                term
              )
+
+    assert {:noreply, %{assigns: %{panel_tab: "layout"}, local_keybindings: []}} =
+             Breeze.RemoteInspector.View.handle_event(
+               "tab_changed",
+               %{"value" => "layout"},
+               %{term | local_keybindings: tree_keybindings}
+             )
+  end
+
+  test "remote inspector render tree selection updates expansion and delegates selection" do
+    {:ok, source_pid} = SelectCaptureServer.start_link(self())
+
+    on_exit(fn ->
+      if Process.alive?(source_pid), do: GenServer.stop(source_pid)
+    end)
+
+    key = {:app@host, inspect(source_pid)}
+
+    term = %Breeze.Term{
+      view: Breeze.RemoteInspector.View,
+      assigns: %{
+        snapshots: %{
+          key => %{
+            source: %{node: :app@host, pid: source_pid},
+            snapshot: %{
+              source: %{node: :app@host, server_pid: source_pid, view_pid: source_pid},
+              selected_id: "root",
+              render_tree: %{
+                id: "root",
+                label: "<box#root>",
+                children: [%{id: "child", label: "<box#child>", children: []}]
+              }
+            },
+            updated_at: 1,
+            alive?: true
+          }
+        },
+        latest_source: key,
+        active_source: key,
+        render_tree_expanded: %{},
+        render_trees: %{}
+      }
+    }
+
+    assert {:noreply, term} =
+             Breeze.RemoteInspector.View.handle_event(
+               "render_tree_changed",
+               %{value: "child", expanded: ["root"]},
+               term
+             )
+
+    assert term.assigns.render_tree_expanded[key] == ["root"]
+    assert term.assigns.render_trees[key].selected_id == "child"
+    assert_receive {:selected_inspector, "child"}, 500
+    assert_receive {:inspector_render_tree, opts}, 500
+    assert Keyword.get(opts, :selected_id) == "child"
+    assert Keyword.get(opts, :expanded) == ["root"]
+    assert Keyword.get(opts, :kind) == :rendered
+  end
+
+  test "remote inspector t key toggles the tree between rendered and code modes" do
+    {:ok, source_pid} = SelectCaptureServer.start_link(self())
+
+    on_exit(fn ->
+      if Process.alive?(source_pid), do: GenServer.stop(source_pid)
+    end)
+
+    key = {:app@host, inspect(source_pid)}
+
+    term = %Breeze.Term{
+      view: Breeze.RemoteInspector.View,
+      assigns: %{
+        snapshots: %{
+          key => %{
+            source: %{node: :app@host, pid: source_pid},
+            snapshot: %{
+              source: %{node: :app@host, server_pid: source_pid, view_pid: source_pid},
+              selected_id: "child",
+              render_tree?: true
+            },
+            updated_at: 1,
+            alive?: true
+          }
+        },
+        latest_source: key,
+        active_source: key,
+        panel_tab: "tree",
+        render_tree_kind: "rendered",
+        render_tree_expanded: %{key => ["root"]},
+        render_trees: %{}
+      }
+    }
+
+    assert {:noreply, term} =
+             Breeze.RemoteInspector.View.handle_event(:ignored, %{"key" => "t"}, term)
+
+    assert term.assigns.panel_tab == "tree"
+    assert term.assigns.render_tree_kind == "code"
+
+    assert %{kind: :code, selected_id: "child", nodes: [%{children: [child]}]} =
+             term.assigns.render_trees[{key, "code"}]
+
+    assert child.label == "<Breeze.Blocks.input#child>"
+
+    assert_receive {:inspector_render_tree, opts}, 500
+    assert Keyword.get(opts, :kind) == :code
+    assert Keyword.get(opts, :selected_id) == "child"
+  end
+
+  test "remote inspector render tree scroll changes stay local" do
+    {:ok, source_pid} = SelectCaptureServer.start_link(self())
+
+    on_exit(fn ->
+      if Process.alive?(source_pid), do: GenServer.stop(source_pid)
+    end)
+
+    key = {:app@host, inspect(source_pid)}
+
+    term = %Breeze.Term{
+      view: Breeze.RemoteInspector.View,
+      assigns: %{
+        snapshots: %{
+          key => %{
+            source: %{node: :app@host, pid: source_pid},
+            snapshot: %{
+              source: %{node: :app@host, server_pid: source_pid, view_pid: source_pid},
+              selected_id: "child",
+              render_tree?: true
+            },
+            updated_at: 1,
+            alive?: true
+          }
+        },
+        latest_source: key,
+        active_source: key,
+        render_tree_expanded: %{key => ["root"]},
+        render_trees: %{
+          key => %{
+            nodes: [
+              %{
+                id: "root",
+                label: "<box#root>",
+                children: [%{id: "child", label: "<box#child>", children: []}]
+              }
+            ],
+            selected_id: "child",
+            expanded: ["root"],
+            limit: 600,
+            truncated?: false
+          }
+        }
+      }
+    }
+
+    assert {:noreply, ^term} =
+             Breeze.RemoteInspector.View.handle_event(
+               "render_tree_changed",
+               %{value: "child", expanded: ["root"], offset: 12},
+               term
+             )
+
+    refute_receive {:selected_inspector, _id}, 50
+    refute_receive {:inspector_render_tree, _opts}, 50
   end
 
   test "remote inspector follows the newest live source after a disconnect and reconnect" do

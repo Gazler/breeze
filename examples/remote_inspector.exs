@@ -4,5 +4,6 @@ Breeze.Example.run(
   view: Breeze.RemoteInspector.View,
   reload: true,
   mouse: true,
-  inspector: false
+  global_keybindings: Breeze.RemoteInspector.View.global_keybindings(),
+  inspector: true
 )
