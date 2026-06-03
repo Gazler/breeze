@@ -1,6 +1,40 @@
 defmodule Breeze.Server do
   @moduledoc """
   Public server entrypoint for Breeze applications.
+
+  ## Startup Options
+
+  `start_link/1` and `run/1` accept these public startup options:
+
+    * `:view` - the root view module. Required.
+    * `:start_opts` - keyword options passed to the root view's
+      `mount/2`. Defaults to `[]`.
+    * `:theme` - a `Breeze.Theme`, theme map/keyword, or built-in
+      theme atom.
+    * `:global_keybindings` - app-wide keybindings checked before
+      focused event handling.
+    * `:reload` - enables live code reload. Defaults to
+      `Application.get_env(:breeze, :reload, false)`. Pass `true`
+      to enable reload in dev, or a keyword list for reload options.
+    * `:inspector` - enables inspector support. Defaults to `false`.
+      Pass `true` or keyword options such as `:toggle_key` and
+      `:move_key`.
+    * `:alt_screen` - enters the terminal alternate screen. Defaults
+      to `true`.
+    * `:hide_cursor` - hides the terminal cursor while the app runs.
+      Defaults to `true`.
+    * `:enhanced_keyboard` - enables enhanced keyboard reporting.
+      Defaults to `true`.
+    * `:mouse` - enables mouse tracking. Defaults to `false`. Pass
+      `true` for click mode or keyword options for
+      `Termite.Screen.enable_mouse/2`.
+    * `:terminal_opts` - options passed to `Termite.Terminal.start/1`
+      when Breeze starts the terminal.
+    * `:terminal` - an existing `%Termite.Terminal{}` to use instead
+      of starting one.
+    * `:halt_fun` - function called when the input router exits.
+      Defaults to `System.halt/0` outside IEx and no-op inside IEx.
+      Use `fn -> :ok end` for embedded or SSH sessions.
   """
 
   use GenServer
@@ -46,29 +80,20 @@ defmodule Breeze.Server do
           | {:start_opts, keyword()}
           | {:alt_screen, boolean()}
           | {:hide_cursor, boolean()}
+          | {:enhanced_keyboard, boolean()}
           | {:mouse, boolean() | keyword()}
+          | {:terminal_opts, keyword()}
+          | {:terminal, %Termite.Terminal{}}
           | {:reload, boolean() | keyword()}
           | {:theme, Breeze.Theme.t() | map() | keyword() | atom()}
-          | {:clipboard, keyword()}
+          | {:halt_fun, (-> term())}
           | {:global_keybindings, list()}
-          | {:child_process_flags, keyword()}
           | {:inspector, boolean() | keyword()}
-          | {:debug_push_interval_ms, pos_integer()}
-          | {:busy_delay_ms, non_neg_integer()}
-          | {:frame_delay_ms, pos_integer()}
 
   @doc """
   Start the Breeze application.
 
-  Valid options are:
-
-    * `:view` - the view to run. This is required
-    * `:alt_screen` - use the terminal alternate screen on start. Defaults to `true`
-    * `:hide_cursor` - hide the cursor on start. Defaults to `true`
-    * `:mouse` - enable mouse tracking. Defaults to `false`. Pass `true` for click mode or keyword options for `Termite.Screen.enable_mouse/2`
-    * `:global_keybindings` - app-wide keybindings checked before focused event handling
-    * `:inspector` - opt-in inspector support. Defaults to `false`
-
+  See the module documentation for startup options.
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -87,7 +112,7 @@ defmodule Breeze.Server do
     opts =
       opts
       |> Keyword.put_new_lazy(:halt_fun, fn -> fn -> :ok end end)
-      |> Keyword.put_new(:pause_iex, true)
+      |> put_internal_new(:pause_iex, true)
 
     case Breeze.InputRouter.start(opts) do
       {:ok, pid} ->
@@ -148,13 +173,30 @@ defmodule Breeze.Server do
     GenServer.cast(pid, {:select_inspector, id})
   end
 
+  defp internal_opts(opts), do: keyword_group(opts, :internal)
+
+  defp put_internal_new(opts, key, value) do
+    if Keyword.has_key?(keyword_group(opts, :internal), key) do
+      opts
+    else
+      Keyword.put(opts, :internal, Keyword.put(keyword_group(opts, :internal), key, value))
+    end
+  end
+
+  defp keyword_group(opts, key) do
+    case Keyword.get(opts, key, []) do
+      group when is_list(group) -> group
+      _other -> []
+    end
+  end
+
   @impl true
   def init(opts) do
     view = Keyword.fetch!(opts, :view)
     start_opts = Keyword.get(opts, :start_opts, [])
-    frame_delay_ms = Keyword.get(opts, :frame_delay_ms, 80)
-    debug_push_interval_ms = Keyword.get(opts, :debug_push_interval_ms, 250)
-    terminal_size_override = Keyword.get(opts, :terminal_size_override)
+    internal_opts = internal_opts(opts)
+    child_process_flags = Keyword.get(internal_opts, :child_process_flags, [])
+    terminal_size_override = Keyword.get(internal_opts, :terminal_size_override)
 
     terminal =
       opts |> Keyword.fetch!(:terminal) |> apply_terminal_size_override(terminal_size_override)
@@ -178,7 +220,7 @@ defmodule Breeze.Server do
         theme: theme,
         theme_source: theme_source,
         apply_theme_defaults?: apply_theme_defaults?,
-        process_flags: Keyword.get(opts, :child_process_flags, []),
+        process_flags: child_process_flags,
         render_tree?: inspector_enabled?,
         server: self(),
         global_keybindings: Keyword.get(opts, :global_keybindings, []),
@@ -216,19 +258,15 @@ defmodule Breeze.Server do
         focused: focused,
         theme: theme,
         apply_theme_defaults?: apply_theme_defaults?,
-        child_process_flags: Keyword.get(opts, :child_process_flags, []),
-        clipboard_opts: Keyword.get(opts, :clipboard, []),
+        child_process_flags: child_process_flags,
+        clipboard_opts: Keyword.get(internal_opts, :clipboard, []),
         terminal_size_override: terminal_size_override,
         global_keybindings: Keyword.get(opts, :global_keybindings, []),
         last_render_at: System.monotonic_time(:millisecond),
         last_interaction_at: nil,
         input: %State.Input{},
         frame: %State.Frame{},
-        debug: %State.Debug{
-          push_interval_ms: debug_push_interval_ms,
-          busy_delay_ms: Keyword.get(opts, :busy_delay_ms, 120),
-          frame_delay_ms: frame_delay_ms
-        },
+        debug: %State.Debug{},
         inspector_state: %State.Inspector{config: Keyword.get(opts, :inspector, false)}
       }
 

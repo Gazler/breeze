@@ -330,7 +330,7 @@ defmodule Breeze.InputRouter do
   end
 
   defp start_terminal(opts) do
-    if Keyword.get(opts, :pause_iex, false) and iex_started?() do
+    if pause_iex?(opts) and iex_started?() do
       start_terminal_with_silent_group_leader(Keyword.get(opts, :terminal_opts, []))
     else
       %TerminalStart{terminal: Termite.Terminal.start(Keyword.get(opts, :terminal_opts, []))}
@@ -338,10 +338,10 @@ defmodule Breeze.InputRouter do
   end
 
   defp maybe_put_iex_terminal_size_override(opts) do
-    if Keyword.get(opts, :pause_iex, false) and iex_started?() do
+    if pause_iex?(opts) and iex_started?() do
       # IEx keeps the physical bottom row for prompt editing after a resize.
       # Let Breeze render inside the rows that remain stable while IEx is paused.
-      Keyword.put_new(opts, :terminal_size_override, &reserve_iex_prompt_row/1)
+      put_internal_new(opts, :terminal_size_override, &reserve_iex_prompt_row/1)
     else
       opts
     end
@@ -376,7 +376,7 @@ defmodule Breeze.InputRouter do
          },
          opts
        ) do
-    if Keyword.get(opts, :pause_iex, false) and iex_started?() do
+    if pause_iex?(opts) and iex_started?() do
       replace_shell_reader(shell_pid)
     end
   end
@@ -406,6 +406,33 @@ defmodule Breeze.InputRouter do
     :ok
   catch
     _kind, _reason -> :ok
+  end
+
+  defp pause_iex?(opts), do: internal_get(opts, :pause_iex, false)
+
+  defp internal_get(opts, key, default) do
+    internal = keyword_group(opts, :internal)
+
+    if Keyword.has_key?(internal, key) do
+      Keyword.fetch!(internal, key)
+    else
+      default
+    end
+  end
+
+  defp put_internal_new(opts, key, value) do
+    if Keyword.has_key?(keyword_group(opts, :internal), key) do
+      opts
+    else
+      Keyword.put(opts, :internal, Keyword.put(keyword_group(opts, :internal), key, value))
+    end
+  end
+
+  defp keyword_group(opts, key) do
+    case Keyword.get(opts, key, []) do
+      group when is_list(group) -> group
+      _other -> []
+    end
   end
 
   defp default_halt_fun do

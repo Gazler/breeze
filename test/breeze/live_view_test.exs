@@ -1258,11 +1258,13 @@ defmodule Breeze.LiveViewTest do
         Breeze.Server.start_app_link(
           view: CrashingView,
           terminal: terminal,
-          clipboard: [
-            copy_fun: fn text ->
-              send(parent, {:copied_crash_details, text})
-              {:ok, "test-clipboard"}
-            end
+          internal: [
+            clipboard: [
+              copy_fun: fn text ->
+                send(parent, {:copied_crash_details, text})
+                {:ok, "test-clipboard"}
+              end
+            ]
           ],
           global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
         )
@@ -1311,11 +1313,13 @@ defmodule Breeze.LiveViewTest do
         Breeze.Server.start_app_link(
           view: CrashingView,
           terminal: terminal,
-          clipboard: [
-            copy_fun: fn text ->
-              send(parent, {:copied_crash_details, text})
-              {:ok, "test-clipboard"}
-            end
+          internal: [
+            clipboard: [
+              copy_fun: fn text ->
+                send(parent, {:copied_crash_details, text})
+                {:ok, "test-clipboard"}
+              end
+            ]
           ],
           global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
         )
@@ -1350,13 +1354,15 @@ defmodule Breeze.LiveViewTest do
         Breeze.Server.start_app_link(
           view: CrashingView,
           terminal: terminal,
-          clipboard: [
-            timeout: 10,
-            find_executable: fn "wl-copy" -> "/usr/bin/wl-copy" end,
-            run_fun: fn _name, _path, _text ->
-              Process.sleep(1_000)
-              {:ok, "slow-copy"}
-            end
+          internal: [
+            clipboard: [
+              timeout: 10,
+              find_executable: fn "wl-copy" -> "/usr/bin/wl-copy" end,
+              run_fun: fn _name, _path, _text ->
+                Process.sleep(1_000)
+                {:ok, "slow-copy"}
+              end
+            ]
           ],
           global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
         )
@@ -1550,10 +1556,10 @@ defmodule Breeze.LiveViewTest do
       Breeze.Server.start_app_link(
         view: DebugToggleRoot,
         terminal: terminal,
-        debug_push_interval_ms: 20,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
+    set_debug_push_interval(pid, 20)
     drain_terminal_writes()
 
     send(pid, {reader, {:data, "\eOQ"}})
@@ -1952,7 +1958,9 @@ defmodule Breeze.LiveViewTest do
       Breeze.Server.start_app_link(
         view: CounterChild,
         terminal: terminal,
-        terminal_size_override: fn size -> %{size | height: max(size.height - 1, 1)} end
+        internal: [
+          terminal_size_override: fn size -> %{size | height: max(size.height - 1, 1)} end
+        ]
       )
 
     assert :sys.get_state(pid).terminal.size == %{width: 120, height: 66}
@@ -2017,10 +2025,10 @@ defmodule Breeze.LiveViewTest do
       Breeze.Server.start_app_link(
         view: DebugPaneRoot,
         terminal: terminal,
-        debug_push_interval_ms: 20,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
+    set_debug_push_interval(pid, 20)
     drain_terminal_writes()
     initial_render_count = :sys.get_state(pid).debug.stats[:render_base_count] || 0
 
@@ -2077,6 +2085,12 @@ defmodule Breeze.LiveViewTest do
     send(pid, {reader, {:data, "\e[21~"}})
 
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+  end
+
+  defp set_debug_push_interval(pid, interval) do
+    :sys.replace_state(pid, fn state ->
+      %{state | debug: %{state.debug | push_interval_ms: interval}}
+    end)
   end
 
   defp drain_terminal_writes(writes \\ []) do
