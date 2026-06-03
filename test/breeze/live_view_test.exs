@@ -117,6 +117,18 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule RenderOnlyChild do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, focus(term, "root")}
+
+    def render(assigns) do
+      ~H"""
+      <box id="root" focusable>render only</box>
+      """
+    end
+  end
+
   defmodule GrowingRoot do
     use Breeze.View
 
@@ -496,6 +508,37 @@ defmodule Breeze.LiveViewTest do
 
     def handle_event(_, _, term), do: {:noreply, term}
     def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule CustomErrorView do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box>Custom Error View</box>
+        <box>View: {inspect(@view)}</box>
+        <box>Kind: {inspect(@kind)}</box>
+        <box>Stacktrace: {length(@stacktrace)}</box>
+        <box>Crash: {inspect(@crash.reason)}</box>
+      </box>
+      """
+    end
+  end
+
+  defmodule KeybindingErrorView do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box>Keybinding Error View</box>
+        <box>View: {inspect(@view)}</box>
+        <.keybinding_bar keybindings={@breeze.keybindings}/>
+      </box>
+      """
+    end
   end
 
   defmodule DebugToggleRoot do
@@ -1105,6 +1148,171 @@ defmodule Breeze.LiveViewTest do
       assert state.frame.base_output =~ "boom"
       assert Breeze.ErrorView.frame_count(state.crash) > 1
       refute state.frame.base_output =~ "No structured stacktrace captured"
+
+      Process.exit(pid, :normal)
+    end)
+  end
+
+  test "child server ignores missing optional view callbacks" do
+    refute function_exported?(RenderOnlyChild, :handle_event, 3)
+    refute function_exported?(RenderOnlyChild, :handle_info, 2)
+
+    {:ok, pid} = ChildServer.start(view: RenderOnlyChild, start_opts: [])
+
+    assert {:noreply, "root", false} = ChildServer.dispatch_input(pid, "x")
+
+    assert {:noreply, "root", false} =
+             ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "x"})
+
+    assert {:noreply, "root"} = ChildServer.dispatch_info(pid, :message)
+  end
+
+  test "server renders configured error view on view exceptions" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+      reader = terminal.reader
+
+      {:ok, pid} =
+        Breeze.Server.start_app_link(
+          view: CrashingView,
+          terminal: terminal,
+          render_errors: [view: CustomErrorView],
+          global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+        )
+
+      send(pid, {reader, {:data, "c"}})
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+
+        state.crash &&
+          state.frame.base_output =~ "Custom Error View" &&
+          state.frame.base_output =~ "View: Breeze.LiveViewTest.CrashingView" &&
+          state.frame.base_output =~ "Kind: :error" &&
+          state.frame.base_output =~ "Crash: %RuntimeError"
+      end)
+
+      Process.exit(pid, :normal)
+    end)
+  end
+
+  test "custom error view without keybindings ignores built-in crash keypresses" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+      reader = terminal.reader
+
+      {:ok, pid} =
+        Breeze.Server.start_app_link(
+          view: CrashingView,
+          terminal: terminal,
+          render_errors: [view: CustomErrorView]
+        )
+
+      send(pid, {reader, {:data, "c"}})
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+
+        state.crash &&
+          state.frame.base_output =~ "Custom Error View"
+      end)
+
+      send(pid, {reader, {:data, "r"}})
+
+      state = :sys.get_state(pid)
+      assert state.crash
+      assert state.frame.base_output =~ "Custom Error View"
+
+      Process.exit(pid, :normal)
+    end)
+  end
+
+  test "custom error view handles crash keypresses through render_errors keybindings" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+      reader = terminal.reader
+
+      {:ok, pid} =
+        Breeze.Server.start_app_link(
+          view: CrashingView,
+          terminal: terminal,
+          render_errors: [
+            view: KeybindingErrorView,
+            keybindings: [{"r", "Restart", :restart}]
+          ]
+        )
+
+      send(pid, {reader, {:data, "c"}})
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+
+        state.crash &&
+          state.frame.base_output =~ "Keybinding Error View" &&
+          state.frame.base_output =~ "r" &&
+          state.frame.base_output =~ "Restart"
+      end)
+
+      send(pid, {reader, {:data, "r"}})
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+
+        is_nil(state.crash) &&
+          state.frame.base_output =~ "ready"
+      end)
+
+      Process.exit(pid, :normal)
+    end)
+  end
+
+  test "custom error view copies details through render_errors keybindings" do
+    parent = self()
+
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+      reader = terminal.reader
+
+      {:ok, pid} =
+        Breeze.Server.start_app_link(
+          view: CrashingView,
+          terminal: terminal,
+          render_errors: [
+            view: CustomErrorView,
+            keybindings: [{"y", "Copy details", :copy_details}]
+          ],
+          internal: [
+            clipboard: [
+              copy_fun: fn text ->
+                send(parent, {:copied_custom_error_details, text})
+                {:ok, "test-clipboard"}
+              end
+            ]
+          ]
+        )
+
+      send(pid, {reader, {:data, "c"}})
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+
+        state.crash &&
+          state.frame.base_output =~ "Custom Error View"
+      end)
+
+      send(pid, {reader, {:data, "y"}})
+
+      assert_receive {:copied_custom_error_details, details}
+      assert details =~ "Breeze Error"
+      assert details =~ "CrashingView"
+      assert details =~ "RuntimeError"
+
+      wait_until(fn ->
+        case :sys.get_state(pid).crash do
+          %{notice: "Copied crash details to test-clipboard."} -> true
+          _ -> false
+        end
+      end)
 
       Process.exit(pid, :normal)
     end)

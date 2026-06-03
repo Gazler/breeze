@@ -35,11 +35,21 @@ defmodule Breeze.Server do
     * `:halt_fun` - function called when the input router exits.
       Defaults to `System.halt/0` outside IEx and no-op inside IEx.
       Use `fn -> :ok end` for embedded or SSH sessions.
+    * `:render_errors` - crash rendering options. Pass
+      `view: MyErrorView` to override the crash screen view. Defaults
+      to `Breeze.ErrorView`. Pass `keybindings: [...]` to configure
+      custom crash screen actions as `{key, label, action}` tuples.
+      Supported actions are `:restart`, `:stop`, and `:copy_details`.
+      Custom error views receive these assigns: `@view`, the crashed
+      root view module; `@crash`, the crash map; `@kind`, the crash
+      kind; `@reason`, the exception, exit reason, or thrown value;
+      `@stacktrace`, the captured stacktrace; and
+      `@breeze.keybindings`, the configured visible keybindings.
   """
 
   use GenServer
 
-  alias Breeze.Server.{Debug, Dimensions, Frame, Input, Inspector, RenderTracking}
+  alias Breeze.Server.{Debug, Dimensions, Error, Frame, Input, Inspector, RenderTracking}
   alias Breeze.Server.State
 
   @flush_input_batch :flush_input_batch
@@ -59,6 +69,7 @@ defmodule Breeze.Server do
     :focused,
     :theme,
     :apply_theme_defaults?,
+    :render_errors,
     :child_process_flags,
     :clipboard_opts,
     :crash,
@@ -89,6 +100,7 @@ defmodule Breeze.Server do
           | {:halt_fun, (-> term())}
           | {:global_keybindings, list()}
           | {:inspector, boolean() | keyword()}
+          | {:render_errors, keyword()}
 
   @doc """
   Start the Breeze application.
@@ -175,6 +187,8 @@ defmodule Breeze.Server do
 
   defp internal_opts(opts), do: keyword_group(opts, :internal)
 
+  defp render_errors_opts(opts), do: keyword_group(opts, :render_errors)
+
   defp put_internal_new(opts, key, value) do
     if Keyword.has_key?(keyword_group(opts, :internal), key) do
       opts
@@ -197,6 +211,7 @@ defmodule Breeze.Server do
     internal_opts = internal_opts(opts)
     child_process_flags = Keyword.get(internal_opts, :child_process_flags, [])
     terminal_size_override = Keyword.get(internal_opts, :terminal_size_override)
+    render_errors = Error.normalize(render_errors_opts(opts))
 
     terminal =
       opts |> Keyword.fetch!(:terminal) |> apply_terminal_size_override(terminal_size_override)
@@ -258,6 +273,7 @@ defmodule Breeze.Server do
         focused: focused,
         theme: theme,
         apply_theme_defaults?: apply_theme_defaults?,
+        render_errors: render_errors,
         child_process_flags: child_process_flags,
         clipboard_opts: Keyword.get(internal_opts, :clipboard, []),
         terminal_size_override: terminal_size_override,
@@ -1720,7 +1736,7 @@ defmodule Breeze.Server do
   defp enter_crash_state(state, crash) do
     cancel_timer(state.frame.animation_timer)
     terminal = apply_mouse_mode(state.terminal, false)
-    crash = Breeze.ErrorView.prepare_crash(state.view, crash, terminal.size)
+    crash = Error.prepare_crash(state.render_errors, state.view, crash, terminal.size)
 
     state
     |> Map.put(:terminal, terminal)
@@ -1740,12 +1756,12 @@ defmodule Breeze.Server do
   defp cancel_timer(timer), do: Process.cancel_timer(timer)
 
   defp render_crash(state, opts \\ []) do
-    crash = Breeze.ErrorView.prepare_crash(state.view, state.crash, state.terminal.size)
+    crash = Error.prepare_crash(state.render_errors, state.view, state.crash, state.terminal.size)
 
     content =
-      Breeze.ErrorView.render_assigns(state.view, crash, state.terminal.size)
+      Error.render_assigns(state.render_errors, state.view, crash, state.terminal.size)
       |> then(
-        &Breeze.Renderer.render_to_string(Breeze.ErrorView, &1,
+        &Breeze.Renderer.render_to_string(Error.view(state.render_errors), &1,
           terminal: state.terminal,
           focused: crash.focused,
           implicit_state: crash.implicit_state
@@ -1767,7 +1783,10 @@ defmodule Breeze.Server do
   end
 
   defp handle_crash_input(input, %{crash: crash} = state) do
-    case Breeze.ErrorView.handle_input(state.view, crash, input, state.terminal.size) do
+    case Error.handle_input(state.render_errors, state.view, crash, input, state.terminal.size) do
+      :ignore ->
+        {:noreply, state}
+
       :restart ->
         {:noreply, restart_root(state, :restart)}
 
@@ -1783,7 +1802,7 @@ defmodule Breeze.Server do
   end
 
   defp copy_or_print_crash_details(state, crash) do
-    details = Breeze.ErrorView.details_text(state.view, crash)
+    details = Error.details_text(state.render_errors, state.view, crash)
 
     case Breeze.ErrorView.Clipboard.copy(details, state.clipboard_opts || []) do
       {:ok, command} ->

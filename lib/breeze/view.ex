@@ -61,7 +61,8 @@ defmodule Breeze.View do
 
   ## Handling events
 
-  Any events that come from the terminal or an implicit are handled in the `handle_event/3` callback:
+  Events that come from the terminal or an implicit are handled in the
+  optional `handle_event/3` callback:
 
   ```
   def handle_event(_, %{"key" => "ArrowUp"}, term) do
@@ -84,11 +85,18 @@ defmodule Breeze.View do
   For convenience, keys are converted to a more friendly representation for example,
   instead of sending "\eA" which is provided by the terminal, we convert it to "ArrowUp".
 
-  Any other messages sent to the process will be handled using `handle_info/2`:
+  If `handle_event/3` is not implemented, events that reach the view are
+  ignored. If it is implemented, normal Elixir function clause matching
+  applies.
+
+  Any other messages sent to the process are handled using the optional
+  `handle_info/2` callback:
 
   ```
   def handle_info(:some_message, term), do: {:noreply, term}
   ```
+
+  If `handle_info/2` is not implemented, those messages are ignored.
 
   ## Style
 

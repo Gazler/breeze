@@ -202,7 +202,7 @@ defmodule Breeze.ChildServer do
 
   def handle_call({:info, message, terminal}, _from, term) do
     term = maybe_put_terminal(term, terminal)
-    reply_from_result(term.view.handle_info(message, term), term)
+    reply_from_result(handle_view_info(term.view, message, term), term)
   end
 
   def handle_call({:put_global_keybindings, keybindings}, _from, term) do
@@ -279,7 +279,7 @@ defmodule Breeze.ChildServer do
   def handle_info(message, term) do
     term = maybe_put_terminal(term, term.terminal)
 
-    case term.view.handle_info(message, term) do
+    case handle_view_info(term.view, message, term) do
       {:noreply, next_term} ->
         next_term = cascade_info_theme_change(next_term, term)
         notify_invalidate(next_term)
@@ -358,6 +358,26 @@ defmodule Breeze.ChildServer do
 
   defp maybe_put_terminal(term, nil), do: term
   defp maybe_put_terminal(term, terminal), do: %{term | terminal: terminal}
+
+  defp handle_view_info(view, message, term) do
+    if view_callback_exported?(view, :handle_info, 2) do
+      view.handle_info(message, term)
+    else
+      {:noreply, term}
+    end
+  end
+
+  defp handle_view_event(view, change, event, term) do
+    if view_callback_exported?(view, :handle_event, 3) do
+      normalize_result(view.handle_event(change, event, term), term)
+    else
+      {:noreply, term}
+    end
+  end
+
+  defp view_callback_exported?(view, name, arity) do
+    Code.ensure_loaded?(view) and function_exported?(view, name, arity)
+  end
 
   defp maybe_probe_system_theme(theme, terminal, server) do
     if requested_system_theme?(theme) do
@@ -749,7 +769,7 @@ defmodule Breeze.ChildServer do
   defp process_input(%{"mouse" => mouse} = event, term, _opts) do
     case mouse_target(term, mouse) do
       nil ->
-        normalize_result(term.view.handle_event(:ignore_me, event, term), term)
+        handle_view_event(term.view, :ignore_me, event, term)
 
       target ->
         term =
@@ -854,12 +874,12 @@ defmodule Breeze.ChildServer do
         {:noreply, term}
 
       true ->
-        normalize_result(term.view.handle_event(change, event, term), term)
+        handle_view_event(term.view, change, event, term)
     end
   end
 
   defp handle_implicit_change(term, _id, change, event) do
-    normalize_result(term.view.handle_event(change, event, term), term)
+    handle_view_event(term.view, change, event, term)
   end
 
   defp dispatch_input_hierarchy(term, key) do
@@ -915,7 +935,7 @@ defmodule Breeze.ChildServer do
   end
 
   defp dispatch_input_steps([:view_direct | _rest], event, _key, term) do
-    normalize_result(term.view.handle_event(:ignore_me, event, term), term)
+    handle_view_event(term.view, :ignore_me, event, term)
   end
 
   defp dispatch_local_keybindings(event, term) do

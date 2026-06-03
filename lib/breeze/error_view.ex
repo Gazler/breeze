@@ -25,7 +25,11 @@ defmodule Breeze.ErrorView do
     message_content_width = message_content_width(message_lines, layout.right_inner_width)
 
     %{
+      view: view,
       crash: crash,
+      kind: crash.kind,
+      reason: crash.reason,
+      stacktrace: crash.stacktrace,
       outer_width: outer_width,
       outer_height: outer_height,
       header_height: header_height,
