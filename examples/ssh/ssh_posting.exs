@@ -36,7 +36,7 @@ defmodule SSHPostingEntrypoint do
       halt_fun: fn -> :ok end,
       hide_cursor: true,
       mouse: [mode: :motion],
-      inspector: true,
+      inspector: [timeline: true],
       global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
     )
   end

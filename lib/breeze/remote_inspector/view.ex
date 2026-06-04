@@ -14,7 +14,10 @@ defmodule Breeze.RemoteInspector.View do
     ]
   end
 
-  def quit(_event, term), do: {:stop, term}
+  def quit(_event, term) do
+    resume_selected_timelines(term.assigns)
+    {:stop, term}
+  end
 
   def mount(_opts, term) do
     _ = Breeze.RemoteInspector.ensure_inspector_distribution()
@@ -31,6 +34,7 @@ defmodule Breeze.RemoteInspector.View do
        render_tree_kind: "rendered",
        render_tree_expanded: %{},
        render_trees: %{},
+       timeline_selected: %{},
        screen: term.terminal.size
      )
      |> put_tree_keybindings()
@@ -40,11 +44,14 @@ defmodule Breeze.RemoteInspector.View do
   def render(assigns) do
     active = active_entry(assigns)
     active_source = active_source(assigns)
+    source_entry = source_entry(assigns)
     render_tree_kind = render_tree_kind(assigns)
     panel_tab = Map.get(assigns, :panel_tab, "overview")
     breeze = assigns |> Map.get(:breeze, %{}) |> Map.put_new(:keybindings, [])
     now = System.system_time(:millisecond)
     active_render_tree = active_render_tree(assigns, active_source, active, render_tree_kind)
+    active_timeline_selected = timeline_selected(assigns, active_source, source_entry)
+    active_timeline_entry = timeline_entry(source_entry, active_timeline_selected)
 
     assigns =
       Map.merge(assigns, %{
@@ -99,6 +106,11 @@ defmodule Breeze.RemoteInspector.View do
           if(active, do: render_tree_selected(active_render_tree, active.snapshot), else: nil),
         active_render_tree_expanded:
           if(active, do: render_tree_expanded(active_render_tree), else: []),
+        active_timeline_enabled?: timeline_enabled?(source_entry),
+        active_timeline_nodes: timeline_nodes(source_entry),
+        active_timeline_selected: active_timeline_selected,
+        active_timeline_status: timeline_status(source_entry, active_timeline_selected),
+        active_timeline_detail: timeline_detail(active_timeline_entry),
         render_tree_kind: render_tree_kind,
         breeze: breeze,
         panel_tab: panel_tab
@@ -185,6 +197,16 @@ defmodule Breeze.RemoteInspector.View do
                   active={@active}
                   active_implicit_text={@active_implicit_text}
                   active_implicit_detail_text={@active_implicit_detail_text}
+                />
+              </:tab>
+              <:tab value="timeline" label="Timeline">
+                <.timeline_tab
+                  active={@active}
+                  enabled={@active_timeline_enabled?}
+                  nodes={@active_timeline_nodes}
+                  selected={@active_timeline_selected}
+                  status={@active_timeline_status}
+                  detail={@active_timeline_detail}
                 />
               </:tab>
             </.tabs>
@@ -516,6 +538,43 @@ defmodule Breeze.RemoteInspector.View do
     """
   end
 
+  attr :active, :any, required: true
+  attr :enabled, :boolean, required: true
+  attr :nodes, :list, required: true
+  attr :selected, :string, required: true
+  attr :status, :string, required: true
+  attr :detail, :list, required: true
+
+  def timeline_tab(assigns) do
+    ~H"""
+    <box class="width-full height-full padding-top-1">
+      <box :if={!is_nil(@active)} class="width-full text-muted">{@status}</box>
+      <.tree
+        :if={!is_nil(@active) and @enabled and @nodes != []}
+        id="remote-inspector-timeline"
+        nodes={@nodes}
+        selected={@selected}
+        expanded={[]}
+        collapsed_prefix=" "
+        expanded_prefix=" "
+        loop="false"
+        virtual
+        br-change="timeline_changed"
+        class="width-full height-7 bg"
+      />
+      <box :if={!is_nil(@active) and @enabled and @nodes == []} class="width-full text-muted">
+        Waiting for timeline entries...
+      </box>
+      <box :if={!is_nil(@active) and !@enabled} class="width-full text-muted">
+        Timeline capture is disabled for this source.
+      </box>
+      <box :if={!is_nil(@active) and @detail != []} class="width-full">
+      </box>
+      <box :for={row <- @detail} class={row.class}>{row.text}</box>
+    </box>
+    """
+  end
+
   attr :title, :string, required: true
   slot :inner_block, required: true
 
@@ -534,12 +593,20 @@ defmodule Breeze.RemoteInspector.View do
       ) do
     active_source = normalize_active_source(term.assigns.active_source, snapshots, latest_source)
 
+    timeline_selected =
+      normalize_timeline_selected(
+        term.assigns[:timeline_selected] || %{},
+        snapshots,
+        active_source
+      )
+
     term =
       term
       |> assign(
         snapshots: snapshots,
         latest_source: latest_source,
-        active_source: active_source
+        active_source: active_source,
+        timeline_selected: timeline_selected
       )
       |> refresh_active_render_tree()
 
@@ -601,6 +668,30 @@ defmodule Breeze.RemoteInspector.View do
     end
   end
 
+  def handle_event("timeline_changed", payload, term) do
+    selected = payload_value(payload, :value)
+    active_source = active_source(term.assigns)
+    source_entry = source_entry(term.assigns)
+
+    if active_source && is_binary(selected) do
+      select_remote_timeline(source_entry, selected)
+
+      timeline_selected =
+        term.assigns
+        |> Map.get(:timeline_selected, %{})
+        |> Map.put(active_source, selected)
+
+      term =
+        term
+        |> assign(timeline_selected: timeline_selected)
+        |> refresh_active_render_tree(force: Map.get(term.assigns, :panel_tab) == "tree")
+
+      {:noreply, term}
+    else
+      {:noreply, term}
+    end
+  end
+
   def handle_event(_, %{"key" => key}, term) when key in ["t", "T"] do
     {:noreply, toggle_tree_panel(term)}
   end
@@ -611,9 +702,160 @@ defmodule Breeze.RemoteInspector.View do
   defp active_source(assigns),
     do: Map.get(assigns, :active_source) || Map.get(assigns, :latest_source)
 
-  defp active_entry(%{snapshots: snapshots, latest_source: latest_source} = assigns) do
+  defp source_entry(%{snapshots: snapshots, latest_source: latest_source} = assigns) do
     Map.get(snapshots, active_source(assigns) || latest_source)
   end
+
+  defp active_entry(%{snapshots: snapshots, latest_source: latest_source} = assigns) do
+    source = active_source(assigns) || latest_source
+    entry = Map.get(snapshots, source)
+    selected = timeline_selected(assigns, source, entry)
+
+    case timeline_entry(entry, selected) do
+      %{snapshot: snapshot} = timeline_entry when is_map(snapshot) ->
+        put_historical_snapshot(entry, snapshot, timeline_entry)
+
+      _entry ->
+        entry
+    end
+  end
+
+  defp put_historical_snapshot(nil, _snapshot, _timeline_entry), do: nil
+
+  defp put_historical_snapshot(entry, snapshot, timeline_entry) do
+    timeline = get_in(entry, [:snapshot, :timeline])
+    snapshot = if timeline, do: Map.put(snapshot, :timeline, timeline), else: snapshot
+
+    entry
+    |> Map.put(:snapshot, snapshot)
+    |> Map.put(:timeline_entry, timeline_entry)
+  end
+
+  defp timeline_selected(_assigns, _source, nil), do: "latest"
+  defp timeline_selected(_assigns, nil, _entry), do: "latest"
+
+  defp timeline_selected(assigns, source, entry) do
+    selected =
+      assigns
+      |> Map.get(:timeline_selected, %{})
+      |> Map.get(source, "latest")
+
+    if timeline_selection_valid?(entry, selected), do: selected, else: "latest"
+  end
+
+  defp timeline_selection_valid?(_entry, "latest"), do: true
+
+  defp timeline_selection_valid?(entry, selected) do
+    is_binary(selected) and not is_nil(timeline_entry(entry, selected))
+  end
+
+  defp timeline_entry(_entry, "latest"), do: nil
+  defp timeline_entry(nil, _selected), do: nil
+
+  defp timeline_entry(entry, selected) when is_binary(selected) do
+    entry
+    |> timeline_entries()
+    |> Enum.find(&(Integer.to_string(Map.get(&1, :id)) == selected))
+  end
+
+  defp timeline_entry(_entry, _selected), do: nil
+
+  defp timeline_enabled?(entry) do
+    match?(%{enabled?: true}, timeline_data(entry))
+  end
+
+  defp timeline_data(%{snapshot: %{timeline: timeline}}) when is_map(timeline), do: timeline
+  defp timeline_data(_entry), do: nil
+
+  defp timeline_entries(entry) do
+    case timeline_data(entry) do
+      %{entries: entries} when is_list(entries) -> entries
+      _ -> []
+    end
+  end
+
+  defp timeline_nodes(nil), do: []
+
+  defp timeline_nodes(entry) do
+    latest = [%{id: "latest", label: "live latest", children: []}]
+
+    entries =
+      entry
+      |> timeline_entries()
+      |> Enum.reverse()
+      |> Enum.map(fn timeline_entry ->
+        id = Integer.to_string(timeline_entry.id)
+
+        %{
+          id: id,
+          label: timeline_entry_label(timeline_entry),
+          children: []
+        }
+      end)
+
+    latest ++ entries
+  end
+
+  defp timeline_entry_label(%{id: id, kind: kind, detail: detail}) do
+    "##{id} #{kind} #{detail}"
+  end
+
+  defp timeline_entry_label(%{id: id, kind: kind}), do: "##{id} #{kind}"
+
+  defp timeline_status(nil, _selected), do: "timeline=unavailable"
+
+  defp timeline_status(entry, selected) do
+    case timeline_data(entry) do
+      %{enabled?: true, count: count} ->
+        "timeline=enabled entries=#{count} selected=#{selected}"
+
+      _ ->
+        "timeline=disabled"
+    end
+  end
+
+  defp timeline_detail(nil), do: []
+
+  defp timeline_detail(entry) do
+    rows = [
+      %{class: "width-full bold text-primary", text: "Entry"},
+      %{class: "width-full", text: "id=#{Map.get(entry, :id)} kind=#{Map.get(entry, :kind)}"},
+      %{class: "width-full text-muted", text: "detail=#{Map.get(entry, :detail, "-")}"}
+    ]
+
+    case Map.get(entry, :snapshot) do
+      %{selected_id: selected_id, focused: focused, counts: counts} ->
+        rows ++
+          [
+            %{
+              class: "width-full",
+              text: "focused=#{focused || "-"} selected=#{selected_id || "-"}"
+            },
+            %{class: "width-full text-muted", text: "counts=#{counts_line(%{counts: counts})}"}
+          ]
+
+      _snapshot ->
+        rows
+    end
+  end
+
+  defp normalize_timeline_selected(selected, snapshots, active_source) when is_map(selected) do
+    selected
+    |> Enum.filter(fn {source, value} ->
+      timeline_selection_valid?(Map.get(snapshots, source), value)
+    end)
+    |> Map.new()
+    |> maybe_put_active_timeline_default(active_source)
+  end
+
+  defp normalize_timeline_selected(_selected, _snapshots, active_source) do
+    if active_source, do: %{active_source => "latest"}, else: %{}
+  end
+
+  defp maybe_put_active_timeline_default(selected, nil), do: selected
+
+  defp maybe_put_active_timeline_default(selected, active_source),
+    do: Map.put_new(selected, active_source, "latest")
 
   defp payload_value(payload, key) when is_map(payload) do
     Map.get(payload, key) || Map.get(payload, Atom.to_string(key))
@@ -711,6 +953,30 @@ defmodule Breeze.RemoteInspector.View do
 
   defp select_remote_element(_active, _selected), do: :ok
 
+  defp select_remote_timeline(_entry, selected) when not is_binary(selected), do: :ok
+
+  defp select_remote_timeline(%{snapshot: %{source: %{server_pid: pid}}}, selected)
+       when is_pid(pid) do
+    Breeze.Server.select_inspector_timeline(pid, selected)
+  end
+
+  defp select_remote_timeline(%{source: %{pid: pid}}, selected) when is_pid(pid) do
+    Breeze.Server.select_inspector_timeline(pid, selected)
+  end
+
+  defp select_remote_timeline(_entry, _selected), do: :ok
+
+  defp resume_selected_timelines(assigns) do
+    selected = Map.get(assigns, :timeline_selected, %{})
+    snapshots = Map.get(assigns, :snapshots, %{})
+
+    Enum.each(snapshots, fn {source, entry} ->
+      if Map.get(selected, source, "latest") != "latest" do
+        select_remote_timeline(entry, "latest")
+      end
+    end)
+  end
+
   defp refresh_active_render_tree(term, opts \\ []) do
     if Keyword.get(opts, :force, false) or Map.get(term.assigns, :panel_tab) == "tree" do
       active_source = active_source(term.assigns)
@@ -769,11 +1035,20 @@ defmodule Breeze.RemoteInspector.View do
     :exit, _reason -> snapshot_render_tree(active.snapshot, kind)
   end
 
+  defp source_server_pid(%{timeline_entry: _entry}), do: nil
   defp source_server_pid(%{snapshot: %{source: %{server_pid: pid}}}) when is_pid(pid), do: pid
   defp source_server_pid(%{source: %{pid: pid}}) when is_pid(pid), do: pid
   defp source_server_pid(_active), do: nil
 
   defp active_render_tree(assigns, source, active, kind) do
+    if match?(%{timeline_entry: _entry}, active) do
+      snapshot_render_tree(active.snapshot, kind)
+    else
+      active_render_tree_from_cache(assigns, source, active, kind)
+    end
+  end
+
+  defp active_render_tree_from_cache(assigns, source, active, kind) do
     assigns
     |> Map.get(:render_trees, %{})
     |> Map.get(render_tree_cache_key(source, kind))

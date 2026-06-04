@@ -5,10 +5,11 @@ defmodule Breeze.Server do
 
   use GenServer
 
-  alias Breeze.Server.{Debug, Dimensions, Frame, Input, Inspector, RenderTracking}
+  alias Breeze.Server.{Debug, Dimensions, Frame, Input, Inspector, RenderTracking, Timeline}
   alias Breeze.Server.State
 
   @flush_input_batch :flush_input_batch
+  @timeline_sys_timeout 1_000
   defstruct [
     :terminal,
     :reader,
@@ -148,6 +149,12 @@ defmodule Breeze.Server do
     GenServer.cast(pid, {:select_inspector, id})
   end
 
+  @doc false
+  @spec select_inspector_timeline(pid(), String.t()) :: :ok
+  def select_inspector_timeline(pid, selected) when is_pid(pid) and is_binary(selected) do
+    GenServer.cast(pid, {:select_inspector_timeline, selected})
+  end
+
   @impl true
   def init(opts) do
     view = Keyword.fetch!(opts, :view)
@@ -162,7 +169,9 @@ defmodule Breeze.Server do
     theme = Breeze.Theme.new(Keyword.get(opts, :theme), terminal: terminal)
     theme_source = Keyword.get(opts, :theme)
     apply_theme_defaults? = Breeze.Theme.defaults_enabled?(Keyword.get(opts, :theme))
-    inspector_enabled? = inspector_enabled?(Keyword.get(opts, :inspector, false))
+    inspector_config = Keyword.get(opts, :inspector, false)
+    inspector_enabled? = inspector_enabled?(inspector_config)
+    timeline_enabled? = Timeline.enabled_config?(inspector_config)
 
     if inspector_enabled? do
       _ = Breeze.RemoteInspector.ensure_app_distribution(view: view)
@@ -180,6 +189,7 @@ defmodule Breeze.Server do
         apply_theme_defaults?: apply_theme_defaults?,
         process_flags: Keyword.get(opts, :child_process_flags, []),
         render_tree?: inspector_enabled?,
+        timeline?: timeline_enabled?,
         server: self(),
         global_keybindings: Keyword.get(opts, :global_keybindings, []),
         invalidate: fn
@@ -229,7 +239,7 @@ defmodule Breeze.Server do
           busy_delay_ms: Keyword.get(opts, :busy_delay_ms, 120),
           frame_delay_ms: frame_delay_ms
         },
-        inspector_state: %State.Inspector{config: Keyword.get(opts, :inspector, false)}
+        inspector_state: %State.Inspector{config: inspector_config}
       }
 
     state = maybe_start_reloader(state)
@@ -296,13 +306,25 @@ defmodule Breeze.Server do
     {:noreply, state}
   end
 
+  def handle_cast({:select_inspector_timeline, selected}, state) when is_binary(selected) do
+    state =
+      if Timeline.enabled?(state) do
+        select_timeline_frame(state, selected)
+      else
+        state
+      end
+
+    {:noreply, state}
+  end
+
   @impl true
   def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
     started_at = System.monotonic_time(:microsecond)
+    decoded = Breeze.Input.decode(data)
 
     state =
       state
-      |> Input.enqueue(Breeze.Input.decode(data))
+      |> Input.enqueue(decoded)
       |> Debug.put_stat(:last_input_us, System.monotonic_time(:microsecond) - started_at)
       |> schedule_input_flush()
 
@@ -312,6 +334,7 @@ defmodule Breeze.Server do
   def handle_info({reader, {:signal, :winch}}, %{reader: reader, crash: crash} = state)
       when not is_nil(crash) do
     terminal = resize_terminal(state)
+
     {:noreply, render_crash(%{state | terminal: terminal}, force_full_redraw?: true)}
   end
 
@@ -319,17 +342,26 @@ defmodule Breeze.Server do
     terminal = resize_terminal(state)
     state = %{state | terminal: terminal}
 
-    case safe_call(fn ->
-           Breeze.ChildServer.dispatch_info(state.view_pid, :resize, terminal)
-         end) do
-      {:ok, {:stop, _focused}} ->
-        stop(state)
+    if Timeline.historical_selection?(state) do
+      state =
+        state
+        |> update_frame(last_payload: nil, last_lines: nil, last_overlays: [])
+        |> render_frame()
 
-      {:ok, {:noreply, focused}} ->
-        {:noreply, force_full_redraw(%{state | focused: focused}, :resize)}
+      {:noreply, state}
+    else
+      case safe_call(fn ->
+             Breeze.ChildServer.dispatch_info(state.view_pid, :resize, terminal)
+           end) do
+        {:ok, {:stop, _focused}} ->
+          stop(state)
 
-      {:crash, crash} ->
-        {:noreply, enter_crash_state(state, crash)}
+        {:ok, {:noreply, focused}} ->
+          {:noreply, force_full_redraw(%{state | focused: focused}, :resize)}
+
+        {:crash, crash} ->
+          {:noreply, enter_crash_state(state, crash)}
+      end
     end
   end
 
@@ -352,7 +384,12 @@ defmodule Breeze.Server do
 
   def handle_info(:child_invalidated, state) do
     state = Debug.increment_stat(state, :child_invalidated_count)
-    {:noreply, maybe_render_base(state, :child_invalidated)}
+
+    if Timeline.historical_selection?(state) do
+      {:noreply, render_frame(state)}
+    else
+      {:noreply, maybe_render_base(state, :child_invalidated)}
+    end
   end
 
   def handle_info({:child_invalidated, _child_id}, %{crash: crash} = state)
@@ -368,24 +405,42 @@ defmodule Breeze.Server do
         Debug.increment_stat(state, :child_invalidated_count)
       end
 
-    {:noreply, maybe_render_invalidated_child(state, child_id)}
+    if Timeline.historical_selection?(state) do
+      {:noreply, render_frame(state)}
+    else
+      {:noreply, maybe_render_invalidated_child(state, child_id)}
+    end
   end
 
   def handle_info(@flush_input_batch, state) do
     state = Debug.increment_stat(state, :flush_input_batch_count)
-    state = update_input(state, flush_scheduled?: false)
 
-    case flush_input_batch(state) do
-      {:stop, state} ->
-        stop(state)
+    if Timeline.historical_selection?(state) do
+      state =
+        state
+        |> update_input(
+          flush_scheduled?: false,
+          queued_input: :queue.new(),
+          render_after_flush?: false
+        )
+        |> render_frame()
 
-      {:noreply, state} ->
-        state =
-          state
-          |> maybe_render_after_input()
-          |> schedule_input_flush()
+      {:noreply, state}
+    else
+      state = update_input(state, flush_scheduled?: false)
 
-        {:noreply, state}
+      case flush_input_batch(state) do
+        {:stop, state} ->
+          stop(state)
+
+        {:noreply, state} ->
+          state =
+            state
+            |> maybe_render_after_input()
+            |> schedule_input_flush()
+
+          {:noreply, state}
+      end
     end
   end
 
@@ -423,12 +478,22 @@ defmodule Breeze.Server do
   end
 
   def handle_info({:reload, :compile_error, reason, _files}, state) do
+    state = resume_timeline_runtime(state)
     shutdown_root_view(state.view_pid)
     {:noreply, enter_crash_state(state, crash_info(:error, reason, []))}
   end
 
   def handle_info({:event_reply, ref, reply}, %{input: %{pending_ref: ref}} = state) do
-    apply_event_reply(state, reply)
+    if Timeline.historical_selection?(state) do
+      {:noreply,
+       update_input(state, pending_ref: nil, pending_started_at: nil, pending_message: nil)}
+    else
+      apply_event_reply(state, reply)
+    end
+  end
+
+  def handle_info({:breeze_timeline_event, _source_pid, event}, state) do
+    {:noreply, Timeline.mark_changed(state, :info, event)}
   end
 
   def handle_info({:event_reply, _ref, _reply}, state), do: {:noreply, state}
@@ -478,6 +543,122 @@ defmodule Breeze.Server do
   defp update_inspector(state, updates),
     do: %{state | inspector_state: struct!(state.inspector_state, updates)}
 
+  defp select_timeline_frame(state, requested) do
+    selected = Timeline.normalize_selection(state, requested)
+
+    state =
+      state
+      |> update_inspector(timeline_selected_id: selected)
+      |> then(fn
+        state when selected == "latest" -> resume_timeline_runtime(state)
+        state -> suspend_timeline_runtime(state)
+      end)
+
+    render_frame(state)
+  end
+
+  defp resume_timeline_when_inspector_closed(%{inspector_state: %{visible?: false}} = state) do
+    resume_timeline_runtime(state)
+  end
+
+  defp resume_timeline_when_inspector_closed(state), do: state
+
+  defp suspend_timeline_runtime(state) do
+    if timeline_runtime_suspended?(state) do
+      state
+    else
+      suspended =
+        state
+        |> timeline_runtime_pids()
+        |> Enum.filter(fn pid -> safe_sys_suspend(pid) == :ok end)
+
+      update_inspector(state, timeline_suspended_pids: suspended)
+    end
+  end
+
+  defp resume_timeline_runtime(state) do
+    state
+    |> timeline_suspended_pids()
+    |> Enum.reverse()
+    |> Enum.each(&safe_sys_resume/1)
+
+    update_inspector(state, timeline_suspended_pids: [], timeline_selected_id: "latest")
+  end
+
+  defp timeline_runtime_suspended?(state) do
+    Enum.any?(timeline_suspended_pids(state), &(is_pid(&1) and Process.alive?(&1)))
+  end
+
+  defp timeline_suspended_pids(%{inspector_state: inspector}) do
+    case Map.get(inspector, :timeline_suspended_pids, []) do
+      pids when is_list(pids) -> pids
+      %MapSet{} = pids -> MapSet.to_list(pids)
+      _pids -> []
+    end
+  end
+
+  defp timeline_suspended_pids(_state), do: []
+
+  defp timeline_runtime_pids(state) do
+    direct_pids =
+      [state.view_pid | Enum.map(Map.values(state.children || %{}), &Map.get(&1, :pid))]
+
+    direct_pids
+    |> Enum.flat_map(fn pid ->
+      [pid | child_runtime_pids(pid)]
+    end)
+    |> Enum.filter(&(is_pid(&1) and &1 != self() and Process.alive?(&1)))
+    |> Enum.uniq()
+  end
+
+  defp child_runtime_pids(pid) when is_pid(pid) do
+    Breeze.ChildServer.runtime_pids(pid, @timeline_sys_timeout)
+  catch
+    :exit, _reason -> []
+  end
+
+  defp child_runtime_pids(_pid), do: []
+
+  defp safe_sys_suspend(pid) when is_pid(pid) do
+    if pid != self() and Process.alive?(pid) do
+      case :sys.suspend(pid, @timeline_sys_timeout) do
+        :ok -> :ok
+        _result -> :error
+      end
+    else
+      :error
+    end
+  catch
+    :exit, _reason -> :error
+  end
+
+  defp safe_sys_resume(pid) when is_pid(pid) do
+    if pid != self() and Process.alive?(pid) do
+      case :sys.resume(pid, @timeline_sys_timeout) do
+        :ok -> :ok
+        _result -> :error
+      end
+    else
+      :ok
+    end
+  catch
+    :exit, _reason -> :error
+  end
+
+  defp safe_sys_resume(_pid), do: :ok
+
+  defp timeline_frame(%{terminal: %{size: screen}}, lines) when is_list(lines) do
+    height = Map.get(screen, :height, 0)
+
+    %{
+      width: Map.get(screen, :width, 0),
+      height: height,
+      lines: Enum.take(lines, max(height, 0))
+    }
+  end
+
+  defp timeline_frame(_state, _lines), do: %{width: 0, height: 0, lines: []}
+
   defp inspector_enabled?(config), do: config not in [false, nil]
 
   defp update_rendered(state, updates), do: %{state | rendered: struct!(state.rendered, updates)}
@@ -510,6 +691,9 @@ defmodule Breeze.Server do
 
   defp handle_decoded_sync_input({:mouse, event}, state) do
     cond do
+      Timeline.historical_selection?(state) ->
+        {:noreply, state}
+
       Inspector.picks_mouse?(state) ->
         {:noreply,
          state
@@ -527,9 +711,15 @@ defmodule Breeze.Server do
   end
 
   defp handle_decoded_sync_input({:key, key}, state) do
-    state
-    |> touch_interaction()
-    |> handle_sync_key_action(sync_key_action(key, state), key)
+    action = sync_key_action(key, state)
+    state = touch_interaction(state)
+
+    if Timeline.historical_selection?(state) and
+         action not in [:global_stop, :inspector_toggle, :inspector_move] do
+      {:noreply, state}
+    else
+      handle_sync_key_action(state, action, key)
+    end
   end
 
   defp handle_deferred_input({:key, _key}, %{input: %{pending_ref: ref}} = state)
@@ -542,7 +732,11 @@ defmodule Breeze.Server do
   end
 
   defp handle_deferred_input({:key, key}, state) do
-    {:noreply, start_async_dispatch(touch_interaction(state), key)}
+    if Timeline.historical_selection?(state) do
+      {:noreply, state}
+    else
+      {:noreply, start_async_dispatch(touch_interaction(state), key)}
+    end
   end
 
   defp handle_deferred_input(_decoded, state), do: {:noreply, state}
@@ -573,10 +767,26 @@ defmodule Breeze.Server do
         {:stop, state}
 
       {:noreply, focused} ->
-        {:noreply, state |> Map.put(:focused, focused) |> mark_input_render_after_flush(true)}
+        {:noreply,
+         state
+         |> Timeline.mark_changed(:input, timeline_input_detail(state, focused))
+         |> update_input(pending_message: nil)
+         |> Map.put(:focused, focused)
+         |> mark_input_render_after_flush(true)}
 
       {:noreply, focused, render?} ->
-        {:noreply, state |> Map.put(:focused, focused) |> mark_input_render_after_flush(render?)}
+        state =
+          if render? do
+            Timeline.mark_changed(state, :input, timeline_input_detail(state, focused))
+          else
+            state
+          end
+
+        {:noreply,
+         state
+         |> update_input(pending_message: nil)
+         |> Map.put(:focused, focused)
+         |> mark_input_render_after_flush(render?)}
     end
   end
 
@@ -612,6 +822,7 @@ defmodule Breeze.Server do
 
   defp finish_event_reply(state, focused, true) do
     state
+    |> Timeline.mark_changed(:input, timeline_input_detail(state, focused, async?: true))
     |> finish_event_reply_state(focused)
     |> maybe_render_base(:event_reply)
   end
@@ -622,9 +833,34 @@ defmodule Breeze.Server do
 
   defp finish_event_reply_state(state, focused) do
     state
-    |> update_input(pending_ref: nil, pending_started_at: nil)
+    |> update_input(pending_ref: nil, pending_started_at: nil, pending_message: nil)
     |> Map.put(:focused, focused)
   end
+
+  defp timeline_input_detail(state, focused, opts \\ []) do
+    detail =
+      if Keyword.get(opts, :async?, false) do
+        %{focused: focused, async?: true}
+      else
+        %{focused: focused}
+      end
+
+    case state.input.pending_message do
+      nil ->
+        detail
+
+      message ->
+        detail
+        |> Map.put(:message, message)
+        |> maybe_put_timeline_key(message)
+    end
+  end
+
+  defp maybe_put_timeline_key(detail, %{"key" => key}) when is_binary(key),
+    do: Map.put(detail, :key, key)
+
+  defp maybe_put_timeline_key(detail, key) when is_binary(key), do: Map.put(detail, :key, key)
+  defp maybe_put_timeline_key(detail, _message), do: detail
 
   defp sync_key_action(key, state) do
     cond do
@@ -645,6 +881,7 @@ defmodule Breeze.Server do
     {:noreply,
      state
      |> Breeze.Inspector.toggle()
+     |> resume_timeline_when_inspector_closed()
      |> maybe_render_base(:inspector_toggle)}
   end
 
@@ -656,6 +893,8 @@ defmodule Breeze.Server do
   end
 
   defp handle_sync_key_action(state, :tab, key) do
+    state = update_input(state, pending_message: normalize_tab_input(key))
+
     safe_apply_tab_input_reply(state, fn state ->
       Breeze.ChildServer.dispatch_input(state.view_pid, normalize_tab_input(key),
         invalidate: false
@@ -664,6 +903,8 @@ defmodule Breeze.Server do
   end
 
   defp handle_sync_key_action(state, :hierarchy, key) do
+    state = update_input(state, pending_message: key)
+
     safe_apply_hierarchy_input_reply(state, fn state ->
       dispatch_input_hierarchy(state, key)
     end)
@@ -880,17 +1121,25 @@ defmodule Breeze.Server do
   defp maybe_render_base(%{crash: crash} = state, _cause) when not is_nil(crash), do: state
 
   defp maybe_render_base(%{view_pid: pid} = state, cause) do
-    state = prune_dead_children(state)
+    if Timeline.historical_selection?(state) do
+      render_frame(state)
+    else
+      state = prune_dead_children(state)
 
-    if Process.alive?(pid), do: render_base(state, cause), else: state
+      if Process.alive?(pid), do: render_base(state, cause), else: state
+    end
   end
 
   defp maybe_render_invalidated_child(state, child_id) do
-    case render_invalidated_child(state, child_id) do
-      {:ok, state} -> state
-      {:crash, state} -> state
-      {:error, _reason} -> maybe_render_base(state, :child_invalidated)
-      :error -> maybe_render_base(state, :child_invalidated)
+    if Timeline.historical_selection?(state) do
+      render_frame(state)
+    else
+      case render_invalidated_child(state, child_id) do
+        {:ok, state} -> state
+        {:crash, state} -> state
+        {:error, _reason} -> maybe_render_base(state, :child_invalidated)
+        :error -> maybe_render_base(state, :child_invalidated)
+      end
     end
   end
 
@@ -1220,11 +1469,13 @@ defmodule Breeze.Server do
     {output, decorations} =
       apply_decorations(state.frame.base_output, state.frame.decorations, state)
 
-    overlays = terminal_overlays(decorations, state)
+    live_overlays = terminal_overlays(decorations, state)
 
-    lines =
+    live_lines =
       output
       |> Frame.normalize_lines(state.terminal.size.height)
+
+    {lines, overlays} = Timeline.display_frame(state, live_lines, live_overlays)
 
     frame_payload =
       Frame.build_payload(
@@ -1259,7 +1510,10 @@ defmodule Breeze.Server do
     |> Debug.put_stat(:last_frame_us, System.monotonic_time(:microsecond) - started_at)
     |> Debug.put_stat(:last_frame_bytes, byte_size(frame_payload))
     |> Debug.put_stat(:overlay_count, length(overlays))
-    |> Inspector.push_snapshot_now()
+    |> Inspector.push_snapshot_now(
+      timeline: true,
+      timeline_frame: timeline_frame(state, live_lines)
+    )
   end
 
   defp initialize_decorations(decorations) do
@@ -1548,6 +1802,7 @@ defmodule Breeze.Server do
   defp live_placeholder_style(_child, _state, _terminal), do: %{}
 
   defp stop(state) do
+    state = resume_timeline_runtime(state)
     shutdown_root_view(state.view_pid)
 
     terminal =
@@ -1690,6 +1945,7 @@ defmodule Breeze.Server do
     |> update_input(
       pending_ref: nil,
       pending_started_at: nil,
+      pending_message: nil,
       flush_scheduled?: false,
       queued_input: :queue.new()
     )
@@ -1808,7 +2064,10 @@ defmodule Breeze.Server do
   defp maybe_hide_cursor(terminal, _), do: terminal
 
   defp reload_after_code_change(state) do
-    state = prune_dead_children(state)
+    state =
+      state
+      |> resume_timeline_runtime()
+      |> prune_dead_children()
 
     case refresh_reload_state(state) do
       {:ok, state} ->
@@ -1825,6 +2084,7 @@ defmodule Breeze.Server do
   defp restart_root(state, cause) do
     state =
       state
+      |> resume_timeline_runtime()
       |> restore_terminal_after_crash_scrollback()
       |> then(&%{&1 | terminal: apply_mouse_mode(&1.terminal, &1.mouse_mode)})
 
@@ -1849,6 +2109,7 @@ defmodule Breeze.Server do
         |> update_input(
           pending_ref: nil,
           pending_started_at: nil,
+          pending_message: nil,
           queued_input: :queue.new(),
           flush_scheduled?: false
         )
@@ -1878,6 +2139,7 @@ defmodule Breeze.Server do
              process_flags: state.child_process_flags || [],
              server: self(),
              render_tree?: Breeze.Inspector.enabled?(state),
+             timeline?: Timeline.enabled?(state),
              global_keybindings: state.global_keybindings || [],
              invalidate: fn -> send(session, :child_invalidated) end
            )
@@ -2137,7 +2399,11 @@ defmodule Breeze.Server do
     end)
 
     state
-    |> update_input(pending_ref: ref, pending_started_at: System.monotonic_time(:millisecond))
+    |> update_input(
+      pending_ref: ref,
+      pending_started_at: System.monotonic_time(:millisecond),
+      pending_message: key
+    )
     |> Debug.put_stat(:last_async_key, key)
     |> schedule_animation()
   end
@@ -2161,6 +2427,7 @@ defmodule Breeze.Server do
         theme: theme,
         process_flags: state.child_process_flags || [],
         render_tree?: Breeze.Inspector.enabled?(state),
+        timeline?: Timeline.enabled?(state),
         invalidate: invalidate
       )
 

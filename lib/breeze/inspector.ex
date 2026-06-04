@@ -101,14 +101,14 @@ defmodule Breeze.Inspector do
     put_inspector_field(state, :selected_id, :inspector_selected_id, selected_id)
   end
 
-  def snapshot(state) do
+  def snapshot(state, opts \\ []) do
     state = sync_selected_id(state)
     screen = Map.get(state.terminal, :size, %{width: 0, height: 0})
     selected_id = inspector_field(state, :selected_id, :inspector_selected_id)
     hovered_id = inspector_field(state, :hovered_id, :inspector_hovered_id)
     focusable_ids = focusable_ids(state)
 
-    %{
+    snapshot = %{
       enabled?: enabled?(state),
       visible?: inspector_field(state, :visible?, :inspector_visible?, false),
       selected_id: selected_id,
@@ -144,6 +144,12 @@ defmodule Breeze.Inspector do
       hovered: selected_snapshot(state, hovered_id),
       selected: selected_snapshot(state, selected_id)
     }
+
+    if Keyword.get(opts, :timeline, true) and Breeze.Server.Timeline.enabled?(state) do
+      Map.put(snapshot, :timeline, Breeze.Server.Timeline.snapshot(state))
+    else
+      snapshot
+    end
   end
 
   def render_tree(state, opts \\ []) do

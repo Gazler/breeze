@@ -1,6 +1,8 @@
 defmodule Breeze.Server.Inspector do
   @moduledoc false
 
+  alias Breeze.Server.Timeline
+
   def picks_mouse?(state), do: Breeze.Inspector.picks_mouse?(state)
 
   def select_target(state, %{button: :left, action: :press} = event) do
@@ -50,9 +52,25 @@ defmodule Breeze.Server.Inspector do
     |> Breeze.Inspector.sync_selected_id()
   end
 
-  def push_snapshot_now(%{inspector_state: %{config: false}} = state), do: state
+  def push_snapshot_now(state, opts \\ [])
 
-  def push_snapshot_now(%{inspector_state: %{subscribers: subscribers}} = state) do
+  def push_snapshot_now(%{inspector_state: %{config: false}} = state, _opts), do: state
+
+  def push_snapshot_now(%{inspector_state: %{subscribers: subscribers}} = state, opts) do
+    state =
+      if Keyword.get(opts, :timeline, false) do
+        Timeline.record_snapshot(
+          state,
+          :render,
+          %{
+            cause: get_in(state.debug.stats, [:last_render_cause])
+          },
+          frame: Keyword.get(opts, :timeline_frame)
+        )
+      else
+        state
+      end
+
     snapshot = Breeze.Inspector.snapshot(state)
     Breeze.RemoteInspector.publish(snapshot)
 

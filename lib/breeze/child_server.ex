@@ -11,6 +11,10 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, {:metadata, opts})
   end
 
+  def runtime_pids(pid, timeout \\ 1_000) do
+    GenServer.call(pid, :runtime_pids, timeout)
+  end
+
   def layout_snapshot(pid) do
     GenServer.call(pid, :layout_snapshot)
   end
@@ -96,6 +100,7 @@ defmodule Breeze.ChildServer do
       theme_source: theme_input,
       apply_theme_defaults?: apply_theme_defaults?,
       render_tree?: Keyword.get(opts, :render_tree?, false) == true,
+      timeline?: Keyword.get(opts, :timeline?, false) == true,
       global_keybindings: global_keybindings,
       assigns: initial_assigns,
       external_assigns: external_assigns
@@ -153,6 +158,10 @@ defmodule Breeze.ChildServer do
 
   def handle_call(:layout_snapshot, _from, term) do
     {:reply, %{elements: term.elements, mouse_targets: term.mouse_targets}, term}
+  end
+
+  def handle_call(:runtime_pids, _from, term) do
+    {:reply, child_runtime_pids(term), term}
   end
 
   def handle_call({:render, opts}, _from, term) do
@@ -264,6 +273,7 @@ defmodule Breeze.ChildServer do
         |> sync_theme_assigns()
         |> cascade_theme_if_changed(term)
 
+      maybe_notify_timeline_change(term, next_term, :info, %{message: :theme_palette, key: key})
       notify_invalidate(next_term)
       {:noreply, next_term}
     else
@@ -278,6 +288,7 @@ defmodule Breeze.ChildServer do
 
   def handle_info({:breeze_flash_timeout, id, token}, term) do
     next_term = Breeze.View.__expire_flash__(term, id, token)
+    maybe_notify_timeline_change(term, next_term, :info, %{message: :flash_timeout, id: id})
     notify_invalidate(next_term)
     {:noreply, next_term}
   end
@@ -288,21 +299,25 @@ defmodule Breeze.ChildServer do
     case term.view.handle_info(message, term) do
       {:noreply, next_term} ->
         next_term = cascade_info_theme_change(next_term, term)
+        maybe_notify_timeline_change(term, next_term, :info, %{message: message})
         notify_invalidate(next_term)
         {:noreply, next_term}
 
       {:noreply, next_term, opts} ->
         next_term = cascade_info_theme_change(next_term, term)
+        maybe_notify_timeline_change(term, next_term, :info, %{message: message})
         maybe_notify_invalidate(next_term, opts)
         {:noreply, next_term}
 
       {:stop, next_term} ->
         next_term = cascade_info_theme_change(next_term, term)
+        maybe_notify_timeline_change(term, next_term, :info, %{message: message})
         notify_invalidate(next_term)
         {:stop, :normal, next_term}
 
       {:stop, next_term, opts} ->
         next_term = cascade_info_theme_change(next_term, term)
+        maybe_notify_timeline_change(term, next_term, :info, %{message: message})
         maybe_notify_invalidate(next_term, opts)
         {:stop, :normal, next_term}
     end
@@ -1123,6 +1138,7 @@ defmodule Breeze.ChildServer do
         global_keybindings: term.global_keybindings,
         apply_theme_defaults?: term.apply_theme_defaults?,
         render_tree?: term.render_tree?,
+        timeline?: term.timeline?,
         invalidate: invalidate
       )
 
@@ -1177,6 +1193,26 @@ defmodule Breeze.ChildServer do
       |> Map.new()
 
     %{term | children: alive_children}
+  end
+
+  defp child_runtime_pids(term) do
+    children =
+      term.children
+      |> Map.values()
+      |> Enum.flat_map(fn
+        %{pid: pid} when is_pid(pid) ->
+          Breeze.ChildServer.runtime_pids(pid)
+
+        _child ->
+          []
+      end)
+
+    [self() | children]
+    |> Enum.filter(&(is_pid(&1) and Process.alive?(&1)))
+    |> Enum.uniq()
+  catch
+    :exit, _reason ->
+      [self()]
   end
 
   defp focused_child_chain(%{focused: nil}), do: []
@@ -1544,6 +1580,45 @@ defmodule Breeze.ChildServer do
       nil -> %{}
       id -> Map.get(term.implicit_meta, id, %{})
     end
+  end
+
+  defp notify_timeline(%{timeline?: true, server: server} = term, kind, detail)
+       when is_pid(server) do
+    send(server, {:breeze_timeline_event, self(), %{view: term.view, kind: kind, detail: detail}})
+    :ok
+  end
+
+  defp notify_timeline(_term, _kind, _detail), do: :ok
+
+  defp maybe_notify_timeline_change(previous_term, next_term, kind, detail) do
+    if timeline_state(previous_term) != timeline_state(next_term) do
+      notify_timeline(next_term, kind, detail)
+    end
+
+    :ok
+  end
+
+  defp timeline_state(term) do
+    Map.take(term, [
+      :assigns,
+      :external_assigns,
+      :theme,
+      :theme_source,
+      :global_keybindings,
+      :local_keybindings,
+      :focus_keybindings,
+      :focused,
+      :allow_unfocused?,
+      :focusables,
+      :focus_meta,
+      :focus_memory,
+      :events,
+      :implicit_state,
+      :retained_implicit_state,
+      :implicit_meta,
+      :children,
+      :apply_theme_defaults?
+    ])
   end
 
   defp notify_invalidate(term), do: notify_invalidate(term, nil)

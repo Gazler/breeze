@@ -398,7 +398,7 @@ Breeze.Example.run(
   theme: Breeze.Theme.builtin(:gruvbox),
   hide_cursor: true,
   mouse: [mode: :motion],
-  inspector: true,
+  inspector: [timeline: true],
   global_keybindings: [
     {"F3", "Cycle theme", &Breeze.View.cycle_theme/2},
     {"q", fn _event, term -> {:stop, term} end}

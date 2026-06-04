@@ -46,6 +46,11 @@ defmodule Breeze.RemoteInspectorTest do
       {:noreply, parent}
     end
 
+    def handle_cast({:select_inspector_timeline, selected}, parent) do
+      send(parent, {:selected_timeline, selected})
+      {:noreply, parent}
+    end
+
     def handle_call({:inspector_render_tree, opts}, _from, parent) do
       send(parent, {:inspector_render_tree, opts})
       kind = Keyword.get(opts, :kind, :rendered)
@@ -297,7 +302,8 @@ defmodule Breeze.RemoteInspectorTest do
         latest_source: nil,
         active_source: nil,
         render_tree_expanded: %{},
-        render_trees: %{}
+        render_trees: %{},
+        timeline_selected: %{}
       }
     }
 
@@ -331,6 +337,149 @@ defmodule Breeze.RemoteInspectorTest do
                %{term | local_keybindings: tree_keybindings}
              )
   end
+
+  test "remote inspector timeline tab can select a historical snapshot" do
+    {:ok, source_pid} = SelectCaptureServer.start_link(self())
+
+    on_exit(fn ->
+      if Process.alive?(source_pid), do: GenServer.stop(source_pid)
+    end)
+
+    key = {:app@host, inspect(source_pid)}
+
+    base_snapshot = %{
+      root_view: InspectorAppView,
+      source: %{node: :app@host, server_pid: source_pid, view_pid: source_pid},
+      theme: nil,
+      counts: %{elements: 1, focusables: 1, mouse_targets: 1, children: 0},
+      focus: %{active_scope: nil, focusables: ["button"], focus_memory: %{}},
+      selected: nil,
+      hovered: nil,
+      selected_id: "live",
+      hovered_id: nil,
+      focused: "live-focus",
+      last_render_at: 1_000,
+      last_interaction_at: 900,
+      render_tree?: false
+    }
+
+    historical_snapshot = %{
+      base_snapshot
+      | selected_id: "past",
+        focused: "past-focus"
+    }
+
+    snapshot =
+      Map.put(base_snapshot, :timeline, %{
+        enabled?: true,
+        count: 1,
+        next_id: 2,
+        frame: %{width: 20, height: 1, lines: ["LIVE FRAME"]},
+        entries: [
+          %{
+            id: 1,
+            kind: :input,
+            detail: "input: %{focused: \"past\"}",
+            frame: %{width: 20, height: 1, lines: ["PAST FRAME"]},
+            snapshot: historical_snapshot
+          }
+        ]
+      })
+
+    assigns = %{
+      snapshots: %{
+        key => %{
+          source: %{node: :app@host, pid: source_pid},
+          snapshot: snapshot,
+          updated_at: 1_000,
+          alive?: true
+        }
+      },
+      latest_source: key,
+      active_source: key,
+      panel_tab: "timeline",
+      render_tree_expanded: %{},
+      render_trees: %{},
+      timeline_selected: %{}
+    }
+
+    output =
+      Breeze.Renderer.render_to_string(
+        Breeze.RemoteInspector.View,
+        Map.put(assigns, :screen, %{width: 100, height: 32}),
+        theme: true,
+        terminal: %Termite.Terminal{size: %{width: 100, height: 40}}
+      )
+
+    assert output =~ "Timeline"
+    assert output =~ "timeline=enabled entries=1 selected=latest"
+    assert output =~ "#1 input"
+    refute output =~ "LIVE FRAME"
+    assert timeline_tree_loop_disabled?(assigns)
+
+    term = %Breeze.Term{view: Breeze.RemoteInspector.View, assigns: assigns}
+
+    assert {:noreply, term} =
+             Breeze.RemoteInspector.View.handle_event("timeline_changed", %{value: "1"}, term)
+
+    assert term.assigns.timeline_selected[key] == "1"
+    assert_receive {:selected_timeline, "1"}, 500
+
+    historical_output =
+      Breeze.Renderer.render_to_string(
+        Breeze.RemoteInspector.View,
+        assigns
+        |> Map.put(:timeline_selected, %{key => "1"})
+        |> Map.put(:screen, %{width: 100, height: 32}),
+        theme: true,
+        terminal: %Termite.Terminal{size: %{width: 100, height: 40}}
+      )
+
+    assert historical_output =~ "past-focus"
+    assert historical_output =~ "past"
+    assert historical_output =~ "timeline=enabled entries=1 selected=1"
+    refute historical_output =~ "PAST FRAME"
+
+    assert {:stop, _term} =
+             Breeze.RemoteInspector.View.quit(:quit, %{
+               term
+               | assigns: Map.put(term.assigns, :timeline_selected, %{key => "1"})
+             })
+
+    assert_receive {:selected_timeline, "latest"}, 500
+  end
+
+  defp timeline_tree_loop_disabled?(assigns) do
+    assigns = Map.put(assigns, :screen, %{width: 100, height: 32})
+
+    Breeze.RemoteInspector.View.render(assigns)
+    |> Breeze.Template.render_to_tree(assigns)
+    |> tree_with_attrs?(%{"id" => "remote-inspector-timeline", "tree-loop" => "false"})
+  end
+
+  defp tree_with_attrs?({tag, _, children}, attrs) when is_atom(tag) do
+    node_attrs =
+      children
+      |> Enum.flat_map(fn
+        {:attribute, [key, value]} -> [{key, value}]
+        {:attribute_bool, [key]} -> [{key, true}]
+        _ -> []
+      end)
+      |> Map.new()
+
+    attrs_match? =
+      Enum.all?(attrs, fn {key, value} ->
+        Map.get(node_attrs, key) == value
+      end)
+
+    attrs_match? or tree_with_attrs?(children, attrs)
+  end
+
+  defp tree_with_attrs?(nodes, attrs) when is_list(nodes) do
+    Enum.any?(nodes, &tree_with_attrs?(&1, attrs))
+  end
+
+  defp tree_with_attrs?(_node, _attrs), do: false
 
   test "remote inspector render tree selection updates expansion and delegates selection" do
     {:ok, source_pid} = SelectCaptureServer.start_link(self())

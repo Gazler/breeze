@@ -364,6 +364,90 @@ defmodule PostingTest do
     Process.exit(pid, :normal)
   end
 
+  test "posting inspector timeline is opt-in and records state changes" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: Posting,
+        terminal: terminal,
+        inspector: [timeline: true],
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    assert %{timeline: %{enabled?: true, entries: initial_entries}} =
+             Breeze.Server.inspector_snapshot(pid)
+
+    assert initial_entries == []
+
+    send(pid, {reader, {:data, "x"}})
+
+    wait_until(fn ->
+      snapshot = Breeze.Server.inspector_snapshot(pid)
+
+      Enum.any?(snapshot.timeline.entries, fn entry ->
+        entry.kind == :input and match?(%{snapshot: %{selected_id: _}}, entry)
+      end)
+    end)
+
+    snapshot = Breeze.Server.inspector_snapshot(pid)
+    assert snapshot.timeline.count == length(snapshot.timeline.entries)
+
+    assert Enum.all?(snapshot.timeline.entries, fn entry ->
+             Map.has_key?(entry, :snapshot) and Map.has_key?(entry, :changes) and
+               match?(%{lines: lines} when is_list(lines), entry.frame)
+           end)
+
+    first_entry = hd(snapshot.timeline.entries)
+
+    send(pid, {reader, {:data, "y"}})
+
+    wait_until(fn ->
+      Breeze.Server.inspector_snapshot(pid).timeline.count >= 2
+    end)
+
+    send(pid, {reader, {:data, "\eOP"}})
+
+    wait_until(fn ->
+      Breeze.Server.inspector_snapshot(pid).timeline.entries
+      |> Enum.any?(fn entry ->
+        String.contains?(entry.detail, "F1") or
+          Enum.any?(entry.changes, &String.contains?(&1.detail, "F1"))
+      end)
+    end)
+
+    live_snapshot = Breeze.Server.inspector_snapshot(pid)
+    latest_entry = List.last(live_snapshot.timeline.entries)
+    latest_lines = :sys.get_state(pid).frame.last_lines
+    refute latest_lines == first_entry.frame.lines
+
+    first_id = Integer.to_string(first_entry.id)
+    Breeze.Server.select_inspector_timeline(pid, first_id)
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      state.inspector_state.timeline_selected_id == first_id and
+        state.frame.last_lines == first_entry.frame.lines
+    end)
+
+    historical_state = :sys.get_state(pid)
+    assert historical_state.inspector_state.timeline_suspended_pids != []
+
+    Breeze.Server.select_inspector_timeline(pid, "latest")
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      state.inspector_state.timeline_selected_id == "latest" and
+        state.inspector_state.timeline_suspended_pids == [] and
+        state.frame.last_lines == latest_entry.frame.lines
+    end)
+
+    Process.exit(pid, :normal)
+  end
+
   test "posting inspector can be toggled and select an element with the mouse" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader
@@ -387,6 +471,7 @@ defmodule PostingTest do
     assert snapshot.enabled?
     assert snapshot.visible?
     assert snapshot.selected_id == "url"
+    refute Map.has_key?(snapshot, :timeline)
 
     bounds = :sys.get_state(pid).rendered.mouse_targets["method"]
     x = div(bounds.left + bounds.right, 2) + 1

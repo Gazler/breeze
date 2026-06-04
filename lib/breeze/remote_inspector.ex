@@ -132,8 +132,20 @@ defmodule Breeze.RemoteInspector do
   end
 
   def remote_server_pid do
-    Enum.find(members(), &(node(&1) != node()))
+    local = Process.whereis(Server)
+
+    Enum.find(members(), fn pid ->
+      (not is_pid(local) or pid != local) and not local_process?(pid) and node(pid) != node()
+    end)
   end
+
+  defp local_process?(pid) when is_pid(pid) do
+    not is_nil(:erlang.process_info(pid, :status))
+  rescue
+    ArgumentError -> false
+  end
+
+  defp local_process?(_pid), do: false
 
   defp ensure_remote_server_pid do
     remote_server_pid() ||
@@ -144,16 +156,26 @@ defmodule Breeze.RemoteInspector do
   end
 
   defp maybe_connect_default_inspector_node do
-    case default_inspector_node(node()) do
-      nil ->
-        false
+    if test_env?() do
+      false
+    else
+      case default_inspector_node(node()) do
+        nil ->
+          false
 
-      target when target == node() ->
-        false
+        target when target == node() ->
+          false
 
-      target ->
-        Node.connect(target)
+        target ->
+          Node.connect(target)
+      end
     end
+  end
+
+  defp test_env? do
+    Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0) and Mix.env() == :test
+  rescue
+    _ -> false
   end
 
   defp default_inspector_node(current_node) when is_atom(current_node) do

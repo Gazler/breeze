@@ -95,6 +95,7 @@ defmodule Breeze.Blocks do
       |> assign(selected_indicator: selected_indicator)
       |> assign(selected_indicator_width: selected_indicator_width)
       |> assign(item_visual_defaults: item_visual_defaults)
+      |> assign(loop_attr: implicit_bool_attr(assigns.loop))
       |> assign(class: merge_class(root_defaults, class_override(assigns)))
       |> assign(
         item_class:
@@ -115,7 +116,7 @@ defmodule Breeze.Blocks do
     <box
       id={@id}
       implicit={Breeze.Implicit.List}
-      list-loop={@loop}
+      list-loop={@loop_attr}
       list-scroll-padding={1}
       focusable
       class={@class}
@@ -329,6 +330,7 @@ defmodule Breeze.Blocks do
       |> assign(rows: rows)
       |> assign(implicit_rows: implicit_tree_rows(rows))
       |> assign(controlled_expanded?: controlled_expanded?)
+      |> assign(loop_attr: implicit_bool_attr(assigns.loop))
       |> assign(prefix_width: prefix_width)
       |> assign(
         class:
@@ -360,7 +362,7 @@ defmodule Breeze.Blocks do
     <box
       id={@id}
       implicit={Breeze.Implicit.Tree}
-      tree-loop={@loop}
+      tree-loop={@loop_attr}
       tree-selected={@selected}
       tree-expanded={@expanded}
       tree-default-expanded={@default_expanded}
@@ -961,6 +963,7 @@ defmodule Breeze.Blocks do
       assigns
       |> assign(columns: columns)
       |> assign(rows: rows)
+      |> assign(loop_attr: implicit_bool_attr(assigns.loop))
       |> assign(cell_class: "height-1 overflow-hidden selected:bg-primary selected:text-bg")
 
     ~H"""
@@ -978,7 +981,7 @@ defmodule Breeze.Blocks do
         id={@id}
         focusable
         implicit={Breeze.Implicit.List}
-        list-loop={@loop}
+        list-loop={@loop_attr}
         list-selected={@selected}
         list-scroll-padding={@scroll_padding}
         class="height-full width-full overflow-scroll scrollbar-arrows focus:scrollbar-primary"
@@ -2106,4 +2109,8 @@ defmodule Breeze.Blocks do
     |> String.graphemes()
     |> Enum.reduce(0, fn grapheme, total -> total + max(Ucwidth.width(grapheme), 0) end)
   end
+
+  defp implicit_bool_attr(true), do: "true"
+  defp implicit_bool_attr(false), do: "false"
+  defp implicit_bool_attr(value), do: value
 end

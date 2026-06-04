@@ -9,7 +9,14 @@ defmodule Snake do
     food = random_food(size, path)
 
     term =
-      assign(term, %{size: size, direction: :right, path: path, food: food, input_buffer: []})
+      assign(term, %{
+        size: size,
+        direction: :right,
+        path: path,
+        food: food,
+        input_buffer: [],
+        paused?: false
+      })
 
     if tick_ms = Keyword.get(opts, :tick_ms, 100) do
       :timer.send_interval(tick_ms, self(), :tick)
@@ -53,7 +60,13 @@ defmodule Snake do
   def handle_event(_, %{"key" => "ArrowDown"}, term), do: {:noreply, change_dir(term, :down)}
   def handle_event(_, %{"key" => "ArrowLeft"}, term), do: {:noreply, change_dir(term, :left)}
   def handle_event(_, %{"key" => "ArrowRight"}, term), do: {:noreply, change_dir(term, :right)}
+
+  def handle_event(_, %{"key" => key}, term) when key in ["p", "P"],
+    do: {:noreply, toggle_pause(term)}
+
   def handle_event(_, _, term), do: {:noreply, term}
+
+  def handle_info(:tick, %{assigns: %{paused?: true}} = term), do: {:noreply, term}
 
   def handle_info(:tick, term) do
     %{input_buffer: input_buffer, path: path, size: size, food: food} = term.assigns
@@ -113,6 +126,10 @@ defmodule Snake do
     end
   end
 
+  defp toggle_pause(term) do
+    assign(term, paused?: !term.assigns.paused?)
+  end
+
   defp random_food(size, path) do
     x = :rand.uniform(size.width)
     y = :rand.uniform(size.height) - 1
@@ -135,6 +152,7 @@ Breeze.Example.run(
   [
     view: Snake,
     hide_cursor: true,
+    inspector: [timeline: true],
     global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
   ],
   keep_alive: :infinity

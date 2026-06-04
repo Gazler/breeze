@@ -269,9 +269,14 @@ defmodule Breeze.ExampleSnapshotTest do
 
     on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert_snapshot(Breeze.Test.render!(session), "examples/snake/initial.ansi",
-      snapshot_dir: "../__snapshots__"
-    )
+    initial = Breeze.Test.render!(session)
+
+    assert_snapshot(initial, "examples/snake/initial.ansi", snapshot_dir: "../__snapshots__")
+
+    assert {:noreply, _focused, true} = Breeze.Test.event(session, nil, %{"key" => "p"})
+    assert {:noreply, _focused} = Breeze.Test.info(session, :tick)
+    assert Breeze.Test.render!(session) == initial
+    assert {:noreply, _focused, true} = Breeze.Test.event(session, nil, %{"key" => "p"})
 
     for _ <- 1..14 do
       assert {:noreply, _focused} = Breeze.Test.info(session, :tick)

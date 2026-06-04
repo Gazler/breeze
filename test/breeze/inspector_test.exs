@@ -90,6 +90,24 @@ defmodule Breeze.InspectorTest do
     assert snapshot.hovered.actual_id == "nested"
   end
 
+  test "snapshot only includes timeline data when timeline capture is enabled" do
+    state = base_state(%{inspector: true})
+    refute Map.has_key?(Inspector.snapshot(state), :timeline)
+
+    state =
+      base_state(%{
+        inspector_state: %State.Inspector{
+          config: [timeline: true],
+          visible?: true,
+          timeline_entries: [%{id: 1, kind: :render, detail: "cause=:init"}],
+          timeline_next_id: 2
+        }
+      })
+
+    assert %{timeline: %{enabled?: true, count: 1, entries: [%{id: 1, kind: :render}]}} =
+             Inspector.snapshot(state)
+  end
+
   test "snapshot falls back to the first explicit id before anonymous inspector nodes" do
     state =
       base_state(%{

@@ -33,6 +33,7 @@ defmodule Breeze.Term do
     frame_delay_ms: 16,
     render_timer: nil,
     render_tree?: false,
+    timeline?: false,
     apply_theme_defaults?: false
   ]
 end

@@ -4,6 +4,7 @@ defmodule Breeze.Server.State.Input do
   defstruct [
     :pending_ref,
     :pending_started_at,
+    :pending_message,
     :pending_sync_child_render_id,
     queued_input: :queue.new(),
     flush_scheduled?: false,
@@ -44,7 +45,12 @@ defmodule Breeze.Server.State.Inspector do
             selected_id: nil,
             hovered_id: nil,
             panel_position: :bottom,
-            subscribers: MapSet.new()
+            subscribers: MapSet.new(),
+            timeline_entries: [],
+            timeline_pending: [],
+            timeline_selected_id: "latest",
+            timeline_next_id: 1,
+            timeline_suspended_pids: []
 end
 
 defmodule Breeze.Server.State.Rendered do
