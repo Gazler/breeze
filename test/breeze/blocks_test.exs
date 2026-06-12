@@ -299,6 +299,52 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule WrappedVirtualUncontrolledTreeExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    @nodes [
+      %{
+        id: "root",
+        label: "root",
+        children: [
+          %{id: "src", label: "src", children: [%{id: "lib", label: "lib"}]},
+          %{id: "mix", label: "mix.exs"}
+        ]
+      }
+    ]
+
+    def mount(_opts, term), do: {:ok, term |> focus("files") |> assign(selected: "root")}
+
+    def tree_wrapper(assigns) do
+      ~H"""
+      <.tree
+        id="files"
+        nodes={@nodes}
+        selected={@selected}
+        default_expanded={["root"]}
+        virtual_window={4}
+        br-change="change"
+        style="width-20 height-6"
+      />
+      """
+    end
+
+    def render(assigns) do
+      assigns = assign(assigns, nodes: @nodes)
+
+      ~H"""
+      <.tree_wrapper nodes={@nodes} selected={@selected}/>
+      """
+    end
+
+    def handle_event("change", %{value: value}, term),
+      do: {:noreply, assign(term, selected: value)}
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule EmptyTreeExample do
     use Breeze.View
     import Breeze.Blocks
@@ -577,6 +623,20 @@ defmodule Breeze.BlocksTest do
 
   test "tree virtual window can use implicit-owned expanded state" do
     {:ok, pid} = ChildServer.start(view: VirtualUncontrolledTreeExample, start_opts: [])
+
+    {:ok, _acc, _box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    assert {:noreply, "files", true} = ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "files", true} = ChildServer.dispatch_input(pid, "Enter")
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    assert box.content =~ "⌄src"
+    assert box.content =~ "lib"
+  end
+
+  test "wrapped virtual tree can use implicit-owned expanded state" do
+    {:ok, pid} = ChildServer.start(view: WrappedVirtualUncontrolledTreeExample, start_opts: [])
 
     {:ok, _acc, _box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
 

@@ -201,12 +201,13 @@ defmodule Breeze.Template do
 
     attrs = eval_component_attrs(attrs, ctx)
     rest = Enum.filter(attrs, fn {key, _value} -> global_attr?(key) end)
+    caller_assigns = component_caller_assigns(ctx.assigns)
 
     assigns =
       attrs
       |> Map.new()
       |> maybe_put_rest(rest)
-      |> Map.put(:__breeze_caller_assigns__, ctx.assigns)
+      |> Map.put(:__breeze_caller_assigns__, caller_assigns)
       |> Map.merge(build_slots(children, ctx))
 
     {%__MODULE__{nodes: comp_nodes, env: comp_env}, comp_assigns} =
@@ -237,6 +238,12 @@ defmodule Breeze.Template do
 
     [{String.to_atom(name), [], attr_nodes ++ child_nodes}]
   end
+
+  defp component_caller_assigns(%{__breeze_caller_assigns__: caller_assigns})
+       when is_map(caller_assigns),
+       do: caller_assigns
+
+  defp component_caller_assigns(assigns), do: assigns
 
   defp merge_text_nodes(nodes) do
     nodes
