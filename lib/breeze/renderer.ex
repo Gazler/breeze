@@ -78,9 +78,11 @@ defmodule Breeze.Renderer do
   end
 
   defp put_breeze_render_context(assigns, opts) when is_map(assigns) do
-    Map.update(assigns, :breeze, render_context(opts), fn
-      breeze when is_map(breeze) -> Map.merge(breeze, render_context(opts))
-      _ -> render_context(opts)
+    context = render_context(opts)
+
+    Map.update(assigns, :breeze, Map.put(context, :flash, []), fn
+      breeze when is_map(breeze) -> breeze |> Map.merge(context) |> Map.put_new(:flash, [])
+      _ -> Map.put(context, :flash, [])
     end)
   end
 

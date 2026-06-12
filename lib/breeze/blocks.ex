@@ -1426,6 +1426,326 @@ defmodule Breeze.Blocks do
   defp maybe_append_dimension(class, :width, width), do: "#{class} width-#{width}"
   defp maybe_append_dimension(class, :height, height), do: "#{class} height-#{height}"
 
+  attr :id, :string, default: nil
+  attr :flash, :any, default: []
+  attr :variant, :string, default: "default", values: ["default", "square", "rounded"]
+  attr :placement, :string, default: "bottom-right"
+  attr :width, :integer, default: 40
+  attr :offset, :integer, default: 1
+  attr :gap, :integer, default: 1
+  attr :layer, :integer, default: 60
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :rest, :global
+
+  def flash_group(assigns) do
+    width = max(Map.get(assigns, :width, 40), 8)
+    gap = max(Map.get(assigns, :gap, 1), 0)
+    variant = flash_variant(Map.get(assigns, :variant, "default"))
+    gap = flash_variant_gap(gap, variant)
+    flash_entries = Breeze.Flash.entries(Map.get(assigns, :flash))
+
+    assigns =
+      assigns
+      |> assign(
+        flash_entries: flash_group_entries(flash_entries, assigns, gap, variant),
+        variant: variant,
+        width: width,
+        class:
+          merge_class(
+            flash_group_class(assigns, width),
+            class_override(assigns)
+          )
+      )
+
+    ~H"""
+    <box
+      :if={@flash_entries != []}
+      id={@id}
+      class={@class}
+      style={Breeze.Blocks.inline_style(assigns)}
+      {@rest}
+    >
+      <.flash
+        :for={flash <- @flash_entries}
+        id={flash.id}
+        kind={flash.kind}
+        title={Map.get(flash, :title)}
+        message={flash.message}
+        highlight={Map.get(flash, :highlight)}
+        variant={@variant}
+        width={@width}
+        class={flash.class}
+      />
+    </box>
+    """
+  end
+
+  defp flash_group_entries([], _assigns, _gap, _variant), do: []
+
+  defp flash_group_entries(entries, assigns, gap, variant) do
+    offset = max(Map.get(assigns, :offset, 1) || 0, 0)
+    layer = Map.get(assigns, :layer, 60)
+    item_offset = flash_item_initial_offset(Map.get(assigns, :placement, "bottom-right"), offset)
+
+    entries_with_heights = Enum.map(entries, &{&1, flash_entry_height(&1, variant)})
+    offsets = flash_item_offsets(entries_with_heights, item_offset, gap)
+
+    entries_with_heights
+    |> Enum.zip(offsets)
+    |> Enum.with_index()
+    |> Enum.map(fn {{{entry, _height}, item_offset}, index} ->
+      Map.put(
+        entry,
+        :class,
+        flash_item_class(item_offset, layer + index)
+      )
+    end)
+  end
+
+  defp flash_item_offsets(entries_with_heights, offset, gap) do
+    {offsets, _next_offset} =
+      Enum.reduce(entries_with_heights, {[], offset}, fn {_entry, height},
+                                                         {offsets, next_offset} ->
+        {[next_offset | offsets], next_offset + height + gap}
+      end)
+
+    Enum.reverse(offsets)
+  end
+
+  defp flash_item_initial_offset(placement, offset) do
+    case normalize_flash_placement(placement) do
+      placement when placement in [:top_left, :top_right] -> 0
+      _placement -> offset
+    end
+  end
+
+  defp flash_entry_height(entry, variant) do
+    padding = if variant == :square, do: 4, else: 2
+
+    flash_content_line_count(Map.get(entry, :title), Map.get(entry, :message)) + padding
+  end
+
+  defp flash_variant(variant) when variant in [:square, "square"], do: :square
+  defp flash_variant(variant) when variant in [:rounded, "rounded"], do: :rounded
+  defp flash_variant(_variant), do: :default
+
+  defp flash_variant_gap(gap, :square), do: max(gap - 1, 0)
+  defp flash_variant_gap(gap, _variant), do: gap
+
+  defp flash_item_class(offset, layer) do
+    "absolute left-0 top-#{offset} layer-#{layer}"
+  end
+
+  attr :id, :string, default: nil
+  attr :kind, :any, default: :info
+  attr :title, :string, default: nil
+  attr :message, :string, default: nil
+  attr :highlight, :any, default: nil
+  attr :variant, :any, default: :default
+  attr :width, :integer, default: 40
+  attr :class, :string, default: nil
+
+  defp flash(assigns) do
+    case flash_variant(Map.get(assigns, :variant, :default)) do
+      :square -> render_square_flash(assigns)
+      variant -> render_compact_flash(assigns, variant)
+    end
+  end
+
+  defp render_compact_flash(assigns, variant) do
+    kind = Map.get(assigns, :kind, :info)
+    highlight = Map.get(assigns, :highlight) || flash_color(kind)
+    highlight_width = 1
+    width = max(Map.get(assigns, :width, 40), highlight_width + 4)
+    body_width = max(width - highlight_width - 2, 1)
+    message = Map.get(assigns, :message) || ""
+    highlight_height = flash_content_line_count(Map.get(assigns, :title), message)
+    highlight_content = flash_highlight_content(Map.get(assigns, :title), message)
+
+    assigns =
+      assigns
+      |> assign(
+        highlight: highlight,
+        width: width,
+        message: message,
+        highlight_height: highlight_height,
+        highlight_content: highlight_content,
+        class:
+          merge_class(
+            "width-#{width} #{flash_compact_border_class(variant)} border-stroke bg-panel overflow-hidden",
+            Map.get(assigns, :class)
+          ),
+        highlight_class: "width-#{highlight_width} height-#{highlight_height} overflow-hidden",
+        highlight_style: flash_highlight_style(highlight),
+        body_class: "width-#{body_width} padding-left-1 padding-right-1 overflow-hidden",
+        title_class: "bold width-full overflow-hidden",
+        message_class: "width-full overflow-hidden"
+      )
+
+    ~H"""
+    <box id={@id} class={@class}>
+      <box class="inline width-full">
+        <box class={@highlight_class} style={@highlight_style}>{@highlight_content}</box>
+        <box class={@body_class}>
+          <box :if={@title} class={@title_class}>{@title}</box>
+          <box class={@message_class}>{@message}</box>
+        </box>
+      </box>
+    </box>
+    """
+  end
+
+  defp flash_compact_border_class(:rounded), do: "border-rounded"
+  defp flash_compact_border_class(_variant), do: "border"
+
+  defp render_square_flash(assigns) do
+    kind = Map.get(assigns, :kind, :info)
+    highlight = Map.get(assigns, :highlight) || flash_color(kind)
+    width = max(Map.get(assigns, :width, 40), 7)
+    body_width = max(width - 3, 1)
+    message = Map.get(assigns, :message) || ""
+    highlight_height = flash_content_line_count(Map.get(assigns, :title), message) + 2
+    highlight_content = flash_square_highlight_content(highlight_height)
+    right_border_content = flash_square_right_border_content(highlight_height)
+
+    assigns =
+      assigns
+      |> assign(
+        highlight: highlight,
+        width: width,
+        message: message,
+        highlight_height: highlight_height,
+        highlight_content: highlight_content,
+        right_border_content: right_border_content,
+        top_border_content: flash_square_horizontal_border_content("▁", width),
+        bottom_border_content: flash_square_horizontal_border_content("▔", width),
+        class:
+          merge_class(
+            "width-#{width}",
+            Map.get(assigns, :class)
+          ),
+        border_row_class: "width-#{width} height-1 text-stroke bg overflow-hidden",
+        highlight_class: "width-2 height-#{highlight_height} text-stroke overflow-hidden",
+        highlight_style: flash_highlight_style(highlight),
+        body_class:
+          "width-#{body_width} bg-panel padding-left-1 padding-right-1 padding-top-1 padding-bottom-1 overflow-hidden",
+        right_border_class:
+          "width-1 height-#{highlight_height} text-stroke bg-panel overflow-hidden",
+        title_class: "bold width-full overflow-hidden",
+        message_class: "width-full overflow-hidden"
+      )
+
+    ~H"""
+    <box id={@id} class={@class}>
+      <box class={@border_row_class}>{@top_border_content}</box>
+      <box class="inline width-full">
+        <box class={@highlight_class} style={@highlight_style}>{@highlight_content}</box>
+        <box class={@body_class}>
+          <box :if={@title} class={@title_class}>{@title}</box>
+          <box class={@message_class}>{@message}</box>
+        </box>
+        <box class={@right_border_class}>{@right_border_content}</box>
+      </box>
+      <box class={@border_row_class}>{@bottom_border_content}</box>
+    </box>
+    """
+  end
+
+  defp flash_highlight_style(highlight), do: %{background_color: highlight}
+
+  defp flash_highlight_content(title, message) do
+    rows = flash_content_line_count(title, message)
+
+    1..rows
+    |> Enum.map_join("\n", fn _ -> " " end)
+  end
+
+  defp flash_square_highlight_content(rows) do
+    1..rows
+    |> Enum.map_join("\n", fn _ -> "▌ " end)
+  end
+
+  defp flash_square_right_border_content(rows) do
+    1..rows
+    |> Enum.map_join("\n", fn _ -> "▐" end)
+  end
+
+  defp flash_square_horizontal_border_content(char, width) do
+    String.duplicate(char, width)
+  end
+
+  defp flash_content_line_count(title, message) do
+    max(title_line_count(title) + text_line_count(message), 1)
+  end
+
+  defp title_line_count(nil), do: 0
+  defp title_line_count(""), do: 0
+  defp title_line_count(title), do: text_line_count(title)
+
+  defp text_line_count(nil), do: 0
+  defp text_line_count(""), do: 0
+
+  defp text_line_count(value) do
+    lines = value |> to_string() |> String.split("\n")
+
+    if List.last(lines) == "" do
+      max(length(lines) - 1, 0)
+    else
+      length(lines)
+    end
+  end
+
+  defp flash_group_class(assigns, width) do
+    [
+      "fixed",
+      flash_placement(Map.get(assigns, :placement, "bottom-right"), Map.get(assigns, :offset, 1)),
+      "width-#{width}",
+      "layer-#{Map.get(assigns, :layer, 60)}"
+    ]
+    |> List.flatten()
+    |> Enum.join(" ")
+  end
+
+  defp flash_placement(placement, offset) do
+    offset = max(offset || 0, 0)
+
+    case normalize_flash_placement(placement) do
+      :top_left -> ["left-#{offset}", "top-#{offset}"]
+      :top_right -> ["right-#{offset}", "top-#{offset}"]
+      :bottom_left -> ["left-#{offset}", "bottom-#{offset}"]
+      _bottom_right -> ["right-#{offset}", "bottom-#{offset}"]
+    end
+  end
+
+  defp normalize_flash_placement(placement) do
+    case placement |> to_string() |> String.replace("-", "_") do
+      "top_left" -> :top_left
+      "top_right" -> :top_right
+      "bottom_left" -> :bottom_left
+      _ -> :bottom_right
+    end
+  end
+
+  defp flash_color(kind) do
+    case kind_name(kind) do
+      "error" -> "error"
+      "warning" -> "warning"
+      "success" -> "success"
+      "info" -> "primary"
+      _ -> "accent"
+    end
+  end
+
+  defp kind_name(nil), do: "info"
+
+  defp kind_name(kind) do
+    kind
+    |> to_string()
+    |> String.replace("_", "-")
+    |> String.downcase()
+  end
+
   attr :id, :string, required: true
   attr :width, :integer, default: nil
   attr :height, :integer, default: nil

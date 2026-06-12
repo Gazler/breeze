@@ -276,6 +276,12 @@ defmodule Breeze.ChildServer do
     {:noreply, term}
   end
 
+  def handle_info({:breeze_flash_timeout, id, token}, term) do
+    next_term = Breeze.View.__expire_flash__(term, id, token)
+    notify_invalidate(next_term)
+    {:noreply, next_term}
+  end
+
   def handle_info(message, term) do
     term = maybe_put_terminal(term, term.terminal)
 
@@ -383,6 +389,7 @@ defmodule Breeze.ChildServer do
       |> maybe_put_theme_assign(:actual_theme_mode, theme.mode)
       |> put_breeze_assign(:theme, breeze_theme_assign(term))
       |> put_breeze_assign(:keybindings, active_keybindings(term))
+      |> put_breeze_assign_new(:flash, [])
 
     %{term | assigns: assigns}
   end
@@ -407,6 +414,13 @@ defmodule Breeze.ChildServer do
   defp put_breeze_assign(assigns, key, value) do
     Map.update(assigns, :breeze, %{key => value}, fn
       breeze when is_map(breeze) -> Map.put(breeze, key, value)
+      _ -> %{key => value}
+    end)
+  end
+
+  defp put_breeze_assign_new(assigns, key, value) do
+    Map.update(assigns, :breeze, %{key => value}, fn
+      breeze when is_map(breeze) -> Map.put_new(breeze, key, value)
       _ -> %{key => value}
     end)
   end
