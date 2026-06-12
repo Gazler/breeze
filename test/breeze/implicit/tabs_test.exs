@@ -177,7 +177,7 @@ defmodule Breeze.Implicit.TabsTest do
       x = div(bounds.left + bounds.right, 2) + 1
       y = div(bounds.top + bounds.bottom, 2) + 1
 
-      assert {_status, _focused, _changed} =
+      assert {_status, "tabs", _changed} =
                Breeze.ChildServer.dispatch_input(pid, %{
                  "mouse" => %{button: :left, action: :press, x: x, y: y, modifiers: []}
                })
@@ -189,6 +189,7 @@ defmodule Breeze.Implicit.TabsTest do
                Breeze.ChildServer.metadata(pid)
 
       assert state.selected == "details"
+      assert Breeze.ChildServer.metadata(pid).focused == "tabs"
     end
   end
 end

@@ -520,6 +520,77 @@ defmodule Breeze.Storybook.ViewTest do
     assert plain_content =~ " Muted  Accent "
   end
 
+  test "list story mouse wheel scrolls the preview list without changing selection" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    select_story!(pid, "list")
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    child = :sys.get_state(pid).children["storybook-preview"].pid
+
+    {Breeze.Implicit.List, before_list} =
+      :sys.get_state(child).implicit_state["storybook-list-muted"]
+
+    preview_bounds = Breeze.ChildServer.layout_snapshot(pid).mouse_targets["storybook-preview"]
+
+    assert {:noreply, "storybook-nav", true} =
+             Breeze.ChildServer.dispatch_input(pid, %{
+               "mouse" => %{
+                 button: :wheel_down,
+                 action: :press,
+                 x: preview_bounds.left + div(preview_bounds.width, 2) + 1,
+                 y: preview_bounds.top + 3,
+                 modifiers: []
+               }
+             })
+
+    {Breeze.Implicit.List, after_list} =
+      :sys.get_state(child).implicit_state["storybook-list-muted"]
+
+    {Breeze.Implicit.List, nav} = :sys.get_state(pid).implicit_state["storybook-nav"]
+
+    assert after_list.offset == before_list.offset + 1
+    assert after_list.selected == before_list.selected
+    assert after_list.selected_index == before_list.selected_index
+    assert nav.selected == "list"
+    assert :sys.get_state(pid).assigns.current_story_id == "list"
+    assert Breeze.ChildServer.metadata(pid).focused == "storybook-nav"
+  end
+
+  test "table story mouse wheel scrolls the preview table without changing selection" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    select_story!(pid, "table")
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    child = :sys.get_state(pid).children["storybook-preview"].pid
+    {Breeze.Implicit.List, before_table} = :sys.get_state(child).implicit_state["storybook-table"]
+    preview_bounds = Breeze.ChildServer.layout_snapshot(pid).mouse_targets["storybook-preview"]
+
+    assert {:noreply, "storybook-nav", true} =
+             Breeze.ChildServer.dispatch_input(pid, %{
+               "mouse" => %{
+                 button: :wheel_down,
+                 action: :press,
+                 x: preview_bounds.left + div(preview_bounds.width, 2) + 1,
+                 y: preview_bounds.top + 4,
+                 modifiers: []
+               }
+             })
+
+    {Breeze.Implicit.List, after_table} = :sys.get_state(child).implicit_state["storybook-table"]
+
+    assert after_table.offset == before_table.offset + 1
+    assert after_table.selected == before_table.selected
+    assert after_table.selected_index == before_table.selected_index
+    assert :sys.get_state(child).assigns.selected_city == "delhi"
+    assert :sys.get_state(pid).assigns.current_story_id == "table"
+  end
+
   test "Ctrl+Up and Ctrl+Down navigate stories regardless of current focus" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
@@ -741,6 +812,58 @@ defmodule Breeze.Storybook.ViewTest do
              Enum.to_list((viewport.top + 1)..(viewport.top + viewport.height))
   end
 
+  test "storybook server routes mouse clicks to tabs inside the preview" do
+    {terminal, pid} = start_storybook_server!("tabs.story.exs", mouse: true)
+    reader = terminal.reader
+
+    {preview_pid, viewport} = wait_for_preview_child(pid, "tabs")
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)
+    assert :sys.get_state(preview_pid).assigns.selected_tab == "headers"
+
+    body =
+      Breeze.ChildServer.layout_snapshot(preview_pid).mouse_targets["storybook-tabs-tab-body"]
+
+    send_mouse(pid, reader, 0, viewport.left + body.left + 1, viewport.top + body.top + 1)
+
+    wait_until(fn ->
+      :sys.get_state(preview_pid).assigns.selected_tab == "body"
+    end)
+
+    assert :sys.get_state(pid).focused == "storybook-preview::storybook-tabs"
+  end
+
+  test "storybook server routes mouse wheel to scrollable preview stories" do
+    for {file, story_id, implicit_id, state_key} <- [
+          {"list.story.exs", "list", "storybook-list-muted", :offset},
+          {"scroll.story.exs", "scroll", "storybook-scroll", :offset_y},
+          {"table.story.exs", "table", "storybook-table", :offset}
+        ] do
+      {terminal, pid} = start_storybook_server!(file, mouse: true)
+      reader = terminal.reader
+
+      {preview_pid, viewport} = wait_for_preview_child(pid, story_id)
+
+      assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)
+
+      {_, before_state} = :sys.get_state(preview_pid).implicit_state[implicit_id]
+      target = Breeze.ChildServer.layout_snapshot(preview_pid).mouse_targets[implicit_id]
+
+      send_mouse(
+        pid,
+        reader,
+        65,
+        viewport.left + min(target.left + 2, target.right) + 1,
+        viewport.top + min(target.top + 1, target.bottom) + 1
+      )
+
+      wait_until(fn ->
+        {_, after_state} = :sys.get_state(preview_pid).implicit_state[implicit_id]
+        Map.fetch!(after_state, state_key) > Map.fetch!(before_state, state_key)
+      end)
+    end
+  end
+
   test "storybook preview child patches clear the full viewport height when the list selection changes" do
     {terminal, pid} = start_storybook_server!("list.story.exs")
 
@@ -830,19 +953,25 @@ defmodule Breeze.Storybook.ViewTest do
     end
   end
 
-  defp start_storybook_server!(file) do
+  defp start_storybook_server!(file, opts \\ []) do
     terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      [
         view: Breeze.Storybook.View,
         terminal: terminal,
         start_opts: [directory: "storybook", file: file]
-      )
+      ]
+      |> Keyword.merge(opts)
+      |> Breeze.Server.start_app_link()
 
     on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
 
     {terminal, pid}
+  end
+
+  defp send_mouse(pid, reader, code, x, y) do
+    send(pid, {reader, {:data, "\e[<#{code};#{x};#{y}M"}})
   end
 
   defp wait_for_preview_child(pid, story_id) do
