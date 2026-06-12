@@ -3,6 +3,7 @@ defmodule Breeze.BlocksTest do
 
   alias Breeze.Blocks
   alias Breeze.ChildServer
+  alias Breeze.Renderer
 
   defmodule UnderlineTabsExample do
     use Breeze.View
@@ -106,6 +107,168 @@ defmodule Breeze.BlocksTest do
 
     def handle_event(_, _, term), do: {:noreply, term}
     def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule FlashGroupExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen">
+        <box>Page body</box>
+        <.flash_group id="flash-stack" flash={@flash} width={28} offset={0}/>
+      </box>
+      """
+    end
+  end
+
+  defmodule FlashGapExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      assigns =
+        assign(assigns,
+          variant: Map.get(assigns, :variant, "default"),
+          gap: Map.get(assigns, :gap, 1)
+        )
+
+      ~H"""
+      <box class="width-screen height-screen bg">
+        <box class="width-screen height-screen bg-primary content-repeat">.</box>
+        <.flash_group
+          id="flash-stack"
+          flash={@flash}
+          variant={@variant}
+          width={20}
+          offset={0}
+          gap={@gap}
+        />
+      </box>
+      """
+    end
+  end
+
+  defmodule FlashSlotExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen">
+        <.flash_group
+          flash={[%{id: "slot-flash", kind: :warning, highlight: "warning", message: "Careful now"}]}
+          placement="top-left"
+          width={24}
+          offset={0}
+        />
+      </box>
+      """
+    end
+  end
+
+  defmodule FlashDefaultTopOffsetExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen">
+        <.flash_group
+          id="flash-stack"
+          flash={[%{id: "default-top-flash", kind: :info, message: "Offset once"}]}
+          placement="top-left"
+          width={24}
+        />
+      </box>
+      """
+    end
+  end
+
+  defmodule FlashTitledExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen">
+        <.flash_group
+          flash={[
+        %{
+          id: "titled-flash",
+          kind: :success,
+          highlight: "accent",
+          title: "Saved",
+          message: "Draft persisted"
+        }
+      ]}
+          placement="top-left"
+          width={24}
+          offset={0}
+        />
+      </box>
+      """
+    end
+  end
+
+  defmodule FlashSquareBorderExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen">
+        <.flash_group
+          flash={[
+        %{
+          id: "square-flash",
+          kind: :warning,
+          highlight: "warning",
+          title: "Saved #12",
+          message: "Draft synced"
+        }
+      ]}
+          placement="top-left"
+          variant="square"
+          width={25}
+          offset={0}
+        />
+      </box>
+      """
+    end
+  end
+
+  defmodule FlashCustomColorExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen">
+        <.flash_group flash={@flash} placement="top-left" width={18} offset={0}/>
+      </box>
+      """
+    end
+  end
+
+  defmodule FlashRoundedBorderExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen">
+        <.flash_group
+          flash={[%{id: "rounded-flash", kind: :info, message: "Rounded"}]}
+          placement="top-left"
+          variant="rounded"
+          width={20}
+          offset={0}
+        />
+      </box>
+      """
+    end
   end
 
   defmodule MutedListExample do
@@ -289,6 +452,52 @@ defmodule Breeze.BlocksTest do
         br-change="change"
         style="width-20 height-6"
       />
+      """
+    end
+
+    def handle_event("change", %{value: value}, term),
+      do: {:noreply, assign(term, selected: value)}
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule WrappedVirtualUncontrolledTreeExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    @nodes [
+      %{
+        id: "root",
+        label: "root",
+        children: [
+          %{id: "src", label: "src", children: [%{id: "lib", label: "lib"}]},
+          %{id: "mix", label: "mix.exs"}
+        ]
+      }
+    ]
+
+    def mount(_opts, term), do: {:ok, term |> focus("files") |> assign(selected: "root")}
+
+    def tree_wrapper(assigns) do
+      ~H"""
+      <.tree
+        id="files"
+        nodes={@nodes}
+        selected={@selected}
+        default_expanded={["root"]}
+        virtual_window={4}
+        br-change="change"
+        style="width-20 height-6"
+      />
+      """
+    end
+
+    def render(assigns) do
+      assigns = assign(assigns, nodes: @nodes)
+
+      ~H"""
+      <.tree_wrapper nodes={@nodes} selected={@selected}/>
       """
     end
 
@@ -485,6 +694,192 @@ defmodule Breeze.BlocksTest do
     assert box.content =~ ~r/\e\[[0-9;]*38;5;4mDetails/
   end
 
+  test "flash_group renders a fixed bottom-right stack with custom highlights" do
+    flash = [
+      %{id: "saved", kind: :success, message: "Saved draft", highlight: "accent"},
+      %{id: "publish-error", kind: :error, title: "Publish failed", message: "Try again"}
+    ]
+
+    {acc, box} =
+      Renderer.render(FlashGroupExample, %{flash: flash},
+        terminal: %Termite.Terminal{size: %{width: 60, height: 12}}
+      )
+
+    stack = Map.fetch!(acc.boxes, "flash-stack")
+    assert stack.position == :fixed
+    assert stack.right == 0
+    assert stack.bottom == 0
+
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    assert plain_content =~ "Page body"
+    assert plain_content =~ "Saved draft"
+    assert plain_content =~ "Publish failed"
+    assert plain_content =~ "Try again"
+    assert box.content =~ ~r/\e\[[0-9;]*48;5;5(?:;|m)/
+  end
+
+  test "flash item component stays private" do
+    Code.ensure_loaded!(Breeze.Blocks)
+
+    assert function_exported?(Breeze.Blocks, :flash_group, 1)
+    refute function_exported?(Breeze.Blocks, :flash, 1)
+    refute :flash in Breeze.Blocks.__breeze_components__()
+  end
+
+  test "flash_group leaves gaps transparent over existing content" do
+    flash = [
+      %{id: "one", kind: :info, message: "One"},
+      %{id: "two", kind: :info, message: "Two"}
+    ]
+
+    {_acc, box} =
+      Renderer.render(FlashGapExample, %{flash: flash},
+        terminal: %Termite.Terminal{size: %{width: 30, height: 10}}
+      )
+
+    assert {".", gap_style} = Map.fetch!(box.layer_map, {6, 10})
+    assert gap_style =~ "48;5;4"
+  end
+
+  test "square flash_group subtracts one row from the configured gap" do
+    flash = [
+      %{id: "one", kind: :info, message: "One"},
+      %{id: "two", kind: :info, message: "Two"}
+    ]
+
+    {_acc, box} =
+      Renderer.render(FlashGapExample, %{flash: flash, variant: "square"},
+        terminal: %Termite.Terminal{size: %{width: 30, height: 12}}
+      )
+
+    assert {"▔", bottom_border_style} = Map.fetch!(box.layer_map, {6, 10})
+    refute bottom_border_style =~ "49m"
+
+    {_acc, box} =
+      Renderer.render(FlashGapExample, %{flash: flash, variant: "square", gap: 2},
+        terminal: %Termite.Terminal{size: %{width: 30, height: 12}}
+      )
+
+    assert {".", gap_style} = Map.fetch!(box.layer_map, {6, 10})
+    assert gap_style =~ "48;5;4"
+
+    assert {"▁", top_border_style} = Map.fetch!(box.layer_map, {1, 10})
+    refute top_border_style =~ "49m"
+    assert top_border_style =~ ~r/48;(?:5|2);/
+  end
+
+  test "flash_group renders message content and semantic warning highlight" do
+    {acc, box} = Renderer.render(FlashSlotExample, %{})
+
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    assert plain_content =~ "Careful now"
+    assert box.content =~ ~r/\e\[[0-9;]*48;5;3(?:;|m)/
+
+    flash_box = Map.fetch!(acc.boxes, "slot-flash")
+    inline_box = hd(flash_box.children)
+    [highlight_box, body_box] = inline_box.children
+
+    assert flash_box.style.border.top == "─"
+    assert flash_box.style.border.top_left == "┌"
+    assert highlight_box.style.width == 1
+    assert body_box.style.width == 21
+  end
+
+  test "flash_group applies the default top offset once" do
+    {acc, box} = Renderer.render(FlashDefaultTopOffsetExample, %{})
+
+    stack_box = Map.fetch!(acc.boxes, "flash-stack")
+    flash_box = Map.fetch!(acc.boxes, "default-top-flash")
+
+    assert stack_box.top == 1
+    assert flash_box.top == 0
+    assert {"┌", _style} = Map.fetch!(box.layer_map, {1, 1})
+    refute match?({"┌", _style}, Map.get(box.layer_map, {2, 1}))
+  end
+
+  test "flash highlight fills the message content height" do
+    {_acc, box} = Renderer.render(FlashTitledExample, %{})
+
+    assert {" ", first_row_style} = Map.fetch!(box.layer_map, {1, 1})
+    assert {" ", second_row_style} = Map.fetch!(box.layer_map, {2, 1})
+
+    assert first_row_style =~ "48;5;5"
+    assert second_row_style =~ "48;5;5"
+  end
+
+  test "flash_group can use square block borders with a padded color strip" do
+    {acc, box} = Renderer.render(FlashSquareBorderExample, %{})
+
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    assert plain_content =~ "▁▁▁▁▁"
+    assert plain_content =~ "▔▔▔▔▔"
+    assert plain_content =~ "Saved #12"
+    assert plain_content =~ "Draft synced"
+
+    flash_box = Map.fetch!(acc.boxes, "square-flash")
+    assert flash_box.style.border == BackBreeze.Border.none()
+
+    assert {"▌", border_strip_style} = Map.fetch!(box.layer_map, {1, 0})
+    assert {" ", inner_strip_style} = Map.fetch!(box.layer_map, {1, 1})
+    assert {"▌", text_row_strip_style} = Map.fetch!(box.layer_map, {2, 0})
+
+    assert border_strip_style =~ "48;5;3"
+    assert border_strip_style =~ "38;5;7"
+    assert inner_strip_style =~ "48;5;3"
+    assert text_row_strip_style =~ "48;5;3"
+
+    assert {"▁", top_border_style} = Map.fetch!(box.layer_map, {0, 0})
+    assert {"▔", bottom_border_style} = Map.fetch!(box.layer_map, {5, 0})
+
+    refute top_border_style =~ "49m"
+    refute bottom_border_style =~ "49m"
+    assert top_border_style =~ ~r/48;(?:5|2);/
+    assert bottom_border_style =~ ~r/48;(?:5|2);/
+  end
+
+  test "square flash_group block borders use the active theme background" do
+    {_acc, box} =
+      Renderer.render(FlashSquareBorderExample, %{}, theme: Breeze.Theme.builtin(:gruvbox))
+
+    assert {"▁", top_border_style} = Map.fetch!(box.layer_map, {0, 0})
+
+    refute top_border_style =~ "49m"
+    assert top_border_style =~ "48;2;40;40;40"
+
+    assert {"▐", right_border_style} = Map.fetch!(box.layer_map, {1, 24})
+    assert right_border_style =~ "48;2;50;48;47"
+  end
+
+  test "flash_group supports custom hex and RGB tuple highlight colors" do
+    {_acc, hex_box} =
+      Renderer.render(FlashCustomColorExample, %{
+        flash: [%{id: "hex-flash", kind: :info, message: "Hex", highlight: "#f0a"}]
+      })
+
+    assert {" ", hex_highlight_style} = Map.fetch!(hex_box.layer_map, {1, 1})
+    assert hex_highlight_style =~ "48;2;255;0;170"
+
+    {_acc, rgb_box} =
+      Renderer.render(FlashCustomColorExample, %{
+        flash: [%{id: "rgb-flash", kind: :info, message: "RGB", color: {1, 2, 3}}]
+      })
+
+    assert {" ", rgb_highlight_style} = Map.fetch!(rgb_box.layer_map, {1, 1})
+    assert rgb_highlight_style =~ "48;2;1;2;3"
+  end
+
+  test "flash_group can use rounded borders" do
+    {acc, box} = Renderer.render(FlashRoundedBorderExample, %{})
+
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    assert plain_content =~ "Rounded"
+
+    flash_box = Map.fetch!(acc.boxes, "rounded-flash")
+    assert flash_box.style.border.top == "─"
+    assert flash_box.style.border.top_left == "╭"
+    assert flash_box.style.border.bottom_right == "╯"
+  end
+
   test "list can render muted while unfocused and restore active colors on focus" do
     {:ok, pid} =
       ChildServer.start(
@@ -577,6 +972,20 @@ defmodule Breeze.BlocksTest do
 
   test "tree virtual window can use implicit-owned expanded state" do
     {:ok, pid} = ChildServer.start(view: VirtualUncontrolledTreeExample, start_opts: [])
+
+    {:ok, _acc, _box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    assert {:noreply, "files", true} = ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:noreply, "files", true} = ChildServer.dispatch_input(pid, "Enter")
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    assert box.content =~ "⌄src"
+    assert box.content =~ "lib"
+  end
+
+  test "wrapped virtual tree can use implicit-owned expanded state" do
+    {:ok, pid} = ChildServer.start(view: WrappedVirtualUncontrolledTreeExample, start_opts: [])
 
     {:ok, _acc, _box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
 

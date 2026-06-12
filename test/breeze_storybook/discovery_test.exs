@@ -25,4 +25,10 @@ defmodule Breeze.Storybook.DiscoveryTest do
     assert Enum.map(stories, & &1.id) == ["dropdown"]
     assert %{id: "dropdown"} = Registry.first_story("storybook", file: "dropdown.story.exs")
   end
+
+  test "flash story covers each flash_group variant" do
+    [%{id: "flash", variants: variants}] = Registry.stories("storybook", file: "flash.story.exs")
+
+    assert Enum.map(variants, & &1.id) == ["default", "square", "rounded"]
+  end
 end
