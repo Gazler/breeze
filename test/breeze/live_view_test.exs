@@ -912,6 +912,23 @@ defmodule Breeze.LiveViewTest do
     end
   end
 
+  defmodule InlineLivePatchRoot do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <box style="inline">
+        <live id="left" view={CounterChild} start_opts={[]}>
+        </live>
+        <live id="right" view={CounterChild} start_opts={[]}>
+        </live>
+      </box>
+      """
+    end
+  end
+
   test "root child tab traverses namespaced live child focusables" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, left_pid} = ChildServer.start(view: CounterChild, start_opts: [], terminal: terminal)
@@ -2127,6 +2144,53 @@ defmodule Breeze.LiveViewTest do
 
     assert Enum.any?(writes, &String.starts_with?(&1, "\e[3;1H"))
     refute Enum.any?(writes, &String.starts_with?(&1, "\e[5;1H"))
+
+    Process.exit(pid, :normal)
+  end
+
+  test "sibling live child patch payload starts at the invalidated child viewport" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: InlineLivePatchRoot,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      Map.has_key?(state.children, "right") and Map.has_key?(state.rendered.elements, "right")
+    end)
+
+    state = :sys.get_state(pid)
+    right = state.children["right"]
+    viewport = state.rendered.elements["right"]
+    assert viewport.left > 0
+    drain_terminal_writes()
+
+    assert {:noreply, _focused, true} = Breeze.ChildServer.dispatch_input(right.pid, "+")
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      state.debug.stats[:last_render_cause] == :child_patch
+    end)
+
+    payload =
+      wait_until(fn ->
+        writes = drain_terminal_writes()
+        payload = IO.iodata_to_binary(writes)
+
+        if payload =~ "Count: 2" do
+          payload
+        else
+          false
+        end
+      end)
+
+    expected_position = "\e[#{viewport.top + 1};#{viewport.left + 1}H"
+    refute String.contains?(payload, "\e[#{viewport.top + 1};1H")
+    assert String.contains?(payload, expected_position)
 
     Process.exit(pid, :normal)
   end

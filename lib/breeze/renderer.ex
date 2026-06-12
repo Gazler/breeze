@@ -70,6 +70,7 @@ defmodule Breeze.Renderer do
         BackBreeze.Box.render_with_dimensions(box, opts)
       end)
 
+    acc = maybe_refresh_live_dimensions(root_tag, root_children, opts, acc)
     box = maybe_dim_screen_backdrop(box, acc, dimensions, root_children, opts)
 
     emit_metric(profile_scope, profile_label, :element_count, map_size(acc.elements))
@@ -844,31 +845,137 @@ defmodule Breeze.Renderer do
   defp maybe_attach_live_viewports(root_tag, root_children, opts) do
     case Keyword.get(opts, :live_view) do
       fun when is_function(fun, 2) ->
-        placeholder_opts = Keyword.put(opts, :live_placeholder, true)
-
-        {placeholder_acc, placeholder_box} =
-          build_from_tree_nodes(root_tag, root_children, placeholder_opts)
-
-        %{dimensions: dimensions} =
-          BackBreeze.Box.render_with_dimensions(placeholder_box, placeholder_opts)
-
-        live_viewports =
-          placeholder_acc.elements
-          |> Enum.sort()
-          |> Enum.zip(dimensions)
-          |> Enum.reduce(%{}, fn {{_idx, flags}, dims}, acc ->
-            if Keyword.get(flags, :__live_placeholder__) do
-              Map.put(acc, Keyword.fetch!(flags, :id), dims)
-            else
-              acc
-            end
-          end)
-
-        Keyword.put(opts, :live_viewports, live_viewports)
+        Keyword.put(
+          opts,
+          :live_viewports,
+          live_placeholder_viewports(root_tag, root_children, opts)
+        )
 
       _ ->
         opts
     end
+  end
+
+  defp maybe_refresh_live_dimensions(root_tag, root_children, opts, acc) do
+    case Keyword.get(opts, :live_view) do
+      fun when is_function(fun, 2) ->
+        root_dimensions = live_root_dimensions(root_tag, root_children, opts, acc.live_dimensions)
+
+        if root_dimensions == %{} do
+          acc
+        else
+          live_viewports =
+            opts
+            |> Keyword.put(:live_placeholder_dimensions, root_dimensions)
+            |> then(&live_placeholder_viewports(root_tag, root_children, &1))
+
+          %{acc | live_dimensions: shift_live_dimensions(acc.live_dimensions, live_viewports)}
+        end
+
+      _ ->
+        acc
+    end
+  end
+
+  defp live_placeholder_viewports(root_tag, root_children, opts) do
+    placeholder_opts = Keyword.put(opts, :live_placeholder, true)
+
+    {placeholder_acc, placeholder_box} =
+      build_from_tree_nodes(root_tag, root_children, placeholder_opts)
+
+    %{dimensions: dimensions} =
+      BackBreeze.Box.render_with_dimensions(placeholder_box, placeholder_opts)
+
+    placeholder_acc.elements
+    |> Enum.sort()
+    |> Enum.zip(dimensions)
+    |> Enum.reduce(%{}, fn {{_idx, flags}, dims}, acc ->
+      if Keyword.get(flags, :__live_placeholder__) do
+        Map.put(acc, Keyword.fetch!(flags, :id), dims)
+      else
+        acc
+      end
+    end)
+  end
+
+  defp live_root_dimensions(root_tag, root_children, opts, live_dimensions) do
+    live_ids(root_tag, root_children, opts)
+    |> Enum.reduce(%{}, fn id, acc ->
+      case Map.get(live_dimensions, id) do
+        %{width: width, height: height} = dims
+        when is_integer(width) and width > 0 and is_integer(height) and height > 0 ->
+          Map.put(acc, id, dims)
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  defp live_ids(_root_tag, root_children, opts) do
+    collect_live_ids(root_children, Keyword.get(opts, :live_prefix), [])
+  end
+
+  defp collect_live_ids(nodes, prefix, acc) when is_list(nodes) do
+    Enum.reduce(nodes, acc, fn
+      {:live, attrs}, acc ->
+        [live_full_id(fetch_live_attr!(attrs, :id), live_prefix_opts(prefix)) | acc]
+
+      {_tag, _attrs, children}, acc when is_list(children) ->
+        collect_live_ids(children, prefix, acc)
+
+      _other, acc ->
+        acc
+    end)
+  end
+
+  defp collect_live_ids(_nodes, _prefix, acc), do: acc
+
+  defp live_prefix_opts(nil), do: []
+  defp live_prefix_opts(prefix), do: [live_prefix: prefix]
+
+  defp shift_live_dimensions(live_dimensions, live_viewports) do
+    Enum.reduce(live_viewports, live_dimensions, fn {id, next_root}, acc ->
+      case Map.get(acc, id) do
+        nil ->
+          acc
+
+        previous_root ->
+          dx = Map.get(next_root, :left, 0) - Map.get(previous_root, :left, 0)
+          dy = Map.get(next_root, :top, 0) - Map.get(previous_root, :top, 0)
+
+          Map.new(acc, fn {key, dims} ->
+            if key == id or String.starts_with?(key, id <> "::") do
+              {key, shift_live_dimension(key, id, dims, next_root, dx, dy)}
+            else
+              {key, dims}
+            end
+          end)
+      end
+    end)
+  end
+
+  defp shift_live_dimension(id, id, dims, next_root, _dx, _dy) do
+    Map.merge(dims, Map.take(next_root, dimension_keys()))
+  end
+
+  defp shift_live_dimension(_key, _id, dims, _next_root, dx, dy) do
+    dims
+    |> Map.update(:left, dx, &(&1 + dx))
+    |> Map.update(:top, dy, &(&1 + dy))
+  end
+
+  defp dimension_keys do
+    [
+      :left,
+      :top,
+      :width,
+      :height,
+      :viewport_width,
+      :viewport_height,
+      :content_width,
+      :content_height
+    ]
   end
 
   defp build_live_placeholder(attrs, flags, acc, opts, current_id) do
@@ -909,20 +1016,39 @@ defmodule Breeze.Renderer do
 
     base = [{:attribute, ["id", full_id]}]
 
-    attrs
-    |> Enum.reduce(base, fn
-      {key, value}, acc when key in [:class, "class"] and not is_nil(value) ->
-        acc ++ [{:attribute, ["class", value]}]
+    nodes =
+      attrs
+      |> Enum.reduce(base, fn
+        {key, value}, acc when key in [:class, "class"] and not is_nil(value) ->
+          acc ++ [{:attribute, ["class", value]}]
 
-      {key, value}, acc when key in [:style, "style"] and not is_nil(value) ->
-        acc ++ [{:attribute, ["style", value]}]
+        {key, value}, acc when key in [:style, "style"] and not is_nil(value) ->
+          acc ++ [{:attribute, ["style", value]}]
 
-      {key, true}, acc when key in [:focusable, "focusable"] ->
-        acc ++ [{:attribute_bool, ["focusable"]}]
+        {key, true}, acc when key in [:focusable, "focusable"] ->
+          acc ++ [{:attribute_bool, ["focusable"]}]
 
-      _, acc ->
-        acc
-    end)
+        _, acc ->
+          acc
+      end)
+
+    case live_placeholder_dimension_style(full_id, opts) do
+      nil -> nodes
+      style -> nodes ++ [{:attribute, ["style", style]}]
+    end
+  end
+
+  defp live_placeholder_dimension_style(full_id, opts) do
+    dimensions = Keyword.get(opts, :live_placeholder_dimensions, %{})
+
+    case Map.get(dimensions, full_id) do
+      %{width: width, height: height}
+      when is_integer(width) and width > 0 and is_integer(height) and height > 0 ->
+        %{width: width, height: height}
+
+      _ ->
+        nil
+    end
   end
 
   defp live_full_id(id, opts) do
