@@ -81,6 +81,21 @@ defmodule Breeze.StyleTest do
     assert element.style.border == BackBreeze.Border.none()
   end
 
+  test "supports border-square class" do
+    element =
+      Style.empty()
+      |> Style.put_class("border-square")
+      |> Style.to_element([])
+
+    assert element.style.border.style == :custom
+    assert element.style.border.top == "▁"
+    assert element.style.border.bottom == "▔"
+    assert element.style.border.left == "▌"
+    assert element.style.border.right == "▐"
+    assert element.style.border.top_left == "▁"
+    assert element.style.border.bottom_right == "▔"
+  end
+
   test "resolve_dimensions reads width and height from classes" do
     assert Style.resolve_dimensions("width-12 height-4", nil) == %{width: 12, height: 4}
   end

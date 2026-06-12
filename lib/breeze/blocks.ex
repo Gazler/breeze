@@ -1405,9 +1405,17 @@ defmodule Breeze.Blocks do
     |> String.split()
     |> Enum.reduce([], fn token, acc ->
       case token do
-        "border-" <> rest when rest not in ["rounded"] -> ["text-" <> rest | acc]
-        "focus:border-" <> rest -> ["focus:text-" <> rest | acc]
-        _ -> acc
+        "border-" <> rest when rest not in ["rounded", "square", "none", "invisible"] ->
+          ["text-" <> rest | acc]
+
+        "focus:border-" <> rest when rest not in ["rounded", "square", "none", "invisible"] ->
+          ["focus:text-" <> rest | acc]
+
+        "focus:border-" <> _rest ->
+          acc
+
+        _ ->
+          acc
       end
     end)
     |> Enum.reverse()
@@ -1665,6 +1673,7 @@ defmodule Breeze.Blocks do
             "border-none" -> false
             "border" -> true
             "border-rounded" -> true
+            "border-square" -> true
             "border-invisible" -> true
             _ -> border?
           end

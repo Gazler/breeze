@@ -406,6 +406,9 @@ defmodule Breeze.Style do
   defp apply_style("border-rounded", {style, attrs}, _theme),
     do: {BackBreeze.Style.border(style, :rounded), attrs}
 
+  defp apply_style("border-square", {style, attrs}, _theme),
+    do: {%{style | border: square_border()}, attrs}
+
   defp apply_style("border-" <> color, {style, attrs}, theme),
     do: {BackBreeze.Style.border_color(style, Theme.resolve_color(theme, color)), attrs}
 
@@ -647,7 +650,21 @@ defmodule Breeze.Style do
   defp normalize_border(:line), do: BackBreeze.Border.line()
   defp normalize_border(:invisible), do: BackBreeze.Border.invisible()
   defp normalize_border(:rounded), do: BackBreeze.Border.rounded()
+  defp normalize_border(:square), do: square_border()
   defp normalize_border(value), do: value
+
+  defp square_border do
+    BackBreeze.Border.custom(%{
+      top: "▁",
+      bottom: "▔",
+      left: "▌",
+      right: "▐",
+      top_left: "▁",
+      top_right: "▁",
+      bottom_left: "▔",
+      bottom_right: "▔"
+    })
+  end
 
   defp truthy?(value), do: value not in [false, nil]
 

@@ -114,6 +114,7 @@ defmodule Breeze.View do
   The following styles are supported:
 
    * `border` - add a line border to the box
+   * `border-square` - add a square block border to the box
    * `bold` - make the text bold
    * `italic` - make the text italic
    * `inverse` - reverse the foreground-background
