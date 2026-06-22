@@ -5,9 +5,12 @@ defmodule Breeze.RemoteInspector do
 
   @group {__MODULE__, :servers}
   @app_group {__MODULE__, :apps}
+  @page_config_key :remote_inspector_pages
+  @reserved_page_ids ~w(tree overview layout theme implicit timeline)
 
   def group, do: @group
   def app_group, do: @app_group
+  def reserved_page_ids, do: @reserved_page_ids
 
   def server_pid do
     ensure_remote_server_pid() || local_server_pid()
@@ -31,10 +34,197 @@ defmodule Breeze.RemoteInspector do
     end
   end
 
+  def pages do
+    :breeze
+    |> Application.get_env(@page_config_key, [])
+    |> normalize_pages()
+  end
+
+  def normalize_pages(config) do
+    config
+    |> normalize_page_config_list()
+    |> List.wrap()
+    |> Enum.flat_map(&normalize_page/1)
+    |> Enum.reject(&(&1.id in @reserved_page_ids))
+    |> Enum.uniq_by(& &1.id)
+  end
+
   def ensure_app_distribution(opts \\ []) do
     opts
     |> Keyword.put_new_lazy(:name, fn -> default_distribution_name(:app, opts) end)
     |> ensure_distribution()
+  end
+
+  defp normalize_page(module) when is_atom(module) do
+    module
+    |> module_page_config()
+    |> page_attrs()
+    |> Map.put(:module, module)
+    |> normalize_page_from_attrs()
+  end
+
+  defp normalize_page({module, opts}) when is_atom(module) and (is_list(opts) or is_map(opts)) do
+    module_attrs =
+      module
+      |> module_page_config()
+      |> page_attrs()
+
+    module_attrs
+    |> Map.merge(page_attrs(opts))
+    |> Map.put(:module, module)
+    |> normalize_page_from_attrs()
+  end
+
+  defp normalize_page({id, label, module}) when is_atom(module) do
+    %{id: id, label: label, module: module}
+    |> normalize_page_from_attrs()
+  end
+
+  defp normalize_page(config) when is_list(config) or is_map(config) do
+    config
+    |> page_attrs()
+    |> normalize_page_from_attrs()
+  end
+
+  defp normalize_page(_config), do: []
+
+  defp normalize_page_config_list(config) when is_list(config) do
+    if Keyword.keyword?(config) and Keyword.has_key?(config, :module) do
+      [config]
+    else
+      config
+    end
+  end
+
+  defp normalize_page_config_list(config), do: config
+
+  defp normalize_page_from_attrs(%{module: module} = attrs) when is_atom(module) do
+    if page_module?(module) do
+      id =
+        attrs
+        |> Map.get(:id, default_page_id(module))
+        |> normalize_page_id()
+
+      label =
+        attrs
+        |> Map.get(:label, humanize_page_id(id))
+        |> normalize_page_label()
+
+      if id && label do
+        config =
+          attrs
+          |> Map.get(:config, %{})
+          |> page_attrs()
+          |> Map.merge(Map.drop(attrs, [:id, :label, :module, :assigns, :config]))
+
+        page = %{
+          id: id,
+          label: label,
+          module: module,
+          assigns: normalize_page_assigns(Map.get(attrs, :assigns, %{})),
+          config: config
+        }
+
+        [page]
+      else
+        []
+      end
+    else
+      []
+    end
+  end
+
+  defp normalize_page_from_attrs(_attrs), do: []
+
+  defp page_module?(module) when is_atom(module) do
+    Code.ensure_loaded?(module) and function_exported?(module, :render, 1)
+  end
+
+  defp page_module?(_module), do: false
+
+  defp module_page_config(module) when is_atom(module) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :page, 0) do
+      module.page()
+    else
+      []
+    end
+  end
+
+  defp page_attrs(config) when is_map(config) do
+    config
+    |> Enum.map(fn {key, value} -> {page_attr_key(key), value} end)
+    |> Map.new()
+  end
+
+  defp page_attrs(config) when is_list(config) do
+    if Keyword.keyword?(config) do
+      config
+      |> Enum.map(fn {key, value} -> {page_attr_key(key), value} end)
+      |> Map.new()
+    else
+      %{}
+    end
+  end
+
+  defp page_attrs(_config), do: %{}
+
+  defp page_attr_key(key) when key in [:id, "id"], do: :id
+  defp page_attr_key(key) when key in [:label, "label"], do: :label
+  defp page_attr_key(key) when key in [:module, "module"], do: :module
+  defp page_attr_key(key) when key in [:assigns, "assigns"], do: :assigns
+  defp page_attr_key(key), do: key
+
+  defp normalize_page_id(id) when is_atom(id), do: id |> Atom.to_string() |> normalize_page_id()
+
+  defp normalize_page_id(id) when is_binary(id) do
+    id
+    |> String.trim()
+    |> String.replace(~r/[^a-zA-Z0-9_-]+/, "-")
+    |> String.trim("-")
+    |> String.downcase()
+    |> case do
+      "" -> nil
+      value -> value
+    end
+  end
+
+  defp normalize_page_id(id), do: id |> to_string() |> normalize_page_id()
+
+  defp normalize_page_label(label) when is_binary(label) do
+    case String.trim(label) do
+      "" -> nil
+      value -> value
+    end
+  end
+
+  defp normalize_page_label(label), do: label |> to_string() |> normalize_page_label()
+
+  defp normalize_page_assigns(assigns) when is_map(assigns), do: assigns
+
+  defp normalize_page_assigns(assigns) when is_list(assigns) do
+    if Keyword.keyword?(assigns), do: Map.new(assigns), else: %{}
+  end
+
+  defp normalize_page_assigns(_assigns), do: %{}
+
+  defp default_page_id(module) do
+    module
+    |> Module.split()
+    |> List.last()
+    |> case do
+      nil -> nil
+      name -> Macro.underscore(name)
+    end
+  end
+
+  defp humanize_page_id(nil), do: nil
+
+  defp humanize_page_id(id) do
+    id
+    |> String.replace("-", "_")
+    |> String.split("_", trim: true)
+    |> Enum.map(&String.capitalize/1)
+    |> Enum.join(" ")
   end
 
   def ensure_inspector_distribution(opts \\ []) do

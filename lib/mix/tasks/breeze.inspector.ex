@@ -2,7 +2,7 @@ defmodule Mix.Tasks.Breeze.Inspector do
   use Mix.Task
 
   @shortdoc "Starts the Breeze remote inspector"
-  @switches [connect: :string]
+  @switches [connect: :string, page: :string]
 
   @impl true
   def run(args) do
@@ -12,16 +12,19 @@ defmodule Mix.Tasks.Breeze.Inspector do
 
     {opts, positional, _invalid} = OptionParser.parse(args, strict: @switches)
     maybe_connect_target(Keyword.get(opts, :connect) || List.first(positional))
+    pages = page_modules(opts)
 
     {:ok, _pid} = Breeze.RemoteInspector.ensure_server()
 
     Mix.shell().info("Starting Breeze remote inspector on #{node()}")
 
-    Breeze.Example.run(run_opts())
+    Breeze.Example.run(run_opts(pages: pages))
   end
 
-  def run_opts do
-    [
+  def run_opts(opts \\ []) do
+    pages = Keyword.get(opts, :pages, [])
+
+    opts = [
       view: Breeze.RemoteInspector.View,
       reload: true,
       theme: :system,
@@ -29,6 +32,38 @@ defmodule Mix.Tasks.Breeze.Inspector do
       global_keybindings: Breeze.RemoteInspector.View.global_keybindings(),
       inspector: true
     ]
+
+    case pages do
+      [] -> opts
+      pages -> Keyword.put(opts, :start_opts, remote_inspector_pages: pages)
+    end
+  end
+
+  def page_modules(opts) when is_list(opts) do
+    opts
+    |> Keyword.get_values(:page)
+    |> Enum.map(&page_module!/1)
+  end
+
+  def page_module!(name) when is_binary(name) do
+    name = String.trim(name)
+
+    if name == "" do
+      Mix.raise("Remote inspector page module cannot be blank")
+    end
+
+    module = module_name(name)
+
+    cond do
+      !Code.ensure_loaded?(module) ->
+        Mix.raise("Could not load remote inspector page #{name}")
+
+      !function_exported?(module, :render, 1) ->
+        Mix.raise("Remote inspector page #{inspect(module)} must export render/1")
+
+      true ->
+        module
+    end
   end
 
   def normalize_connect_target(target) when is_binary(target) do
@@ -57,6 +92,14 @@ defmodule Mix.Tasks.Breeze.Inspector do
     else
       "breeze.inspector could not start distributed Erlang as inspector: #{inspect(reason)}"
     end
+  end
+
+  defp module_name(name) do
+    name
+    |> String.trim()
+    |> String.trim_leading("Elixir.")
+    |> String.split(".", trim: true)
+    |> Module.concat()
   end
 
   defp maybe_connect_target(nil), do: :ok

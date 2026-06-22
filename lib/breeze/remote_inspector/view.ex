@@ -3,6 +3,7 @@ defmodule Breeze.RemoteInspector.View do
 
   use Breeze.View
   import Breeze.Blocks
+  alias Breeze.Template
   alias BackBreeze.TextSpan
 
   @render_tree_limit 600
@@ -19,22 +20,25 @@ defmodule Breeze.RemoteInspector.View do
     {:stop, term}
   end
 
-  def mount(_opts, term) do
+  def mount(opts, term) do
     _ = Breeze.RemoteInspector.ensure_inspector_distribution()
     {:ok, _pid} = Breeze.RemoteInspector.ensure_server()
     :ok = Breeze.RemoteInspector.subscribe(self())
     state = Breeze.RemoteInspector.snapshot()
+    pages = remote_inspector_pages(opts)
 
     {:ok,
      assign(term,
        snapshots: state.snapshots,
        latest_source: state.latest_source,
        active_source: state.latest_source,
+       remote_inspector_pages: pages,
        panel_tab: "overview",
        render_tree_kind: "rendered",
        render_tree_expanded: %{},
        render_trees: %{},
        timeline_selected: %{},
+       custom_page_states: %{},
        screen: term.terminal.size
      )
      |> put_tree_keybindings()
@@ -52,6 +56,17 @@ defmodule Breeze.RemoteInspector.View do
     active_render_tree = active_render_tree(assigns, active_source, active, render_tree_kind)
     active_timeline_selected = timeline_selected(assigns, active_source, source_entry)
     active_timeline_entry = timeline_entry(source_entry, active_timeline_selected)
+    custom_pages = remote_inspector_pages(assigns)
+
+    custom_page_context =
+      custom_page_context(
+        assigns,
+        active,
+        active_source,
+        source_entry,
+        active_render_tree,
+        active_timeline_selected
+      )
 
     assigns =
       Map.merge(assigns, %{
@@ -112,6 +127,8 @@ defmodule Breeze.RemoteInspector.View do
         active_timeline_status: timeline_status(source_entry, active_timeline_selected),
         active_timeline_detail: timeline_detail(active_timeline_entry),
         render_tree_kind: render_tree_kind,
+        custom_pages: custom_pages,
+        custom_page_context: custom_page_context,
         breeze: breeze,
         panel_tab: panel_tab
       })
@@ -208,6 +225,9 @@ defmodule Breeze.RemoteInspector.View do
                   status={@active_timeline_status}
                   detail={@active_timeline_detail}
                 />
+              </:tab>
+              <:tab :for={page <- @custom_pages} value={page.id} label={page.label}>
+                <.custom_page page={page} context={@custom_page_context}/>
               </:tab>
             </.tabs>
           </box>
@@ -575,6 +595,37 @@ defmodule Breeze.RemoteInspector.View do
     """
   end
 
+  attr :page, :map, required: true
+  attr :context, :map, required: true
+
+  def custom_page(assigns) do
+    page = assigns.page
+    page_assigns = custom_page_assigns(page, assigns.context)
+
+    if Code.ensure_loaded?(page.module) and function_exported?(page.module, :render, 1) do
+      page.module
+      |> apply(:render, [page_assigns])
+      |> normalize_custom_page_render(page_assigns)
+    else
+      custom_page_message(
+        page_assigns,
+        "remote inspector page #{inspect(page.module)} is unavailable"
+      )
+    end
+  rescue
+    error ->
+      custom_page_message(
+        custom_page_assigns(assigns.page, assigns.context),
+        "remote inspector page failed: #{Exception.message(error)}"
+      )
+  catch
+    kind, reason ->
+      custom_page_message(
+        custom_page_assigns(assigns.page, assigns.context),
+        "remote inspector page failed: #{inspect({kind, reason})}"
+      )
+  end
+
   attr :title, :string, required: true
   slot :inner_block, required: true
 
@@ -613,6 +664,10 @@ defmodule Breeze.RemoteInspector.View do
     {:noreply, term}
   end
 
+  def handle_info({:remote_inspector_page, page_id, message}, term) do
+    delegate_custom_page_info(page_id, message, term)
+  end
+
   def handle_info(:resize, term) do
     {:noreply, assign(term, screen: term.terminal.size)}
   end
@@ -622,7 +677,7 @@ defmodule Breeze.RemoteInspector.View do
      term
      |> assign(panel_tab: value)
      |> put_tree_keybindings()
-     |> refresh_active_render_tree(force: value == "tree")}
+     |> refresh_active_render_tree(force: render_tree_panel?(value, term.assigns))}
   end
 
   def handle_event("tab_changed", %{"value" => value}, term) do
@@ -630,7 +685,7 @@ defmodule Breeze.RemoteInspector.View do
      term
      |> assign(panel_tab: value)
      |> put_tree_keybindings()
-     |> refresh_active_render_tree(force: value == "tree")}
+     |> refresh_active_render_tree(force: render_tree_panel?(value, term.assigns))}
   end
 
   def handle_event("render_tree_changed", payload, term) do
@@ -684,7 +739,9 @@ defmodule Breeze.RemoteInspector.View do
       term =
         term
         |> assign(timeline_selected: timeline_selected)
-        |> refresh_active_render_tree(force: Map.get(term.assigns, :panel_tab) == "tree")
+        |> refresh_active_render_tree(
+          force: render_tree_panel?(Map.get(term.assigns, :panel_tab), term.assigns)
+        )
 
       {:noreply, term}
     else
@@ -697,7 +754,7 @@ defmodule Breeze.RemoteInspector.View do
   end
 
   def handle_event(_, %{"key" => "q"}, term), do: quit(%{"key" => "q"}, term)
-  def handle_event(_, _, term), do: {:noreply, term}
+  def handle_event(event, payload, term), do: delegate_custom_page_event(event, payload, term)
 
   defp active_source(assigns),
     do: Map.get(assigns, :active_source) || Map.get(assigns, :latest_source)
@@ -863,6 +920,212 @@ defmodule Breeze.RemoteInspector.View do
 
   defp payload_value(_payload, _key), do: nil
 
+  defp remote_inspector_pages(values) when is_map(values) do
+    case Map.fetch(values, :remote_inspector_pages) do
+      {:ok, pages} -> configured_remote_inspector_pages(pages)
+      :error -> Breeze.RemoteInspector.pages()
+    end
+  end
+
+  defp remote_inspector_pages(values) when is_list(values) do
+    case Keyword.fetch(values, :remote_inspector_pages) do
+      {:ok, pages} -> configured_remote_inspector_pages(pages)
+      :error -> Breeze.RemoteInspector.pages()
+    end
+  end
+
+  defp remote_inspector_pages(_values), do: Breeze.RemoteInspector.pages()
+
+  defp configured_remote_inspector_pages(pages) do
+    Breeze.RemoteInspector.normalize_pages(Breeze.RemoteInspector.pages() ++ List.wrap(pages))
+  end
+
+  defp custom_page_context(assigns) do
+    active = active_entry(assigns)
+    active_source = active_source(assigns)
+    source_entry = source_entry(assigns)
+    render_tree_kind = render_tree_kind(assigns)
+    render_tree = active_render_tree(assigns, active_source, active, render_tree_kind)
+    selected = timeline_selected(assigns, active_source, source_entry)
+
+    custom_page_context(assigns, active, active_source, source_entry, render_tree, selected)
+  end
+
+  defp custom_page_context(
+         assigns,
+         active,
+         active_source,
+         source_entry,
+         render_tree,
+         timeline_selected
+       ) do
+    snapshot = active_snapshot(active)
+
+    %{
+      active?: not is_nil(active),
+      active: active,
+      active_source: active_source,
+      source_entry: source_entry,
+      snapshot: snapshot,
+      selected: snapshot_value(snapshot, :selected),
+      hovered: snapshot_value(snapshot, :hovered),
+      focused_entry: snapshot_value(snapshot, :focused_entry),
+      snapshots: Map.get(assigns, :snapshots, %{}),
+      latest_source: Map.get(assigns, :latest_source),
+      screen: Map.get(assigns, :screen),
+      panel_tab: Map.get(assigns, :panel_tab, "overview"),
+      render_tree_kind: render_tree_kind(assigns),
+      render_tree: render_tree,
+      timeline_selected: timeline_selected,
+      timeline_entry: timeline_entry(source_entry, timeline_selected),
+      custom_page_states: Map.get(assigns, :custom_page_states, %{})
+    }
+  end
+
+  defp active_snapshot(%{snapshot: snapshot}) when is_map(snapshot), do: snapshot
+  defp active_snapshot(_active), do: nil
+
+  defp snapshot_value(%{} = snapshot, key), do: Map.get(snapshot, key)
+  defp snapshot_value(_snapshot, _key), do: nil
+
+  defp custom_page_assigns(page, context) do
+    state =
+      context
+      |> Map.get(:custom_page_states, %{})
+      |> Map.get(page.id, %{})
+
+    context
+    |> Map.merge(%{
+      id: page.id,
+      label: page.label,
+      page: page,
+      config: Map.get(page, :config, %{})
+    })
+    |> Map.merge(Map.get(page, :assigns, %{}))
+    |> Map.merge(state)
+  end
+
+  defp delegate_custom_page_event(event, payload, term) do
+    case active_custom_page(term.assigns) do
+      nil ->
+        {:noreply, term}
+
+      page ->
+        invoke_custom_page_callback(page, term, :handle_event, [event, payload])
+    end
+  end
+
+  defp delegate_custom_page_info(page_id, message, term) do
+    case custom_page_by_id(term.assigns, page_id) do
+      nil ->
+        {:noreply, term}
+
+      page ->
+        invoke_custom_page_callback(page, term, :handle_info, [message])
+    end
+  end
+
+  defp invoke_custom_page_callback(page, term, callback, args) do
+    if Code.ensure_loaded?(page.module) and
+         function_exported?(page.module, callback, length(args) + 1) do
+      page_assigns = custom_page_assigns(page, custom_page_context(term.assigns))
+
+      page.module
+      |> apply(callback, args ++ [page_assigns])
+      |> normalize_custom_page_callback_reply(term, page)
+    else
+      {:noreply, term}
+    end
+  rescue
+    error ->
+      {:noreply,
+       put_custom_page_error(
+         term,
+         page.id,
+         "remote inspector page failed: #{Exception.message(error)}"
+       )}
+  catch
+    kind, reason ->
+      {:noreply,
+       put_custom_page_error(
+         term,
+         page.id,
+         "remote inspector page failed: #{inspect({kind, reason})}"
+       )}
+  end
+
+  defp normalize_custom_page_callback_reply({:noreply, state}, term, page) when is_map(state) do
+    {:noreply, put_custom_page_state(term, page.id, state)}
+  end
+
+  defp normalize_custom_page_callback_reply(:noreply, term, _page), do: {:noreply, term}
+  defp normalize_custom_page_callback_reply(_reply, term, _page), do: {:noreply, term}
+
+  defp put_custom_page_error(term, page_id, message) do
+    current =
+      term.assigns
+      |> Map.get(:custom_page_states, %{})
+      |> Map.get(page_id, %{})
+
+    put_custom_page_state(term, page_id, Map.put(current, :custom_page_error, message))
+  end
+
+  defp put_custom_page_state(term, page_id, state) do
+    custom_page_states =
+      term.assigns
+      |> Map.get(:custom_page_states, %{})
+      |> Map.put(page_id, state)
+
+    assign(term, custom_page_states: custom_page_states)
+  end
+
+  defp active_custom_page(assigns) do
+    custom_page_by_id(assigns, Map.get(assigns, :panel_tab))
+  end
+
+  defp custom_page_by_id(assigns, page_id) when is_binary(page_id) do
+    assigns
+    |> remote_inspector_pages()
+    |> Enum.find(&(&1.id == page_id))
+  end
+
+  defp custom_page_by_id(_assigns, _page_id), do: nil
+
+  defp normalize_custom_page_render({%Template{} = template, comp_assigns}, _page_assigns) do
+    {template, comp_assigns}
+  end
+
+  defp normalize_custom_page_render(%Template{} = template, page_assigns) do
+    {template, page_assigns}
+  end
+
+  defp normalize_custom_page_render(content, page_assigns) do
+    rendered =
+      cond do
+        is_binary(content) or is_list(content) or is_nil(content) ->
+          Template.render_to_string(content, page_assigns)
+
+        true ->
+          inspect(content)
+      end
+
+    custom_page_content(Map.put(page_assigns, :content, rendered))
+  end
+
+  defp custom_page_content(assigns) do
+    ~H"""
+    <box class="width-full height-full padding-top-1 overflow-hidden">{@content}</box>
+    """
+  end
+
+  defp custom_page_message(assigns, message) do
+    assigns = Map.put(assigns, :message, message)
+
+    ~H"""
+    <box class="width-full height-full padding-top-1 overflow-hidden text-error">{@message}</box>
+    """
+  end
+
   defp normalize_expanded(nil), do: nil
   defp normalize_expanded(expanded) when is_list(expanded), do: expanded
   defp normalize_expanded(expanded), do: List.wrap(expanded)
@@ -978,7 +1241,8 @@ defmodule Breeze.RemoteInspector.View do
   end
 
   defp refresh_active_render_tree(term, opts \\ []) do
-    if Keyword.get(opts, :force, false) or Map.get(term.assigns, :panel_tab) == "tree" do
+    if Keyword.get(opts, :force, false) or
+         render_tree_panel?(Map.get(term.assigns, :panel_tab), term.assigns) do
       active_source = active_source(term.assigns)
       active = active_entry(term.assigns)
       kind = render_tree_kind(term.assigns)
@@ -1006,6 +1270,25 @@ defmodule Breeze.RemoteInspector.View do
       term
     end
   end
+
+  defp render_tree_panel?("tree", _assigns), do: true
+
+  defp render_tree_panel?(panel, assigns) when is_binary(panel) do
+    assigns
+    |> remote_inspector_pages()
+    |> Enum.find(&(&1.id == panel))
+    |> case do
+      %{config: config} when is_map(config) ->
+        truthy?(Map.get(config, :render_tree)) or truthy?(Map.get(config, :render_tree?))
+
+      _page ->
+        false
+    end
+  end
+
+  defp render_tree_panel?(_panel, _assigns), do: false
+
+  defp truthy?(value), do: value in [true, "true", "1", 1, ""]
 
   defp fetch_render_tree(nil, _assigns, _source, _kind, _opts), do: nil
   defp fetch_render_tree(_active, _assigns, nil, _kind, _opts), do: nil

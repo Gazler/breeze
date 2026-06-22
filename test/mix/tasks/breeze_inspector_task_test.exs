@@ -1,6 +1,17 @@
 defmodule Mix.Tasks.BreezeInspectorTaskTest do
   use ExUnit.Case, async: true
 
+  defmodule LLMInspectorPage do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"<box>LLM</box>"
+    end
+  end
+
+  defmodule NotAnInspectorPage do
+  end
+
   test "run opts enable reload and remote inspector self-inspection" do
     assert Mix.Tasks.Breeze.Inspector.run_opts() == [
              view: Breeze.RemoteInspector.View,
@@ -10,6 +21,40 @@ defmodule Mix.Tasks.BreezeInspectorTaskTest do
              global_keybindings: Breeze.RemoteInspector.View.global_keybindings(),
              inspector: true
            ]
+  end
+
+  test "run opts can pass extra remote inspector pages" do
+    opts = Mix.Tasks.Breeze.Inspector.run_opts(pages: [LLMInspectorPage])
+
+    assert Keyword.get(opts, :view) == Breeze.RemoteInspector.View
+    assert Keyword.get(opts, :start_opts) == [remote_inspector_pages: [LLMInspectorPage]]
+  end
+
+  test "page modules resolve from --page option values" do
+    name = inspect(LLMInspectorPage)
+
+    assert Mix.Tasks.Breeze.Inspector.page_modules(page: name, page: "Elixir." <> name) == [
+             LLMInspectorPage,
+             LLMInspectorPage
+           ]
+  end
+
+  test "sample LLM inspector page can be passed with --page" do
+    assert Mix.Tasks.Breeze.Inspector.page_modules(page: "Breeze.RemoteInspector.Pages.LLM") == [
+             Breeze.RemoteInspector.Pages.LLM
+           ]
+  end
+
+  test "page modules must export render/1" do
+    assert_raise Mix.Error, ~r/must export render\/1/, fn ->
+      Mix.Tasks.Breeze.Inspector.page_module!(inspect(NotAnInspectorPage))
+    end
+  end
+
+  test "page module values cannot be blank" do
+    assert_raise Mix.Error, ~r/cannot be blank/, fn ->
+      Mix.Tasks.Breeze.Inspector.page_module!(" ")
+    end
   end
 
   test "distribution error message prompts user to start epmd for nodistribution" do

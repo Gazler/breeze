@@ -18,6 +18,72 @@ defmodule Breeze.RemoteInspectorTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule CustomInspectorPage do
+    @behaviour Breeze.RemoteInspector.Page
+
+    use Breeze.View
+
+    def page, do: [id: "llm", label: "LLM", render_tree: true, note: "module-default"]
+
+    def render(assigns) do
+      ~H"""
+      <box id="custom-inspector-page" class="width-full height-full">
+        page={@id} label={@label} selected={snapshot_selected(@snapshot)} hovered={snapshot_hovered(@snapshot)} config={@config.note} static={@static} tree={tree_selected(@render_tree)}
+      </box>
+      """
+    end
+
+    defp snapshot_selected(%{selected_id: selected_id}), do: selected_id || "-"
+    defp snapshot_selected(_snapshot), do: "-"
+
+    defp snapshot_hovered(%{hovered_id: hovered_id}), do: hovered_id || "-"
+    defp snapshot_hovered(_snapshot), do: "-"
+
+    defp tree_selected(%{selected_id: selected_id}), do: selected_id || "-"
+    defp tree_selected(_render_tree), do: "-"
+  end
+
+  defmodule InteractiveInspectorPage do
+    @behaviour Breeze.RemoteInspector.Page
+
+    use Breeze.View
+
+    def page, do: [id: "chat", label: "Chat"]
+
+    def render(assigns) do
+      assigns =
+        Map.merge(%{prompt: "-", info: "-", count: 0, custom_page_error: "-"}, assigns)
+
+      ~H"""
+      <box id="interactive-inspector-page" class="width-full height-full">
+        prompt={@prompt} info={@info} count={@count} error={@custom_page_error}
+      </box>
+      """
+    end
+
+    def handle_event("interactive_prompt_changed", payload, assigns) do
+      value = Map.get(payload, :value) || Map.get(payload, "value")
+
+      {:noreply,
+       %{
+         prompt: value,
+         info: Map.get(assigns, :info, "-"),
+         count: Map.get(assigns, :count, 0) + 1
+       }}
+    end
+
+    def handle_event(_event, _payload, _assigns), do: :noreply
+
+    def handle_info({:done, value}, assigns) do
+      {:noreply,
+       %{
+         prompt: Map.get(assigns, :prompt, "-"),
+         info: value,
+         count: Map.get(assigns, :count, 0)
+       }}
+    end
+  end
+
   defmodule FakeInspectorServer do
     use GenServer
 
@@ -72,6 +138,88 @@ defmodule Breeze.RemoteInspectorTest do
          truncated?: false
        }, parent}
     end
+  end
+
+  test "remote inspector pages are configurable and reserve built-in page ids" do
+    assert [
+             %{
+               id: "llm",
+               label: "Tools",
+               module: CustomInspectorPage,
+               assigns: %{static: "extra"},
+               config: %{note: "config", render_tree: true}
+             }
+           ] =
+             Breeze.RemoteInspector.normalize_pages([
+               {CustomInspectorPage,
+                id: "llm", label: "Tools", note: "config", assigns: [static: "extra"]},
+               {CustomInspectorPage, id: "tree", label: "Reserved"},
+               {CustomInspectorPage, id: "llm", label: "Duplicate"}
+             ])
+
+    previous = Application.get_env(:breeze, :remote_inspector_pages)
+
+    on_exit(fn ->
+      case previous do
+        nil -> Application.delete_env(:breeze, :remote_inspector_pages)
+        value -> Application.put_env(:breeze, :remote_inspector_pages, value)
+      end
+    end)
+
+    Application.put_env(:breeze, :remote_inspector_pages, {CustomInspectorPage, id: "agent"})
+
+    assert [%{id: "agent", label: "LLM"}] = Breeze.RemoteInspector.pages()
+  end
+
+  test "remote inspector view combines configured and supplied pages" do
+    previous = Application.get_env(:breeze, :remote_inspector_pages)
+
+    on_exit(fn ->
+      case previous do
+        nil -> Application.delete_env(:breeze, :remote_inspector_pages)
+        value -> Application.put_env(:breeze, :remote_inspector_pages, value)
+      end
+    end)
+
+    Application.put_env(
+      :breeze,
+      :remote_inspector_pages,
+      {CustomInspectorPage, id: "configured", label: "Config"}
+    )
+
+    key = {:app@host, "#PID<0.1.0>"}
+
+    output =
+      Breeze.Renderer.render_to_string(
+        Breeze.RemoteInspector.View,
+        %{
+          snapshots: %{
+            key => %{
+              source: %{node: :app@host, pid: self()},
+              snapshot: inspector_snapshot(self(), "button"),
+              updated_at: 1_000,
+              alive?: true
+            }
+          },
+          latest_source: key,
+          active_source: key,
+          panel_tab: "llm",
+          remote_inspector_pages: [
+            {CustomInspectorPage,
+             id: "llm", label: "LLM", note: "config", assigns: %{static: "extra"}}
+          ],
+          render_trees: %{},
+          render_tree_expanded: %{},
+          timeline_selected: %{},
+          screen: %{width: 100, height: 32}
+        },
+        theme: true,
+        terminal: %Termite.Terminal{size: %{width: 100, height: 40}}
+      )
+
+    assert output =~ " Config "
+    assert output =~ "label=LLM"
+    assert output =~ "page=llm"
   end
 
   test "remote inspector view renders rich snapshot details" do
@@ -293,6 +441,206 @@ defmodule Breeze.RemoteInspectorTest do
     assert tree_output =~ "38;2;4;5;6"
   end
 
+  test "remote inspector view renders custom pages with active snapshot context" do
+    key = {:app@host, "#PID<0.1.0>"}
+
+    output =
+      Breeze.Renderer.render_to_string(
+        Breeze.RemoteInspector.View,
+        %{
+          snapshots: %{
+            key => %{
+              source: %{node: :app@host, pid: self()},
+              snapshot: inspector_snapshot(self(), "button"),
+              updated_at: 1_000,
+              alive?: true
+            }
+          },
+          latest_source: key,
+          active_source: key,
+          panel_tab: "llm",
+          remote_inspector_pages: [
+            {CustomInspectorPage,
+             id: "llm", label: "LLM", note: "config", assigns: %{static: "extra"}}
+          ],
+          render_trees: %{
+            key => %{
+              nodes: [%{id: "root", label: "<box#root>", children: []}],
+              selected_id: "button",
+              expanded: [],
+              limit: 600,
+              truncated?: false
+            }
+          },
+          render_tree_expanded: %{},
+          timeline_selected: %{},
+          screen: %{width: 100, height: 32}
+        },
+        theme: true,
+        terminal: %Termite.Terminal{size: %{width: 100, height: 40}}
+      )
+
+    assert output =~ " LLM "
+    assert output =~ "page=llm"
+    assert output =~ "label=LLM"
+    assert output =~ "selected=button"
+    assert output =~ "hovered=hover"
+    assert output =~ "config=config"
+    assert output =~ "static=extra"
+    assert output =~ "tree=button"
+  end
+
+  test "remote inspector custom pages can handle events and async messages" do
+    key = {:app@host, "#PID<0.1.0>"}
+
+    term = %Breeze.Term{
+      view: Breeze.RemoteInspector.View,
+      assigns: %{
+        snapshots: %{
+          key => %{
+            source: %{node: :app@host, pid: self()},
+            snapshot: inspector_snapshot(self(), "button"),
+            updated_at: 1_000,
+            alive?: true
+          }
+        },
+        latest_source: key,
+        active_source: key,
+        panel_tab: "chat",
+        remote_inspector_pages: [InteractiveInspectorPage],
+        render_tree_kind: "rendered",
+        render_trees: %{},
+        render_tree_expanded: %{},
+        timeline_selected: %{},
+        custom_page_states: %{},
+        screen: %{width: 100, height: 32}
+      }
+    }
+
+    assert {:noreply, term} =
+             Breeze.RemoteInspector.View.handle_event(
+               "interactive_prompt_changed",
+               %{value: "hello"},
+               term
+             )
+
+    assert term.assigns.custom_page_states["chat"].prompt == "hello"
+    assert term.assigns.custom_page_states["chat"].count == 1
+
+    assert {:noreply, term} =
+             Breeze.RemoteInspector.View.handle_info(
+               {:remote_inspector_page, "chat", {:done, "ok"}},
+               term
+             )
+
+    assert term.assigns.custom_page_states["chat"].prompt == "hello"
+    assert term.assigns.custom_page_states["chat"].info == "ok"
+
+    output =
+      Breeze.Renderer.render_to_string(
+        Breeze.RemoteInspector.View,
+        term.assigns,
+        theme: true,
+        terminal: %Termite.Terminal{size: %{width: 100, height: 40}}
+      )
+
+    assert output =~ " Chat "
+    assert output =~ "prompt=hello"
+    assert output =~ "info=ok"
+    assert output =~ "count=1"
+  end
+
+  test "sample LLM page renders active app context" do
+    key = {:app@host, "#PID<0.1.0>"}
+
+    output =
+      Breeze.Renderer.render_to_string(
+        Breeze.RemoteInspector.View,
+        %{
+          snapshots: %{
+            key => %{
+              source: %{node: :app@host, pid: self()},
+              snapshot: inspector_snapshot(self(), "button"),
+              updated_at: 1_000,
+              alive?: true
+            }
+          },
+          latest_source: key,
+          active_source: key,
+          panel_tab: "llm",
+          remote_inspector_pages: [Breeze.RemoteInspector.Pages.LLM],
+          render_trees: %{
+            key => %{
+              kind: :rendered,
+              nodes: [
+                %{
+                  id: "root",
+                  label: "<box#root>",
+                  children: [%{id: "button", label: "<box#button>", children: []}]
+                }
+              ],
+              selected_id: "button",
+              expanded: ["root"],
+              limit: 600,
+              truncated?: false
+            }
+          },
+          render_tree_expanded: %{},
+          timeline_selected: %{},
+          screen: %{width: 100, height: 32}
+        },
+        theme: true,
+        terminal: %Termite.Terminal{size: %{width: 100, height: 40}}
+      )
+
+    assert output =~ "LLM Context"
+    assert output =~ "root_view=Breeze.RemoteInspectorTest.InspectorAppView"
+    assert output =~ "selected=id=button"
+    assert output =~ "Render Tree"
+    assert output =~ "<box#button>"
+  end
+
+  test "remote inspector custom pages can request render tree data" do
+    {:ok, source_pid} = SelectCaptureServer.start_link(self())
+
+    on_exit(fn ->
+      stop_process(source_pid)
+    end)
+
+    key = {:app@host, inspect(source_pid)}
+
+    term = %Breeze.Term{
+      view: Breeze.RemoteInspector.View,
+      assigns: %{
+        snapshots: %{
+          key => %{
+            source: %{node: :app@host, pid: source_pid},
+            snapshot: inspector_snapshot(source_pid, "child"),
+            updated_at: 1,
+            alive?: true
+          }
+        },
+        latest_source: key,
+        active_source: key,
+        panel_tab: "overview",
+        remote_inspector_pages: [{CustomInspectorPage, id: "llm", label: "LLM"}],
+        render_tree_kind: "rendered",
+        render_tree_expanded: %{key => ["root"]},
+        render_trees: %{},
+        timeline_selected: %{}
+      }
+    }
+
+    assert {:noreply, term} =
+             Breeze.RemoteInspector.View.handle_event("tab_changed", %{value: "llm"}, term)
+
+    assert term.assigns.panel_tab == "llm"
+    assert term.assigns.render_trees[key].selected_id == "child"
+    assert_receive {:inspector_render_tree, opts}, 500
+    assert Keyword.get(opts, :kind) == :rendered
+    assert Keyword.get(opts, :selected_id) == "child"
+  end
+
   test "remote inspector tab changes accept implicit tab payloads" do
     term = %Breeze.Term{
       view: Breeze.RemoteInspector.View,
@@ -342,7 +690,7 @@ defmodule Breeze.RemoteInspectorTest do
     {:ok, source_pid} = SelectCaptureServer.start_link(self())
 
     on_exit(fn ->
-      if Process.alive?(source_pid), do: GenServer.stop(source_pid)
+      stop_process(source_pid)
     end)
 
     key = {:app@host, inspect(source_pid)}
@@ -481,11 +829,45 @@ defmodule Breeze.RemoteInspectorTest do
 
   defp tree_with_attrs?(_node, _attrs), do: false
 
+  defp stop_process(pid) when is_pid(pid) do
+    try do
+      if Process.alive?(pid), do: GenServer.stop(pid)
+    catch
+      :exit, _reason -> :ok
+    end
+  end
+
+  defp stop_process(_pid), do: :ok
+
+  defp stop_local_process(pid) when is_pid(pid) do
+    if node(pid) == node(), do: stop_process(pid)
+  end
+
+  defp stop_local_process(_pid), do: :ok
+
+  defp inspector_snapshot(pid, selected_id) do
+    %{
+      root_view: InspectorAppView,
+      source: %{node: :app@host, server_pid: pid, view_pid: pid},
+      theme: nil,
+      counts: %{elements: 1, focusables: 1, mouse_targets: 1, children: 0},
+      focus: %{active_scope: nil, focusables: [selected_id], focus_memory: %{}},
+      selected: nil,
+      hovered: nil,
+      selected_id: selected_id,
+      hovered_id: "hover",
+      focused: selected_id,
+      last_render_at: 1_000,
+      last_interaction_at: 900,
+      render_tree?: true
+    }
+  end
+
   test "remote inspector render tree selection updates expansion and delegates selection" do
     {:ok, source_pid} = SelectCaptureServer.start_link(self())
 
     on_exit(fn ->
-      if Process.alive?(source_pid), do: GenServer.stop(source_pid)
+      stop_process(source_pid)
     end)
 
     key = {:app@host, inspect(source_pid)}
@@ -536,7 +918,7 @@ defmodule Breeze.RemoteInspectorTest do
     {:ok, source_pid} = SelectCaptureServer.start_link(self())
 
     on_exit(fn ->
-      if Process.alive?(source_pid), do: GenServer.stop(source_pid)
+      stop_process(source_pid)
     end)
 
     key = {:app@host, inspect(source_pid)}
@@ -585,7 +967,7 @@ defmodule Breeze.RemoteInspectorTest do
     {:ok, source_pid} = SelectCaptureServer.start_link(self())
 
     on_exit(fn ->
-      if Process.alive?(source_pid), do: GenServer.stop(source_pid)
+      stop_process(source_pid)
     end)
 
     key = {:app@host, inspect(source_pid)}
@@ -691,9 +1073,7 @@ defmodule Breeze.RemoteInspectorTest do
     {:ok, pid} = Breeze.RemoteInspector.ensure_server()
 
     on_exit(fn ->
-      if is_pid(pid) and Process.alive?(pid) and node(pid) == node() do
-        GenServer.stop(pid)
-      end
+      stop_local_process(pid)
     end)
 
     refute Breeze.RemoteInspector.available?()
@@ -730,11 +1110,8 @@ defmodule Breeze.RemoteInspectorTest do
     {:ok, inspector_pid} = Breeze.RemoteInspector.ensure_server()
 
     on_exit(fn ->
-      if Process.alive?(app_pid), do: GenServer.stop(app_pid)
-
-      if Process.alive?(inspector_pid) and node(inspector_pid) == node() do
-        GenServer.stop(inspector_pid)
-      end
+      stop_process(app_pid)
+      stop_local_process(inspector_pid)
     end)
 
     wait_until(fn ->
@@ -753,11 +1130,8 @@ defmodule Breeze.RemoteInspectorTest do
     {:ok, inspector_pid} = Breeze.RemoteInspector.ensure_server()
 
     on_exit(fn ->
-      if Process.alive?(source_pid), do: GenServer.stop(source_pid)
-
-      if Process.alive?(inspector_pid) and node(inspector_pid) == node() do
-        GenServer.stop(inspector_pid)
-      end
+      stop_process(source_pid)
+      stop_local_process(inspector_pid)
     end)
 
     Breeze.RemoteInspector.Server.publish(
