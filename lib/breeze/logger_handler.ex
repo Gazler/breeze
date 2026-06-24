@@ -52,9 +52,32 @@ defmodule Breeze.LoggerHandler do
   defp format_event(event) do
     event
     |> :logger_formatter.format(@formatter_config)
-    |> IO.iodata_to_binary()
+    |> unicode_chardata_to_binary()
     |> String.trim_trailing()
   rescue
     _ -> inspect(event)
+  end
+
+  defp unicode_chardata_to_binary(chardata) do
+    case :unicode.characters_to_binary(chardata) do
+      binary when is_binary(binary) ->
+        binary
+
+      {:error, _valid, _rest} ->
+        chardata_to_valid_binary(chardata)
+
+      {:incomplete, _valid, _rest} ->
+        chardata_to_valid_binary(chardata)
+    end
+  end
+
+  defp chardata_to_valid_binary(chardata) do
+    binary = IO.iodata_to_binary(chardata)
+
+    if String.valid?(binary) do
+      binary
+    else
+      :unicode.characters_to_binary(binary, :latin1, :utf8)
+    end
   end
 end

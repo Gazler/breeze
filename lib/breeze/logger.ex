@@ -39,15 +39,15 @@ defmodule Breeze.Logger do
 
   def render(assigns) do
     ~H"""
-    <box style={"width-#{@width}"}>
-      <box style="bold">{@title}</box>
-      <box>{@helper_text}</box>
+    <box class={["bg overflow-hidden", width_style(@width)]}>
+      <box class="bg bold width-full">{@title}</box>
+      <box class="bg width-full">{@helper_text}</box>
       <box
         id="logger"
         focusable
         implicit={Breeze.Implicit.Scroll}
         scroll-autoscroll="bottom"
-        style={"border-rounded overflow-scroll scrollbar-arrows focus:border-4 width-#{@width} height-#{@height}"}
+        class={"bg border-rounded width-full overflow-scroll scrollbar-arrows focus:border-4 #{height_style(@height)}"}
       >
         <box :for={entry <- @lines} style={entry.style}>{entry.line}</box>
       </box>
@@ -99,6 +99,14 @@ defmodule Breeze.Logger do
   defp decorate_entry(entry) do
     Map.put(entry, :style, level_style(entry.level))
   end
+
+  defp width_style(:screen), do: "width-screen"
+  defp width_style("screen"), do: "width-screen"
+  defp width_style(width), do: "width-#{width}"
+
+  defp height_style(:full), do: "height-full"
+  defp height_style("full"), do: "height-full"
+  defp height_style(height), do: "height-#{height}"
 
   defp level_style(:debug), do: "text-8"
   defp level_style(:info), do: "text-6"

@@ -23,6 +23,19 @@ defmodule Breeze.LoggerTest do
     assert line =~ message
   end
 
+  test "collector normalizes unicode logger chardata before rendering" do
+    {:ok, collector} = Breeze.LoggerCollector.ensure_started()
+    :ok = Breeze.LoggerCollector.subscribe(self())
+    assert_receive {:logger_snapshot, []}
+
+    event = %{level: :info, msg: {:string, [181, ?s]}, meta: %{}}
+    Breeze.LoggerHandler.log(event, %{config: %{collector: collector}})
+
+    assert_receive {:logger_entry, %{level: :info, line: line}}, 1_000
+    assert String.valid?(line)
+    assert line =~ "µs"
+  end
+
   test "logger view renders recent log lines" do
     {:ok, pid} = ChildServer.start(view: Breeze.Logger, start_opts: [max_lines: 2])
     wait_until(fn -> true end)
@@ -46,6 +59,26 @@ defmodule Breeze.LoggerTest do
     refute box.content =~ first
     assert box.content =~ second
     assert box.content =~ third
+  end
+
+  test "logger height applies to the scroll viewport" do
+    {acc, box} =
+      Renderer.render(
+        Breeze.Logger,
+        %{
+          title: "Logs",
+          helper_text: "Help",
+          min_level: :debug,
+          width: 40,
+          height: 6,
+          lines: []
+        },
+        focused: "logger",
+        implicit_state: %{}
+      )
+
+    assert logger_viewport(acc).style.height == 6
+    assert box.height == 8
   end
 
   test "logger view applies scroll offsets from the scroll implicit" do

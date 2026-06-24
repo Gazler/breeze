@@ -330,6 +330,25 @@ defmodule Breeze.LiveViewTest do
     end
   end
 
+  defmodule MouseScrollLiveParent do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, focus(term, "anchor")}
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen">
+        <box id="anchor" focusable class="height-1">anchor</box>
+        <live id="scroll-child" view={BufferedScrollView} class="width-full height-full">
+        </live>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule KeybindingFooterRoot do
     use Breeze.View
     import Breeze.Blocks
@@ -968,6 +987,71 @@ defmodule Breeze.LiveViewTest do
              ChildServer.render_snapshot(root_pid, terminal: terminal, live_view: live_view)
 
     assert %{focused: nil} = ChildServer.metadata(root_pid)
+  end
+
+  test "root child forwards mouse wheel input to a live child scroll implicit" do
+    terminal = %Termite.Terminal{size: %{width: 40, height: 10}}
+    {:ok, root_pid} = ChildServer.start(view: MouseScrollLiveParent, terminal: terminal)
+
+    assert {:ok, _acc, _box, _decorations} =
+             ChildServer.render_snapshot(root_pid, terminal: terminal)
+
+    %{children: %{"scroll-child" => %{pid: child_pid}}} = :sys.get_state(root_pid)
+    targets = ChildServer.layout_snapshot(root_pid).mouse_targets
+
+    assert {:noreply, "anchor", true} =
+             ChildServer.dispatch_input(
+               root_pid,
+               wheel_event(:wheel_down, targets["scroll-child::scroll"])
+             )
+
+    assert ChildServer.metadata(root_pid).focused == "anchor"
+
+    assert {Breeze.Implicit.Scroll, %{offset_y: offset_y}} =
+             ChildServer.metadata(child_pid).implicit_state["scroll"]
+
+    assert offset_y > 0
+  end
+
+  test "server forwards mouse wheel input to a live child scroll implicit" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: MouseScrollLiveParent,
+        terminal: terminal,
+        mouse: true,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+
+    {child_pid, bounds} =
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+        targets = ChildServer.layout_snapshot(state.view_pid).mouse_targets
+
+        with %{pid: child_pid} <- state.children["scroll-child"],
+             bounds when is_map(bounds) <- targets["scroll-child::scroll"] do
+          {child_pid, bounds}
+        else
+          _ -> nil
+        end
+      end)
+
+    {x, y} = mouse_center(bounds)
+    send(pid, {reader, {:data, "\e[<65;#{x};#{y}M"}})
+
+    offset_y =
+      wait_until(fn ->
+        case ChildServer.metadata(child_pid).implicit_state["scroll"] do
+          {Breeze.Implicit.Scroll, %{offset_y: offset_y}} when offset_y > 0 -> offset_y
+          _ -> nil
+        end
+      end)
+
+    assert offset_y > 0
   end
 
   test "theme changes cascade to nested live children immediately" do
@@ -2391,6 +2475,24 @@ defmodule Breeze.LiveViewTest do
   end
 
   defp wait_until(_fun, 0), do: flunk("condition not met")
+
+  defp wheel_event(button, bounds) do
+    {x, y} = mouse_center(bounds)
+
+    %{
+      "mouse" => %{
+        button: button,
+        action: :press,
+        modifiers: [],
+        x: x,
+        y: y
+      }
+    }
+  end
+
+  defp mouse_center(bounds) do
+    {div(bounds.left + bounds.right, 2) + 1, div(bounds.top + bounds.bottom, 2) + 1}
+  end
 
   defp make_reload_fixture_path(label) do
     dir =
