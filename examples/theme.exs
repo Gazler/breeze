@@ -16,7 +16,7 @@ defmodule ThemeDemo do
         </:title>
         <box class="text-primary bold width-full">Semantic theme tokens</box>
         <box class="text-muted width-full">
-          1 system16  2 system  3 nebula  4 catppuccin  5 dracula  6 gruvbox  7 nord  8 solarized-light  9 solarized-dark
+          1 system16  2 system  3 nebula  4 catppuccin  5 dracula  6 commander  7 gruvbox  8 nord  9 solarized-light  0 solarized-dark
         </box>
         <box class="text-muted width-full">
           Semantic `class` tokens and inline `style` maps work together.
@@ -133,15 +133,18 @@ defmodule ThemeDemo do
     do: {:noreply, switch_theme(term, :dracula)}
 
   def handle_event(_, %{"key" => "6"}, term),
-    do: {:noreply, switch_theme(term, :gruvbox)}
+    do: {:noreply, switch_theme(term, :commander)}
 
   def handle_event(_, %{"key" => "7"}, term),
-    do: {:noreply, switch_theme(term, :nord)}
+    do: {:noreply, switch_theme(term, :gruvbox)}
 
   def handle_event(_, %{"key" => "8"}, term),
-    do: {:noreply, switch_theme(term, :solarized_light)}
+    do: {:noreply, switch_theme(term, :nord)}
 
   def handle_event(_, %{"key" => "9"}, term),
+    do: {:noreply, switch_theme(term, :solarized_light)}
+
+  def handle_event(_, %{"key" => "0"}, term),
     do: {:noreply, switch_theme(term, :solarized_dark)}
 
   def handle_event(_, _, term), do: {:noreply, term}

@@ -83,6 +83,7 @@ defmodule Breeze.Theme do
     * `:nebula`
     * `:catppuccin` or `:catppuccin` with the `:dark` variant
     * `:dracula`
+    * `:commander`, optionally with the `:blue` variant
     * `:gruvbox` or `:gruvbox` with the `:dark` variant
     * `:nord`
     * `:solarized` with either the `:light` or `:dark` variant
@@ -144,6 +145,7 @@ defmodule Breeze.Theme do
     * `:nebula`
     * `:catppuccin` or `:catppuccin` with the `:dark` variant
     * `:dracula`
+    * `:commander`, optionally with the `:blue` variant
     * `:gruvbox` or `:gruvbox` with the `:dark` variant
     * `:nord`
     * `:solarized` with either the `:light` or `:dark` variant
@@ -152,6 +154,7 @@ defmodule Breeze.Theme do
   ## Examples
 
       Breeze.Theme.builtin(:nebula)
+      Breeze.Theme.builtin(:commander, :blue)
       Breeze.Theme.builtin(:solarized, :light)
   """
   @spec builtin(atom(), atom() | nil) :: t()
@@ -167,6 +170,7 @@ defmodule Breeze.Theme do
       :nebula,
       :catppuccin,
       :dracula,
+      :commander,
       :gruvbox,
       :nord,
       :solarized_light,

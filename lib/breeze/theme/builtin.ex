@@ -11,6 +11,8 @@ defmodule Breeze.Theme.Builtin do
   def fetch!(:catppuccin, nil), do: catppuccin()
   def fetch!(:catppuccin, :dark), do: catppuccin()
   def fetch!(:dracula, nil), do: dracula()
+  def fetch!(:commander, nil), do: commander()
+  def fetch!(:commander, :blue), do: commander()
   def fetch!(:gruvbox, nil), do: gruvbox()
   def fetch!(:gruvbox, :dark), do: gruvbox()
   def fetch!(:nord, nil), do: nord()
@@ -91,6 +93,30 @@ defmodule Breeze.Theme.Builtin do
         panel: "#383A59"
       },
       extras: %{cursor: "#F8F8F2"}
+    )
+  end
+
+  defp commander do
+    Theme.new(
+      name: "commander-blue",
+      dark: true,
+      defaults: %{
+        foreground_color: "#FFFFFF",
+        background_color: "#000000",
+        border_color: "#00AAAA"
+      },
+      palette: %{
+        muted: "#AAAAAA",
+        primary: "#00FFFF",
+        secondary: "#00AAAA",
+        warning: "#FFFF55",
+        error: "#FF5555",
+        success: "#55FF55",
+        accent: "#FFFF00",
+        surface: "#000077",
+        panel: "#0000AA"
+      },
+      extras: %{cursor: "#FFFF55"}
     )
   end
 

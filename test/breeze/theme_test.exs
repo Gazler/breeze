@@ -79,6 +79,7 @@ defmodule Breeze.ThemeTest do
              :nebula,
              :catppuccin,
              :dracula,
+             :commander,
              :gruvbox,
              :nord,
              :solarized_light,
@@ -90,9 +91,11 @@ defmodule Breeze.ThemeTest do
     assert Theme.resolve_theme(:system16) == {:system16, :system16}
     assert Theme.resolve_theme(:system) == {:system, :system}
     assert {:gruvbox, %Theme{name: "gruvbox-dark"}} = Theme.resolve_theme(:gruvbox)
+    assert {:commander, %Theme{name: "commander-blue"}} = Theme.resolve_theme(:commander)
   end
 
   test "next_theme advances through a theme cycle" do
+    assert {:commander, %Theme{name: "commander-blue"}} = Theme.next_theme(:dracula)
     assert {:nord, %Theme{name: "nord"}} = Theme.next_theme(:gruvbox)
     assert {:system16, :system16} = Theme.next_theme(:solarized_dark)
     assert {:system16, :system16} = Theme.next_theme(:missing)
@@ -314,9 +317,26 @@ defmodule Breeze.ThemeTest do
   end
 
   test "built-in constructors stay behind the Theme.builtin API" do
-    for constructor <- ~w(nebula catppuccin dracula gruvbox nord solarized_light solarized_dark)a do
+    for constructor <-
+          ~w(nebula catppuccin dracula commander gruvbox nord solarized_light solarized_dark)a do
       refute function_exported?(Breeze.Theme.Builtin, constructor, 0)
     end
+  end
+
+  test "commander builtin theme matches classic blue TUI colors" do
+    theme = Theme.builtin(:commander)
+
+    assert theme.name == "commander-blue"
+    assert theme.dark == true
+    assert Theme.color(theme, :text) == {255, 255, 255}
+    assert Theme.color(theme, :background) == {0, 0, 0}
+    assert Theme.color(theme, :border) == {0, 170, 170}
+    assert Theme.color(theme, :panel) == {0, 0, 170}
+    assert Theme.color(theme, :surface) == {0, 0, 119}
+    assert Theme.color(theme, :primary) == {0, 255, 255}
+    refute Theme.color(theme, :border) == Theme.color(theme, :primary)
+    assert Theme.color(theme, :cursor) == {255, 255, 85}
+    assert Theme.builtin(:commander, :blue).name == "commander-blue"
   end
 
   test "views can switch themes at runtime" do
