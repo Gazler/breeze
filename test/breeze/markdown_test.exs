@@ -89,6 +89,11 @@ defmodule Breeze.MarkdownTest do
       assert result == "#{@code}foo#{@reset}"
     end
 
+    test "supports a custom reset sequence" do
+      result = Markdown.render("`foo`.", 20, reset: "<restore>")
+      assert result == "#{@code}foo<restore>."
+    end
+
     test "renders bold text" do
       result = Markdown.render("**bold**", 20)
       assert result == "#{@bold}bold#{@reset}"
