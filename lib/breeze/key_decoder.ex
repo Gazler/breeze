@@ -187,6 +187,7 @@ defmodule Breeze.KeyDecoder do
   defp decode_csi_u_key(8), do: "Backspace"
   defp decode_csi_u_key(9), do: "\t"
   defp decode_csi_u_key(13), do: "Enter"
+  defp decode_csi_u_key(27), do: "Escape"
   defp decode_csi_u_key(127), do: "Backspace"
   defp decode_csi_u_key(codepoint) when codepoint in 57376..57398, do: "F#{codepoint - 57363}"
 

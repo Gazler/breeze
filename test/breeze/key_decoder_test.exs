@@ -45,6 +45,8 @@ defmodule Breeze.KeyDecoderTest do
     assert Breeze.KeyDecoder.decode("\e[27;2;9u") == "ShiftTab"
     assert Breeze.KeyDecoder.decode("\t") == "\t"
     assert Breeze.KeyDecoder.decode("\e") == "Escape"
+    assert Breeze.KeyDecoder.decode("\e[27u") == "Escape"
+    assert Breeze.KeyDecoder.decode("\e[27;1u") == "Escape"
     assert Breeze.KeyDecoder.decode("\r") == "Enter"
   end
 
