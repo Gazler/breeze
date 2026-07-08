@@ -464,12 +464,22 @@ defmodule Breeze.Renderer do
               {:rendered, prefix, child_acc, child_box} ->
                 child_acc = namespace_live_acc(child_acc, prefix, child_opts)
 
-                {merge_live_acc(acc, child_acc, current_id), child_box}
+                {
+                  acc
+                  |> merge_live_acc(child_acc, current_id)
+                  |> maybe_add_live_root_focus(attrs, full_id),
+                  child_box
+                }
 
               {:rendered, prefix, child_acc, child_box, child_dimensions} ->
                 child_acc = namespace_live_acc(child_acc, prefix, child_opts)
 
-                {merge_live_acc(acc, child_acc, current_id), child_box}
+                {
+                  acc
+                  |> merge_live_acc(child_acc, current_id)
+                  |> maybe_add_live_root_focus(attrs, full_id),
+                  child_box
+                }
                 |> then(fn {merged_acc, rendered_box} ->
                   {
                     %{
@@ -481,10 +491,10 @@ defmodule Breeze.Renderer do
                 end)
 
               :preloaded ->
-                {acc, nil}
+                {maybe_add_live_root_focus(acc, attrs, full_id), nil}
 
               _ ->
-                {acc, nil}
+                {maybe_add_live_root_focus(acc, attrs, full_id), nil}
             end
 
           _ ->
@@ -842,6 +852,18 @@ defmodule Breeze.Renderer do
     end
   end
 
+  defp maybe_add_live_root_focus(acc, attrs, full_id) do
+    if truthy_live_attr?(fetch_live_attr(attrs, :focusable, false)) do
+      %{
+        acc
+        | ids: [full_id | acc.ids],
+          focusables: [full_id | acc.focusables]
+      }
+    else
+      acc
+    end
+  end
+
   defp maybe_attach_live_viewports(root_tag, root_children, opts) do
     case Keyword.get(opts, :live_view) do
       fun when is_function(fun, 2) ->
@@ -1126,6 +1148,8 @@ defmodule Breeze.Renderer do
       true -> default
     end
   end
+
+  defp truthy_live_attr?(value), do: value in [true, "true"]
 
   defp normalize_animation_result({:ok, %Box{} = box, _opts}), do: {box, %{}}
   defp normalize_animation_result({:ok, %Box{} = box}), do: {box, %{}}

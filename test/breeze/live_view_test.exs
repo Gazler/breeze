@@ -117,6 +117,40 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule RootCounterChild do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, assign(term, count: 0)}
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box>Root count: {@count}</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "+"}, term) do
+      {:noreply, assign(term, count: term.assigns.count + 1)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule FocusableLiveRootExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <live id="child" view={RootCounterChild} start_opts={[]} focusable>
+        </live>
+      </box>
+      """
+    end
+  end
+
   defmodule RenderOnlyChild do
     use Breeze.View
 
@@ -987,6 +1021,25 @@ defmodule Breeze.LiveViewTest do
              ChildServer.render_snapshot(root_pid, terminal: terminal, live_view: live_view)
 
     assert %{focused: nil} = ChildServer.metadata(root_pid)
+  end
+
+  test "focusable live child keeps root focus when child has no local focus target" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, root_pid} = ChildServer.start(view: FocusableLiveRootExample, terminal: terminal)
+
+    assert {:ok, _acc, box, _decorations} =
+             ChildServer.render_snapshot(root_pid, terminal: terminal)
+
+    assert box.content =~ "Root count: 0"
+    assert %{focused: "child"} = ChildServer.metadata(root_pid)
+
+    assert {:noreply, "child", true} = ChildServer.dispatch_input(root_pid, "+")
+    assert {:noreply, "child", true} = ChildServer.dispatch_input(root_pid, "+")
+
+    assert {:ok, _acc, box, _decorations} =
+             ChildServer.render_snapshot(root_pid, terminal: terminal)
+
+    assert box.content =~ "Root count: 2"
   end
 
   test "root child forwards mouse wheel input to a live child scroll implicit" do

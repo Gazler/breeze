@@ -2349,6 +2349,9 @@ defmodule Breeze.Server do
   defp namespace_child_reply({:noreply, focused}, child_id),
     do: {:noreply, namespace_child_focus(focused, child_id)}
 
+  defp namespace_child_reply({:noreply, nil, true}, child_id),
+    do: {:noreply, child_id, true}
+
   defp namespace_child_reply({:noreply, focused, consumed}, child_id),
     do: {:noreply, namespace_child_focus(focused, child_id), consumed}
 
