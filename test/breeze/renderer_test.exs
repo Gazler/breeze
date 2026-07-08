@@ -144,6 +144,20 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule ScreenDimBackdropExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-12 height-5 bg-surface text">
+        <box class="absolute left-1 top-1 text-primary">Hi</box>
+        <.modal id="modal" width={4} height={2} dim/>
+      </box>
+      """
+    end
+  end
+
   defmodule ScrollImplicit do
     def init(_children, last_state), do: %{offset_y: last_state[:offset_y] || 0, offset_x: 0}
 
@@ -497,6 +511,21 @@ defmodule Breeze.RendererTest do
                  "\e[48;2;25;53;73;38;2;74;156;255m└─────┘\e[0m"
     end
 
+    test "screen dim keeps backdrop text and fill backgrounds consistent" do
+      theme = Breeze.Theme.builtin(:nebula)
+
+      {_acc, box} =
+        Renderer.render(ScreenDimBackdropExample, %{},
+          theme: theme,
+          terminal: %Termite.Terminal{size: %{width: 12, height: 5}}
+        )
+
+      assert map_size(box.layer_map) < 30
+      assert {" ", blank_style} = layer_point(box.layer_map, 1, 0)
+      assert {"H", text_style} = layer_point(box.layer_map, 1, 1)
+      assert background_rgb(blank_style) == background_rgb(text_style)
+    end
+
     test "theme: false preserves legacy unthemed defaults" do
       assert Renderer.render_to_string(ThemeDefaultsExample, %{}, theme: false) ==
                "┌─────┐\n│Hello│\n└─────┘"
@@ -770,4 +799,37 @@ defmodule Breeze.RendererTest do
                """
     end
   end
+
+  defp background_rgb(style) do
+    case Regex.run(~r/48;2;(\d+);(\d+);(\d+)/, style) do
+      [_, red, green, blue] ->
+        {String.to_integer(red), String.to_integer(green), String.to_integer(blue)}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp layer_point(layer_map, y, x) do
+    Map.get(layer_map, {y, x}) || default_fill_at(layer_map, y, x)
+  end
+
+  defp default_fill_at(layer_map, y, x) do
+    layer_map
+    |> Map.get(:__default_fill__)
+    |> default_fill_entries()
+    |> Enum.find_value(fn
+      {{_char, _style} = point, left, top, right, bottom}
+      when x >= left and x <= right and y >= top and y <= bottom ->
+        point
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp default_fill_entries(nil), do: []
+  defp default_fill_entries([]), do: []
+  defp default_fill_entries([_ | _] = fills), do: fills
+  defp default_fill_entries({_point, _left, _top, _right, _bottom} = fill), do: [fill]
 end

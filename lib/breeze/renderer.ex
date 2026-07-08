@@ -1232,7 +1232,7 @@ defmodule Breeze.Renderer do
   end
 
   defp dim_layer_map_outside_regions(layer_map, regions, background, amount) do
-    {dimmed_map, _seq_cache} =
+    {dimmed_map, seq_cache} =
       Enum.reduce(layer_map, {%{}, %{}}, fn
         {key, value}, {acc, seq_cache} when key == :__wide_glyphs__ ->
           {Map.put(acc, key, value), seq_cache}
@@ -1249,8 +1249,111 @@ defmodule Breeze.Renderer do
           end
       end)
 
-    dimmed_map
+    dim_default_fill_entries(
+      dimmed_map,
+      Map.get(layer_map, :__default_fill__),
+      regions,
+      background,
+      amount,
+      seq_cache
+    )
   end
+
+  defp dim_default_fill_entries(layer_map, fills, regions, background, amount, seq_cache) do
+    fill_entries = default_fill_entries(fills)
+
+    if fill_entries == [] do
+      layer_map
+    else
+      {dimmed_fills, _cache} =
+        Enum.reduce(fill_entries, {[], seq_cache}, fn
+          {{char, seq}, left, top, right, bottom} = fill, {acc, cache}
+          when left <= right and top <= bottom ->
+            {dimmed_seq, cache} = dim_ansi_sequence(seq, background, amount, cache)
+
+            fills =
+              split_default_fill_around_regions(
+                fill,
+                {char, dimmed_seq},
+                regions
+              )
+
+            {Enum.reverse(fills, acc), cache}
+
+          _fill, acc ->
+            acc
+        end)
+
+      Map.put(layer_map, :__default_fill__, Enum.reverse(dimmed_fills))
+    end
+  end
+
+  defp default_fill_entries(nil), do: []
+  defp default_fill_entries([]), do: []
+  defp default_fill_entries([_ | _] = fills), do: fills
+  defp default_fill_entries({_point, _left, _top, _right, _bottom} = fill), do: [fill]
+
+  defp split_default_fill_around_regions({point, left, top, right, bottom}, dimmed_point, regions) do
+    rect = {left, top, right, bottom}
+
+    original_fills =
+      Enum.flat_map(regions, fn region ->
+        case intersect_rect(rect, region) do
+          nil -> []
+          {left, top, right, bottom} -> [{point, left, top, right, bottom}]
+        end
+      end)
+
+    dimmed_fills =
+      rect
+      |> subtract_regions(regions)
+      |> Enum.map(fn {left, top, right, bottom} ->
+        {dimmed_point, left, top, right, bottom}
+      end)
+
+    original_fills ++ dimmed_fills
+  end
+
+  defp subtract_regions(rect, regions) do
+    Enum.reduce(regions, [rect], fn region, rects ->
+      Enum.flat_map(rects, &subtract_region(&1, region))
+    end)
+  end
+
+  defp subtract_region(rect, region) do
+    case intersect_rect(rect, region) do
+      nil ->
+        [rect]
+
+      {cut_left, cut_top, cut_right, cut_bottom} ->
+        {left, top, right, bottom} = rect
+
+        [
+          maybe_rect(left, top, right, cut_top - 1),
+          maybe_rect(left, cut_bottom + 1, right, bottom),
+          maybe_rect(left, cut_top, cut_left - 1, cut_bottom),
+          maybe_rect(cut_right + 1, cut_top, right, cut_bottom)
+        ]
+        |> Enum.reject(&is_nil/1)
+    end
+  end
+
+  defp intersect_rect({left, top, right, bottom}, region) do
+    intersect_left = max(left, region.left)
+    intersect_top = max(top, region.top)
+    intersect_right = min(right, region.right)
+    intersect_bottom = min(bottom, region.bottom)
+
+    if intersect_left <= intersect_right and intersect_top <= intersect_bottom do
+      {intersect_left, intersect_top, intersect_right, intersect_bottom}
+    end
+  end
+
+  defp maybe_rect(left, top, right, bottom) when left <= right and top <= bottom do
+    {left, top, right, bottom}
+  end
+
+  defp maybe_rect(_left, _top, _right, _bottom), do: nil
 
   defp point_in_any_region?(x, y, regions) do
     Enum.any?(regions, fn region ->
