@@ -1196,7 +1196,9 @@ defmodule Breeze.Renderer do
         layer_map = dim_layer_map_outside_regions(box.layer_map, regions, background, 0.45)
 
         fixed_layer_map =
-          dim_layer_map_outside_regions(box.fixed_layer_map, regions, background, 0.45)
+          box
+          |> Map.get(:fixed_layer_map, %{})
+          |> dim_layer_map_outside_regions(regions, background, 0.45)
 
         %{
           box
@@ -1404,16 +1406,55 @@ defmodule Breeze.Renderer do
   end
 
   defp dim_ansi_sgr_sequence(seq, background, amount) do
-    Regex.replace(~r/\e\[([0-9;]+)m/, seq, fn _, params ->
-      params =
-        params
-        |> String.split(";", trim: true)
-        |> dim_sgr_params(background, amount, [])
-        |> Enum.join(";")
-
-      "\e[" <> params <> "m"
-    end)
+    do_dim_ansi_sgr_sequence(seq, background, amount, "")
   end
+
+  defp do_dim_ansi_sgr_sequence("", _background, _amount, acc), do: acc
+
+  defp do_dim_ansi_sgr_sequence(seq, background, amount, acc) do
+    case :binary.match(seq, "\e[") do
+      :nomatch ->
+        acc <> seq
+
+      {start, 2} ->
+        prefix = binary_part(seq, 0, start)
+        after_prefix = binary_part(seq, start + 2, byte_size(seq) - start - 2)
+
+        case :binary.match(after_prefix, "m") do
+          :nomatch ->
+            acc <> seq
+
+          {stop, 1} ->
+            params = binary_part(after_prefix, 0, stop)
+            rest = binary_part(after_prefix, stop + 1, byte_size(after_prefix) - stop - 1)
+
+            if sgr_params?(params) do
+              dimmed_params =
+                params
+                |> String.split(";", trim: true)
+                |> dim_sgr_params(background, amount, [])
+                |> Enum.join(";")
+
+              do_dim_ansi_sgr_sequence(
+                rest,
+                background,
+                amount,
+                acc <> prefix <> "\e[" <> dimmed_params <> "m"
+              )
+            else
+              do_dim_ansi_sgr_sequence(after_prefix, background, amount, acc <> prefix <> "\e[")
+            end
+        end
+    end
+  end
+
+  defp sgr_params?(params) when byte_size(params) > 0 do
+    params
+    |> :binary.bin_to_list()
+    |> Enum.all?(fn char -> char in ?0..?9 or char == ?; end)
+  end
+
+  defp sgr_params?(_params), do: false
 
   defp dim_sgr_params(["38", "2", red, green, blue | rest], background, amount, acc) do
     {dim_red, dim_green, dim_blue} =
@@ -1673,23 +1714,35 @@ defmodule Breeze.Renderer do
   defp profile(nil, _label, _metric, fun), do: fun.()
 
   defp profile(scope, label, metric, fun) do
-    :telemetry.span(
-      [:breeze, :render],
-      %{scope: scope, label: label, metric: metric},
-      fn ->
-        result = fun.()
-        {result, %{scope: scope, label: label, metric: metric}}
-      end
-    )
+    if telemetry_enabled?() do
+      :telemetry.span(
+        [:breeze, :render],
+        %{scope: scope, label: label, metric: metric},
+        fn ->
+          result = fun.()
+          {result, %{scope: scope, label: label, metric: metric}}
+        end
+      )
+    else
+      fun.()
+    end
   end
 
   defp emit_metric(nil, _label, _metric, _value), do: :ok
 
   defp emit_metric(scope, label, metric, value) do
-    :telemetry.execute(
-      [:breeze, :render, :metric],
-      %{value: value},
-      %{scope: scope, label: label, metric: metric}
-    )
+    if telemetry_enabled?() do
+      :telemetry.execute(
+        [:breeze, :render, :metric],
+        %{value: value},
+        %{scope: scope, label: label, metric: metric}
+      )
+    else
+      :ok
+    end
+  end
+
+  defp telemetry_enabled? do
+    not Application.get_env(:breeze, :disable_telemetry, false)
   end
 end

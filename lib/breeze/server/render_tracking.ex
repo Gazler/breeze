@@ -4,8 +4,16 @@ defmodule Breeze.Server.RenderTracking do
   @table __MODULE__
 
   def begin do
-    ensure_table!()
-    make_ref()
+    if disabled?() do
+      :disabled
+    else
+      ensure_table!()
+      make_ref()
+    end
+  end
+
+  def finish(:disabled) do
+    empty()
   end
 
   def finish(ref) do
@@ -52,9 +60,22 @@ defmodule Breeze.Server.RenderTracking do
   end
 
   defp track(ref, kind, item) do
-    ensure_table!()
-    true = :ets.insert(@table, {ref, kind, item})
+    if ref == :disabled or disabled?() do
+      :ok
+    else
+      ensure_table!()
+      true = :ets.insert(@table, {ref, kind, item})
+    end
+
     :ok
+  end
+
+  defp disabled? do
+    Application.get_env(:breeze, :disable_render_tracking, false)
+  end
+
+  defp empty do
+    %{missing: [], decorations: [], child_timings: []}
   end
 
   defp tracked_decoration_identity(decoration) do

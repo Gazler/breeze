@@ -7,23 +7,33 @@ defmodule Breeze.DebugProfiler do
   @table :breeze_debug_profile
 
   def reset(scope) do
-    ensure_handler()
-    delete_scope(scope)
+    if enabled?() do
+      ensure_handler()
+      delete_scope(scope)
+    end
 
     :ok
   end
 
   def snapshot(scope) do
-    ensure_handler()
+    if enabled?() do
+      ensure_handler()
 
-    entries = match_scope(scope)
-    delete_scope(scope)
+      entries = match_scope(scope)
+      delete_scope(scope)
 
-    entries
-    |> Enum.map(fn {{^scope, label, metric}, value} ->
-      %{label: label, metric: metric, value: value}
-    end)
-    |> Enum.sort_by(fn %{value: value} -> sort_value(value) end, :desc)
+      entries
+      |> Enum.map(fn {{^scope, label, metric}, value} ->
+        %{label: label, metric: metric, value: value}
+      end)
+      |> Enum.sort_by(fn %{value: value} -> sort_value(value) end, :desc)
+    else
+      []
+    end
+  end
+
+  def enabled? do
+    not Application.get_env(:breeze, :disable_telemetry, false)
   end
 
   defp ensure_handler do

@@ -592,6 +592,59 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule FastDecoration do
+    @frames ["a", "b", "c"]
+
+    def init(_items, _root_attrs, last_state),
+      do: {:ok, last_state, rerender_every: 20}
+
+    def handle_modifiers(:root, _flags, _state), do: []
+    def handle_modifiers(:child, _flags, _state), do: []
+
+    def animate(:root, box, _flags, _state, %{frame: frame} = ctx) do
+      content = Enum.at(@frames, rem(frame, length(@frames)))
+
+      case Map.get(ctx, :layout) do
+        %Breeze.Viewport{left: left, top: top} ->
+          {:ok, %{box | content: content}, overlays: [%{x: left, y: top, content: content}]}
+
+        _layout ->
+          %{box | content: content}
+      end
+    end
+
+    def animate(:child, box, _flags, _state, _ctx), do: box
+  end
+
+  defmodule FasterDecorationRoot do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term) do
+      {:ok, term |> focus("search") |> assign(query: "", loading?: false)}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <.input id="search" input-value={@query} br-change="query_changed" style="width-20"/>
+        <box :if={@loading?} id="fast" implicit={FastDecoration} style="width-1">a</box>
+      </box>
+      """
+    end
+
+    def handle_event("query_changed", %{value: value}, term) do
+      {:noreply, assign(term, query: value)}
+    end
+
+    def handle_event("show_loading", _event, term) do
+      {:noreply, assign(term, loading?: true)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule CrashingView do
     use Breeze.View
 
@@ -1219,6 +1272,45 @@ defmodule Breeze.LiveViewTest do
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: nil, implicit_state: %{})
     assert box.content =~ "Frame: 1"
+  end
+
+  test "server reschedules animation when a faster decoration appears" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: FasterDecorationRoot,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+
+    initial_state = :sys.get_state(pid)
+    assert Enum.any?(initial_state.frame.decorations, &(&1.id == "search"))
+    assert is_reference(initial_state.frame.animation_timer)
+
+    assert {:noreply, "search", true} =
+             ChildServer.dispatch_event(initial_state.view_pid, "show_loading", %{})
+
+    send(pid, :child_invalidated)
+
+    assert wait_until(fn ->
+             state = :sys.get_state(pid)
+
+             Enum.find_value(state.frame.decorations, fn
+               %{
+                 id: "fast",
+                 frame_index: frame_index,
+                 current_overlays: [%{content: content} | _]
+               }
+               when frame_index > 0 ->
+                 content
+
+               _decoration ->
+                 false
+             end)
+           end) in ["b", "c"]
   end
 
   test "server preserves private-use glyphs in terminal output" do

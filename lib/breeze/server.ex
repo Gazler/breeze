@@ -244,7 +244,7 @@ defmodule Breeze.Server do
 
     session = self()
 
-    {:ok, view_pid} =
+    child_start_result =
       Breeze.ChildServer.start(
         view: view,
         start_opts: start_opts,
@@ -261,6 +261,8 @@ defmodule Breeze.Server do
           child_id -> send(session, {:child_invalidated, child_id})
         end
       )
+
+    {:ok, view_pid} = child_start_result
 
     Process.monitor(view_pid)
 
@@ -1016,13 +1018,19 @@ defmodule Breeze.Server do
   end
 
   defp safe_focused_metadata(state) do
-    case Breeze.ChildServer.metadata(state.view_pid) do
-      %{focused: focused, theme: theme} -> {focused, theme}
-      %{focused: focused} -> {focused, state.theme}
-      _ -> {nil, state.theme}
+    case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
+      {:ok, %{focused: focused, theme: theme}} ->
+        {focused, theme}
+
+      {:ok, %{focused: focused}} ->
+        {focused, state.theme}
+
+      {:crash, _crash} ->
+        {nil, state.theme}
+
+      _ ->
+        {nil, state.theme}
     end
-  catch
-    :exit, _reason -> {nil, state.theme}
   end
 
   defp maybe_render_after_input(%{input: %{pending_ref: ref}} = state) when not is_nil(ref),
@@ -1544,26 +1552,45 @@ defmodule Breeze.Server do
 
   defp schedule_animation(%{frame: %{decorations: []}} = state), do: state
 
-  defp schedule_animation(%{frame: %{animation_timer: nil}} = state) do
+  defp schedule_animation(state) do
     case next_tick_delay(state) do
       nil ->
         update_frame(state, next_tick_at: nil)
 
       delay ->
-        timer = Process.send_after(self(), :animation_tick, delay)
-
-        %{
-          state
-          | frame: %{
-              state.frame
-              | animation_timer: timer,
-                next_tick_at: System.monotonic_time(:millisecond) + delay
-            }
-        }
+        schedule_animation_tick(state, delay)
     end
   end
 
-  defp schedule_animation(state), do: state
+  defp schedule_animation_tick(state, delay) do
+    next_tick_at = System.monotonic_time(:millisecond) + delay
+
+    case state.frame do
+      %{animation_timer: timer, next_tick_at: current_tick_at}
+      when is_reference(timer) and is_integer(current_tick_at) and current_tick_at <= next_tick_at ->
+        state
+
+      %{animation_timer: timer} when is_reference(timer) ->
+        Process.cancel_timer(timer)
+        put_animation_timer(state, next_tick_at, delay)
+
+      _ ->
+        put_animation_timer(state, next_tick_at, delay)
+    end
+  end
+
+  defp put_animation_timer(state, next_tick_at, delay) do
+    timer = Process.send_after(self(), :animation_tick, delay)
+
+    %{
+      state
+      | frame: %{
+          state.frame
+          | animation_timer: timer,
+            next_tick_at: next_tick_at
+        }
+    }
+  end
 
   defp next_tick_delay(state) do
     state.frame.decorations

@@ -327,6 +327,22 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule NestedCenteredFixedPositionExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen overflow-hidden">
+        <box class="height-3 width-full overflow-hidden">Header</box>
+        <box class="height-1 width-full overflow-hidden">
+          <box class="fixed center">OK</box>
+        </box>
+        <box class="height-1 width-full overflow-hidden">Footer</box>
+      </box>
+      """
+    end
+  end
+
   defmodule InsetFixedPositionExample do
     use Breeze.View
 
@@ -707,13 +723,25 @@ defmodule Breeze.RendererTest do
           terminal: %Termite.Terminal{size: %{width: 10, height: 4}}
         )
 
-      assert box.content ==
-               """
-                         
-                   OK    
-                         
-                         \
-               """
+      lines = String.split(box.content, "\n")
+
+      assert length(lines) == 4
+      assert Enum.all?(lines, &(String.length(&1) == 10))
+      assert lines |> Enum.at(1) |> String.slice(4, 2) == "OK"
+    end
+
+    test "keeps nested centered fixed positioning relative to the screen" do
+      {_, box} =
+        Renderer.render(NestedCenteredFixedPositionExample, %{},
+          terminal: %Termite.Terminal{size: %{width: 20, height: 10}}
+        )
+
+      plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+      lines = String.split(plain_content, "\n")
+
+      assert lines |> Enum.at(4) |> String.slice(9, 2) == "OK"
+      refute lines |> Enum.at(7) |> String.slice(9, 2) == "OK"
+      assert lines |> Enum.at(4) |> String.slice(0, 6) == "Footer"
     end
 
     test "supports inset positioning for fixed boxes" do

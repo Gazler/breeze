@@ -164,6 +164,7 @@ defmodule Breeze.ChildServer do
   def handle_call({:render_snapshot, opts}, _from, term) do
     {term, acc, box, decorations} = render_term(term, opts)
     box = maybe_compact_snapshot_box(box, opts)
+
     {:reply, {:ok, acc, box, decorations}, term}
   end
 
@@ -510,7 +511,9 @@ defmodule Breeze.ChildServer do
         term,
         final_opts,
         initial_implicit_state,
-        explicit_focus?
+        explicit_focus?,
+        profile_scope,
+        profile_label
       )
 
     first_pass_implicit_state =
@@ -586,7 +589,14 @@ defmodule Breeze.ChildServer do
     {term, acc, box, decorations}
   end
 
-  defp maybe_bootstrap_initial_render_state(term, opts, implicit_state, explicit_focus?) do
+  defp maybe_bootstrap_initial_render_state(
+         term,
+         opts,
+         implicit_state,
+         explicit_focus?,
+         profile_scope,
+         profile_label
+       ) do
     if term.implicit_state == %{} and term.implicit_meta == %{} do
       prepass_opts =
         opts
@@ -595,22 +605,32 @@ defmodule Breeze.ChildServer do
         |> Keyword.put(:live_placeholder, true)
         |> Keyword.put(:layout_prepass, true)
 
-      {acc, box} = Breeze.Renderer.render_tree(term.view, term.assigns, prepass_opts)
+      {acc, box} =
+        profile(profile_scope, profile_label, :bootstrap_render_tree_us, fn ->
+          Breeze.Renderer.render_tree(term.view, term.assigns, prepass_opts)
+        end)
 
-      %{dimensions: dimensions} = BackBreeze.Box.render_with_dimensions(box, prepass_opts)
+      %{dimensions: dimensions} =
+        profile(profile_scope, profile_label, :bootstrap_layout_us, fn ->
+          BackBreeze.Box.render_structured_with_dimensions(box, prepass_opts)
+        end)
 
       %{elements: elements, mouse_targets: mouse_targets} =
-        Breeze.RenderState.build_layout(
-          acc,
-          dimensions,
-          Map.get(acc, :live_dimensions, %{})
-        )
+        profile(profile_scope, profile_label, :bootstrap_build_layout_us, fn ->
+          Breeze.RenderState.build_layout(
+            acc,
+            dimensions,
+            Map.get(acc, :live_dimensions, %{})
+          )
+        end)
 
       bootstrap =
-        Breeze.RenderState.bootstrap(
-          %{term | implicit_state: implicit_state},
-          acc
-        )
+        profile(profile_scope, profile_label, :bootstrap_state_us, fn ->
+          Breeze.RenderState.bootstrap(
+            %{term | implicit_state: implicit_state},
+            acc
+          )
+        end)
 
       focus_memory =
         Breeze.Focus.remember_focus(
