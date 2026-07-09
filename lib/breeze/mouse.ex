@@ -16,7 +16,9 @@ defmodule Breeze.Mouse do
     with [raw_code, raw_x, raw_tail] <- String.split(rest, ";", parts: 3),
          {code, ""} <- Integer.parse(raw_code),
          {x, ""} <- Integer.parse(raw_x),
-         <<raw_y::binary-size(byte_size(raw_tail) - 1), suffix>> <- raw_tail,
+         tail_size when tail_size > 0 <- byte_size(raw_tail),
+         raw_y_size = tail_size - 1,
+         <<raw_y::binary-size(^raw_y_size), suffix>> <- raw_tail,
          {y, ""} <- Integer.parse(raw_y),
          true <- suffix in [?M, ?m] do
       {:ok,

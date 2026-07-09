@@ -216,7 +216,7 @@ defmodule Breeze.Server.Frame do
   defp do_wide_background_line(<<"\e[", rest::binary>>, acc) do
     case :binary.match(rest, "m") do
       {index, 1} ->
-        <<params::binary-size(index), "m", rest::binary>> = rest
+        <<params::binary-size(^index), "m", rest::binary>> = rest
         do_wide_background_line(rest, [["\e[", params, "m"] | acc])
 
       :nomatch ->

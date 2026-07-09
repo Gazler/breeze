@@ -169,8 +169,6 @@ defmodule Breeze.RemoteInspector do
     end
   end
 
-  defp default_inspector_node(_current_node), do: nil
-
   defp application_for_module(module) when is_atom(module),
     do: Application.get_application(module)
 

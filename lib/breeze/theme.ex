@@ -481,10 +481,6 @@ defmodule Breeze.Theme do
   defp normalize_mode("custom"), do: :custom
   defp normalize_mode(_), do: nil
 
-  defp system_defaults(nil) do
-    %{foreground_color: 7, background_color: 0, border_color: 8}
-  end
-
   defp system_defaults(terminal_palette) do
     background =
       terminal_palette_lookup(terminal_palette, :background) ||
@@ -534,20 +530,6 @@ defmodule Breeze.Theme do
       accent: 5,
       surface: tone_mix(background, foreground, 0.08, 8),
       panel: tone_mix(background, foreground, 0.14, 0)
-    }
-  end
-
-  defp system_palette(nil) do
-    %{
-      muted: 8,
-      primary: 12,
-      secondary: 14,
-      warning: 11,
-      error: 9,
-      success: 10,
-      accent: 13,
-      surface: 0,
-      panel: 0
     }
   end
 
@@ -624,7 +606,7 @@ defmodule Breeze.Theme do
   end
 
   defp terminal_palette_from_terminal(%Termite.Terminal{} = terminal),
-    do: Map.get(terminal, :palette) || Breeze.Theme.Probe.cached_terminal_palette(terminal)
+    do: Breeze.Theme.Probe.cached_terminal_palette(terminal)
 
   defp terminal_palette_from_terminal(_), do: nil
 
@@ -696,7 +678,6 @@ defmodule Breeze.Theme do
 
   defp normalize_color_value(color), do: color
 
-  defp terminal_palette_lookup(nil, _key), do: nil
   defp terminal_palette_lookup(palette, key), do: Map.get(palette, key)
 
   defp system_palette_available?(terminal_palette) when is_map(terminal_palette) do

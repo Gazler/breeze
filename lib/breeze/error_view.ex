@@ -448,8 +448,6 @@ defmodule Breeze.ErrorView do
     end
   end
 
-  defp selected_frame_lines(nil), do: ["No stacktrace frames captured"]
-
   defp selected_frame_lines(frame) do
     [
       "",

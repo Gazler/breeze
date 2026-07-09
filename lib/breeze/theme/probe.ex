@@ -22,7 +22,6 @@ defmodule Breeze.Theme.Probe do
   @spec probe_status(Termite.Terminal.t() | nil) :: :ready | :pending | :unavailable
   def probe_status(%Termite.Terminal{} = terminal) do
     cond do
-      is_map(Map.get(terminal, :palette)) -> :ready
       cached_palette_status(terminal) == :pending -> :pending
       cached_palette_status(terminal) == :ready -> :ready
       true -> :unavailable
@@ -311,6 +310,4 @@ defmodule Breeze.Theme.Probe do
     Enum.all?([:background, :foreground], &match?({_, _, _}, Map.get(palette, &1))) and
       Enum.all?(@required_palette_indexes, &match?({_, _, _}, Map.get(palette, &1)))
   end
-
-  defp palette_probe_complete?(_), do: false
 end

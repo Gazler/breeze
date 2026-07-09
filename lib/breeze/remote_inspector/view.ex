@@ -855,8 +855,6 @@ defmodule Breeze.RemoteInspector.View do
   defp render_tree_expanded(%{expanded: expanded}) when is_list(expanded), do: expanded
   defp render_tree_expanded(_tree), do: []
 
-  defp default_render_tree_expanded(nil, _selected_id), do: []
-
   defp default_render_tree_expanded(tree, selected_id) do
     case render_tree_path(tree, selected_id) do
       [] ->

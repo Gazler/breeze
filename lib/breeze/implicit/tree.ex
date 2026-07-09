@@ -226,8 +226,6 @@ defmodule Breeze.Implicit.Tree do
     }
   end
 
-  defp row_from_attrs(row), do: row_from_child(row)
-
   defp row_from_child(child) do
     %{
       value: Map.fetch!(child, :value),

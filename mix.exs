@@ -13,6 +13,7 @@ defmodule Breeze.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
+      test_ignore_filters: [~r{(^|/)test/support/}],
       name: "Breeze",
       source_url: "https://github.com/Gazler/breeze",
       docs: docs()
@@ -37,8 +38,8 @@ defmodule Breeze.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:termite, github: "gazler/termite", override: true},
-      {:back_breeze, github: "gazler/back_breeze"},
+      {:termite, "~> 0.4 or ~> 0.5"},
+      {:back_breeze, "~> 0.4.1"},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
       {:telemetry, "~> 1.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
