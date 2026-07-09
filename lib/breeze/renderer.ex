@@ -463,6 +463,7 @@ defmodule Breeze.Renderer do
             case fun.(attrs, child_opts) do
               {:rendered, prefix, child_acc, child_box} ->
                 child_acc = namespace_live_acc(child_acc, prefix, child_opts)
+                child_box = Box.localize_fixed_layer_map(child_box)
 
                 {
                   acc
@@ -473,6 +474,7 @@ defmodule Breeze.Renderer do
 
               {:rendered, prefix, child_acc, child_box, child_dimensions} ->
                 child_acc = namespace_live_acc(child_acc, prefix, child_opts)
+                child_box = Box.localize_fixed_layer_map(child_box)
 
                 {
                   acc
@@ -1174,10 +1176,14 @@ defmodule Breeze.Renderer do
         background = Theme.resolve_color(theme, :background_color)
         layer_map = dim_layer_map_outside_regions(box.layer_map, regions, background, 0.45)
 
+        fixed_layer_map =
+          dim_layer_map_outside_regions(box.fixed_layer_map, regions, background, 0.45)
+
         %{
           box
           | layer_map: layer_map,
-            content: Box.layer_map_to_content(layer_map, box.width, box.height)
+            fixed_layer_map: fixed_layer_map,
+            content: Box.layer_maps_to_content(layer_map, fixed_layer_map, box.width, box.height)
         }
       end
     else

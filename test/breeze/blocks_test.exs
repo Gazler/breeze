@@ -581,6 +581,35 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defp rendered_cell!(box, point) do
+    rendered_cell(box, point) || flunk("expected rendered cell at #{inspect(point)}")
+  end
+
+  defp rendered_cell(box, point) do
+    layer_cell(box.fixed_layer_map, point) || layer_cell(box.layer_map, point)
+  end
+
+  defp layer_cell(layer_map, point) when is_map(layer_map) do
+    Map.get(layer_map, point) || default_fill_cell(Map.get(layer_map, :__default_fill__), point)
+  end
+
+  defp default_fill_cell(nil, _point), do: nil
+
+  defp default_fill_cell({_cell, _left, _top, _right, _bottom} = fill, point) do
+    default_fill_cell([fill], point)
+  end
+
+  defp default_fill_cell(fills, {y, x}) when is_list(fills) do
+    Enum.find_value(fills, fn
+      {cell, left, top, right, bottom}
+      when left <= x and x <= right and top <= y and y <= bottom ->
+        cell
+
+      _fill ->
+        nil
+    end)
+  end
+
   describe "merge_class/2" do
     test "matches merge_style semantics" do
       assert Blocks.merge_class("border width-24 height-8", "width-32 bg-4") ==
@@ -737,7 +766,7 @@ defmodule Breeze.BlocksTest do
         terminal: %Termite.Terminal{size: %{width: 30, height: 10}}
       )
 
-    assert {".", gap_style} = Map.fetch!(box.layer_map, {6, 10})
+    assert {".", gap_style} = rendered_cell!(box, {6, 10})
     assert gap_style =~ "48;5;4"
   end
 
@@ -752,7 +781,7 @@ defmodule Breeze.BlocksTest do
         terminal: %Termite.Terminal{size: %{width: 30, height: 12}}
       )
 
-    assert {"▔", bottom_border_style} = Map.fetch!(box.layer_map, {6, 10})
+    assert {"▔", bottom_border_style} = rendered_cell!(box, {6, 10})
     refute bottom_border_style =~ "49m"
 
     {_acc, box} =
@@ -760,10 +789,10 @@ defmodule Breeze.BlocksTest do
         terminal: %Termite.Terminal{size: %{width: 30, height: 12}}
       )
 
-    assert {".", gap_style} = Map.fetch!(box.layer_map, {6, 10})
+    assert {".", gap_style} = rendered_cell!(box, {6, 10})
     assert gap_style =~ "48;5;4"
 
-    assert {"▁", top_border_style} = Map.fetch!(box.layer_map, {1, 10})
+    assert {"▁", top_border_style} = rendered_cell!(box, {1, 10})
     refute top_border_style =~ "49m"
     assert top_border_style =~ ~r/48;(?:5|2);/
   end
@@ -793,15 +822,15 @@ defmodule Breeze.BlocksTest do
 
     assert stack_box.top == 1
     assert flash_box.top == 0
-    assert {"┌", _style} = Map.fetch!(box.layer_map, {1, 1})
-    refute match?({"┌", _style}, Map.get(box.layer_map, {2, 1}))
+    assert {"┌", _style} = rendered_cell!(box, {1, 1})
+    refute match?({"┌", _style}, rendered_cell(box, {2, 1}))
   end
 
   test "flash highlight fills the message content height" do
     {_acc, box} = Renderer.render(FlashTitledExample, %{})
 
-    assert {" ", first_row_style} = Map.fetch!(box.layer_map, {1, 1})
-    assert {" ", second_row_style} = Map.fetch!(box.layer_map, {2, 1})
+    assert {" ", first_row_style} = rendered_cell!(box, {1, 1})
+    assert {" ", second_row_style} = rendered_cell!(box, {2, 1})
 
     assert first_row_style =~ "48;5;5"
     assert second_row_style =~ "48;5;5"
@@ -819,17 +848,17 @@ defmodule Breeze.BlocksTest do
     flash_box = Map.fetch!(acc.boxes, "square-flash")
     assert flash_box.style.border == BackBreeze.Border.none()
 
-    assert {"▌", border_strip_style} = Map.fetch!(box.layer_map, {1, 0})
-    assert {" ", inner_strip_style} = Map.fetch!(box.layer_map, {1, 1})
-    assert {"▌", text_row_strip_style} = Map.fetch!(box.layer_map, {2, 0})
+    assert {"▌", border_strip_style} = rendered_cell!(box, {1, 0})
+    assert {" ", inner_strip_style} = rendered_cell!(box, {1, 1})
+    assert {"▌", text_row_strip_style} = rendered_cell!(box, {2, 0})
 
     assert border_strip_style =~ "48;5;3"
     assert border_strip_style =~ "38;5;7"
     assert inner_strip_style =~ "48;5;3"
     assert text_row_strip_style =~ "48;5;3"
 
-    assert {"▁", top_border_style} = Map.fetch!(box.layer_map, {0, 0})
-    assert {"▔", bottom_border_style} = Map.fetch!(box.layer_map, {5, 0})
+    assert {"▁", top_border_style} = rendered_cell!(box, {0, 0})
+    assert {"▔", bottom_border_style} = rendered_cell!(box, {5, 0})
 
     refute top_border_style =~ "49m"
     refute bottom_border_style =~ "49m"
@@ -841,12 +870,12 @@ defmodule Breeze.BlocksTest do
     {_acc, box} =
       Renderer.render(FlashSquareBorderExample, %{}, theme: Breeze.Theme.builtin(:gruvbox))
 
-    assert {"▁", top_border_style} = Map.fetch!(box.layer_map, {0, 0})
+    assert {"▁", top_border_style} = rendered_cell!(box, {0, 0})
 
     refute top_border_style =~ "49m"
     assert top_border_style =~ "48;2;40;40;40"
 
-    assert {"▐", right_border_style} = Map.fetch!(box.layer_map, {1, 24})
+    assert {"▐", right_border_style} = rendered_cell!(box, {1, 24})
     assert right_border_style =~ "48;2;50;48;47"
   end
 
@@ -856,7 +885,7 @@ defmodule Breeze.BlocksTest do
         flash: [%{id: "hex-flash", kind: :info, message: "Hex", highlight: "#f0a"}]
       })
 
-    assert {" ", hex_highlight_style} = Map.fetch!(hex_box.layer_map, {1, 1})
+    assert {" ", hex_highlight_style} = rendered_cell!(hex_box, {1, 1})
     assert hex_highlight_style =~ "48;2;255;0;170"
 
     {_acc, rgb_box} =
@@ -864,7 +893,7 @@ defmodule Breeze.BlocksTest do
         flash: [%{id: "rgb-flash", kind: :info, message: "RGB", color: {1, 2, 3}}]
       })
 
-    assert {" ", rgb_highlight_style} = Map.fetch!(rgb_box.layer_map, {1, 1})
+    assert {" ", rgb_highlight_style} = rendered_cell!(rgb_box, {1, 1})
     assert rgb_highlight_style =~ "48;2;1;2;3"
   end
 
