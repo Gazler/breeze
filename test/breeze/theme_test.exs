@@ -294,6 +294,14 @@ defmodule Breeze.ThemeTest do
     assert Theme.color(theme, :background) == {13, 33, 55}
   end
 
+  test "nebula uses a quieter default border than its focus color" do
+    theme = Theme.builtin(:nebula)
+
+    assert Theme.default_style(theme).border_color == {47, 111, 153}
+    assert Theme.color(theme, :primary) == {74, 156, 255}
+    refute Theme.default_style(theme).border_color == Theme.color(theme, :primary)
+  end
+
   test "builtin themes can be loaded by name and variant" do
     light = Theme.builtin(:solarized, :light)
     dark = Theme.builtin(:solarized, :dark)

@@ -651,7 +651,9 @@ defmodule Breeze.Style do
   defp normalize_border(:invisible), do: BackBreeze.Border.invisible()
   defp normalize_border(:rounded), do: BackBreeze.Border.rounded()
   defp normalize_border(:square), do: square_border()
-  defp normalize_border(value), do: value
+  defp normalize_border(%BackBreeze.Border{} = value), do: value
+  defp normalize_border(true), do: BackBreeze.Border.line()
+  defp normalize_border(_value), do: BackBreeze.Border.none()
 
   defp square_border do
     BackBreeze.Border.custom(%{

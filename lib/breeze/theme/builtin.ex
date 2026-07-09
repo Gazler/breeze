@@ -32,7 +32,7 @@ defmodule Breeze.Theme.Builtin do
       defaults: %{
         foreground_color: "#D6E7FF",
         background_color: "#0D2137",
-        border_color: "#4A9CFF"
+        border_color: "#2F6F99"
       },
       palette: %{
         muted: "#7DA3C8",

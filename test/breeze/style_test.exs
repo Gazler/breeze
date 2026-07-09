@@ -40,6 +40,15 @@ defmodule Breeze.StyleTest do
     assert element.style.border.left == "│"
   end
 
+  test "normalizes invalid inline border values" do
+    element =
+      Style.empty()
+      |> Style.put_style(%{border: {50, 48, 47}})
+      |> Style.to_element([])
+
+    assert element.style.border == BackBreeze.Border.none()
+  end
+
   test "supports conditional class maps" do
     element =
       Style.empty()
