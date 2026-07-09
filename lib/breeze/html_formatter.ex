@@ -262,6 +262,12 @@ defmodule Breeze.HTMLFormatter do
       {:__breeze_literal__, value} ->
         value
 
+      {:__breeze_access__, receiver, field} when is_atom(field) ->
+        {{:., [], [receiver, field]}, [no_parens: true], []}
+
+      {:__breeze_helper__, _module, name, _arity, args} when is_atom(name) and is_list(args) ->
+        {name, [], args}
+
       {{:., _, [{:__aliases__, _, [:Map]}, :get]}, _, [{:assigns, _, _}, name]}
       when is_atom(name) ->
         {:@, [], [{name, [], nil}]}

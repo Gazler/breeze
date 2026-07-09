@@ -90,36 +90,37 @@ defmodule Breeze.Template do
         [value]
 
       :error ->
-        {acc, trailing_text} =
+        {nodes, trailing_text} =
           Enum.reduce(segments, {[], ""}, fn
-            {:expr, expr}, {acc, text} ->
+            {:expr, expr}, {nodes, text} ->
               case render_slot_expr(expr, ctx) do
-                {:slot, nodes} ->
-                  acc = if text == "", do: acc, else: acc ++ [text]
-                  {acc ++ nodes, ""}
+                {:slot, slot_nodes} ->
+                  nodes = if text == "", do: nodes, else: [text | nodes]
+                  {prepend_reversed(slot_nodes, nodes), ""}
 
                 :not_a_slot ->
                   case eval_expr(expr, ctx) do
                     nil ->
-                      {acc, text}
+                      {nodes, text}
 
                     "" ->
-                      {acc, text}
+                      {nodes, text}
 
                     value ->
                       if is_binary(value) do
-                        {acc, text <> value}
+                        {nodes, text <> value}
                       else
-                        {acc, text <> normalize_output(value)}
+                        {nodes, text <> normalize_output(value)}
                       end
                   end
               end
 
-            literal, {acc, text} when is_binary(literal) ->
-              {acc, text <> literal}
+            literal, {nodes, text} when is_binary(literal) ->
+              {nodes, text <> literal}
           end)
 
-        if trailing_text == "", do: acc, else: acc ++ [trailing_text]
+        nodes = if trailing_text == "", do: nodes, else: [trailing_text | nodes]
+        Enum.reverse(nodes)
     end
   end
 
@@ -296,6 +297,10 @@ defmodule Breeze.Template do
   defp expr_local_helper_captures(expr) do
     {_expr, helpers} =
       Macro.prewalk(expr, [], fn
+        {:__breeze_helper__, _module, name, arity, _args} = node, helpers
+        when is_atom(name) and is_integer(arity) ->
+          {node, [{name, arity} | helpers]}
+
         {{:., _meta, [_module, :__breeze_eval_helper__]}, _call_meta, [name, arity, _args]} =
             node,
         helpers
@@ -453,11 +458,15 @@ defmodule Breeze.Template do
             end)
 
           key = String.to_atom(slot_name)
-          {Map.update(slots, key, entries, &(&1 ++ entries)), inner}
+          slots = Map.update(slots, key, Enum.reverse(entries), &prepend_reversed(entries, &1))
+          {slots, inner}
 
         node, {slots, inner} ->
-          {slots, inner ++ [node]}
+          {slots, [node | inner]}
       end)
+
+    slots = Map.new(slots, fn {key, entries} -> {key, Enum.reverse(entries)} end)
+    inner_block_nodes = Enum.reverse(inner_block_nodes)
 
     if inner_block_nodes == [] do
       slots
@@ -637,12 +646,23 @@ defmodule Breeze.Template do
       {:__breeze_literal__, value} ->
         value
 
+      {:__breeze_access__, receiver, field} ->
+        receiver
+        |> eval_expr(ctx)
+        |> fetch_dot_field!(field)
+
+      {:__breeze_helper__, module, name, arity, args} ->
+        values = Enum.map(args, &eval_expr(&1, ctx))
+        apply(module, :__breeze_eval_helper__, [name, arity, values])
+
       _ ->
         binding = Map.to_list(ctx.vars) ++ [assigns: ctx.assigns]
         {value, _binding} = Code.eval_quoted(expr, binding, ctx.env)
         value
     end
   end
+
+  defp fetch_dot_field!(value, field), do: Map.fetch!(value, field)
 
   defp normalize_output(nil), do: ""
   defp normalize_output(data) when is_binary(data), do: data
@@ -1114,6 +1134,20 @@ defmodule Breeze.Template do
     {:__breeze_assign__, name}
   end
 
+  defp simplify_expr({{:., _dot_meta, [receiver, field]}, call_meta, []})
+       when is_atom(field) and is_list(call_meta) do
+    {:__breeze_access__, simplify_expr(receiver), field}
+  end
+
+  defp simplify_expr(
+         {{:., [], [{:__aliases__, [alias: false], module_parts}, :__breeze_eval_helper__]}, [],
+          [name, arity, args]}
+       )
+       when is_atom(name) and is_integer(arity) and is_list(module_parts) and is_list(args) do
+    {:__breeze_helper__, Module.concat(module_parts), name, arity,
+     Enum.map(args, &simplify_expr/1)}
+  end
+
   defp simplify_expr({name, _meta, ctx}) when is_atom(name) and is_atom(ctx) do
     {:__breeze_var__, name}
   end
@@ -1253,4 +1287,8 @@ defmodule Breeze.Template do
 
   defp trim_ws(<<char::utf8, rest::binary>>) when is_ws(char), do: trim_ws(rest)
   defp trim_ws(source), do: source
+
+  defp prepend_reversed(items, acc) do
+    Enum.reduce(items, acc, fn item, acc -> [item | acc] end)
+  end
 end
