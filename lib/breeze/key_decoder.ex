@@ -83,71 +83,125 @@ defmodule Breeze.KeyDecoder do
   end
 
   defp decode_modified_cursor_csi(sequence) do
-    with [_, modifier, suffix] <- Regex.run(~r/^1;(\d+)([ABCDHFPQRSZ])$/, sequence) do
-      suffix
-      |> modified_cursor_key()
-      |> with_modifiers(to_int(modifier))
+    with "1;" <> rest <- sequence,
+         {modifier_text, suffix} <- split_trailing_ascii(rest),
+         modifier when is_integer(modifier) <- parse_decimal(modifier_text),
+         key when not is_nil(key) <- modified_cursor_key(suffix) do
+      key
+      |> with_modifiers(modifier)
+    else
+      _ -> nil
     end
   end
 
   defp decode_xterm_modify_other_keys_csi_u(sequence) do
-    with [_, modifier, codepoint] <- Regex.run(~r/^27;(\d+);(\d+)u$/, sequence) do
+    with {:ok, body} <- trim_suffix(sequence, "u"),
+         ["27", modifier_text, codepoint_text] <- String.split(body, ";"),
+         modifier when is_integer(modifier) <- parse_decimal(modifier_text),
+         codepoint when is_integer(codepoint) <- parse_decimal(codepoint_text) do
       codepoint
-      |> to_int()
       |> decode_csi_u_key()
-      |> with_modifiers(to_int(modifier))
+      |> with_modifiers(modifier)
+    else
+      _ -> nil
     end
   end
 
   defp decode_csi_u_with_modifiers(sequence) do
-    with [_, codepoint, modifier] <- Regex.run(~r/^(\d+);(\d+)(?::[0-9:]+)?u$/, sequence) do
+    with {:ok, body} <- trim_suffix(sequence, "u"),
+         [codepoint_text, modifier_tail] <- String.split(body, ";", parts: 2),
+         modifier_text <- modifier_from_tail(modifier_tail),
+         codepoint when is_integer(codepoint) <- parse_decimal(codepoint_text),
+         modifier when is_integer(modifier) <- parse_decimal(modifier_text) do
       codepoint
-      |> to_int()
       |> decode_csi_u_key()
-      |> with_modifiers(to_int(modifier))
+      |> with_modifiers(modifier)
+    else
+      _ -> nil
     end
   end
 
   defp decode_csi_u(sequence) do
-    with [_, codepoint] <- Regex.run(~r/^(\d+)u$/, sequence) do
+    with {:ok, body} <- trim_suffix(sequence, "u"),
+         codepoint when is_integer(codepoint) <- parse_decimal(body) do
       codepoint
-      |> to_int()
       |> decode_csi_u_key()
+    else
+      _ -> nil
     end
   end
 
   defp decode_tilde_csi(sequence) do
-    case Regex.run(~r/^(\d+)(?:;(\d+)(?::\d+)?)?~$/, sequence) do
-      [_, codepoint] ->
-        codepoint
-        |> to_int()
-        |> decode_tilde_key()
+    with {:ok, body} <- trim_suffix(sequence, "~") do
+      case String.split(body, ";", parts: 2) do
+        [codepoint_text] ->
+          with codepoint when is_integer(codepoint) <- parse_decimal(codepoint_text) do
+            decode_tilde_key(codepoint)
+          else
+            _ -> nil
+          end
 
-      [_, codepoint, modifier] ->
-        codepoint
-        |> to_int()
-        |> decode_tilde_key()
-        |> maybe_with_modifiers(modifier)
+        [codepoint_text, modifier_tail] ->
+          modifier_text = modifier_from_tail(modifier_tail)
 
-      _ ->
-        nil
+          with codepoint when is_integer(codepoint) <- parse_decimal(codepoint_text),
+               modifier when is_integer(modifier) <- parse_decimal(modifier_text) do
+            codepoint
+            |> decode_tilde_key()
+            |> with_modifiers(modifier)
+          else
+            _ -> nil
+          end
+      end
+    else
+      _ -> nil
     end
   end
 
   defp decode_xterm_modify_other_keys_tilde(sequence) do
-    with [_, modifier, codepoint] <- Regex.run(~r/^27;(\d+);(\d+)~$/, sequence) do
+    with {:ok, body} <- trim_suffix(sequence, "~"),
+         ["27", modifier_text, codepoint_text] <- String.split(body, ";"),
+         modifier when is_integer(modifier) <- parse_decimal(modifier_text),
+         codepoint when is_integer(codepoint) <- parse_decimal(codepoint_text) do
       codepoint
-      |> to_int()
       |> decode_csi_u_key()
-      |> with_modifiers(to_int(modifier))
+      |> with_modifiers(modifier)
+    else
+      _ -> nil
     end
   end
 
-  defp maybe_with_modifiers(key, ""), do: key
-  defp maybe_with_modifiers(key, nil), do: key
-  defp maybe_with_modifiers(key, modifier), do: with_modifiers(key, to_int(modifier))
+  defp parse_decimal(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {integer, ""} -> integer
+      _ -> nil
+    end
+  end
 
-  defp to_int(value), do: String.to_integer(value)
+  defp parse_decimal(_value), do: nil
+
+  defp trim_suffix(value, suffix) do
+    if String.ends_with?(value, suffix) do
+      length = byte_size(value) - byte_size(suffix)
+      {:ok, binary_part(value, 0, length)}
+    else
+      :error
+    end
+  end
+
+  defp split_trailing_ascii(value) when is_binary(value) and byte_size(value) > 0 do
+    length = byte_size(value) - 1
+    <<prefix::binary-size(length), suffix::binary-size(1)>> = value
+    {prefix, suffix}
+  end
+
+  defp split_trailing_ascii(_value), do: nil
+
+  defp modifier_from_tail(tail) do
+    tail
+    |> String.split(":", parts: 2)
+    |> hd()
+  end
 
   defp modified_cursor_key("A"), do: "ArrowUp"
   defp modified_cursor_key("B"), do: "ArrowDown"
@@ -160,6 +214,7 @@ defmodule Breeze.KeyDecoder do
   defp modified_cursor_key("R"), do: "F3"
   defp modified_cursor_key("S"), do: "F4"
   defp modified_cursor_key("Z"), do: "\t"
+  defp modified_cursor_key(_suffix), do: nil
 
   defp decode_tilde_key(1), do: "Home"
   defp decode_tilde_key(2), do: "Insert"

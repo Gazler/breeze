@@ -1018,20 +1018,14 @@ defmodule Breeze.ChildServer do
   end
 
   defp printable_key?(key) when is_binary(key) do
-    String.length(key) == 1 and key not in ["\n", "\r", "\t", "\v", "\f"] and
-      String.printable?(key) and not String.match?(key, ~r/[\x00-\x1F\x7F]/u)
+    Breeze.Printable.single_key?(key)
   end
 
   defp printable_key?(_key), do: false
 
   defp batched_printable_event?(%{"__batched_printable__" => true, "key" => key})
        when is_binary(key) do
-    key != "" and
-      String.printable?(key) and
-      Enum.all?(String.graphemes(key), fn grapheme ->
-        grapheme not in ["\n", "\r", "\t", "\v", "\f"] and
-          not String.match?(grapheme, ~r/[\x00-\x1F\x7F]/u)
-      end)
+    Breeze.Printable.text?(key)
   end
 
   defp batched_printable_event?(_event), do: false

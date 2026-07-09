@@ -34,8 +34,7 @@ defmodule Breeze.Server.Input do
   def key_name(_), do: nil
 
   def raw_printable_key?(key) when is_binary(key) do
-    String.length(key) == 1 and key not in ["\n", "\r", "\t", "\v", "\f"] and
-      String.printable?(key) and not String.match?(key, ~r/[\x00-\x1F\x7F]/u)
+    Breeze.Printable.single_key?(key)
   end
 
   def raw_printable_key?(_key), do: false

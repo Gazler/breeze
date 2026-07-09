@@ -21,15 +21,5 @@ defmodule Breeze.Input do
 
   defp decode_key(raw_key), do: Breeze.KeyDecoder.decode(raw_key)
 
-  defp printable_text?(""), do: false
-
-  defp printable_text?(raw_key) do
-    String.printable?(raw_key) and
-      Enum.all?(String.graphemes(raw_key), &printable_grapheme?/1)
-  end
-
-  defp printable_grapheme?(grapheme) do
-    grapheme not in ["\n", "\r", "\t", "\v", "\f"] and
-      not String.match?(grapheme, ~r/[\x00-\x1F\x7F]/u)
-  end
+  defp printable_text?(raw_key), do: Breeze.Printable.text?(raw_key)
 end

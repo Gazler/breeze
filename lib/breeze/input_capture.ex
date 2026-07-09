@@ -1,9 +1,7 @@
 defmodule Breeze.InputCapture do
   @moduledoc false
 
-  @non_text_keys ["\n", "\r", "\t", "\v", "\f"]
   @modifier_keys ["ctrlKey", "altKey", "metaKey"]
-  @control_character_pattern ~r/[\x00-\x1F\x7F]/u
 
   def captures_key?(meta, key) when is_map(meta) do
     cond do
@@ -95,21 +93,7 @@ defmodule Breeze.InputCapture do
   defp text_editing_key?(key) when key in ["\x08", "\x17"], do: true
   defp text_editing_key?(_key), do: false
 
-  defp printable_text?(""), do: false
-
-  defp printable_text?(key) do
-    if String.printable?(key),
-      do: Enum.all?(String.graphemes(key), &printable_grapheme?/1),
-      else: false
-  end
-
-  defp printable_grapheme?(grapheme) do
-    cond do
-      grapheme in @non_text_keys -> false
-      String.match?(grapheme, @control_character_pattern) -> false
-      :otherwise -> true
-    end
-  end
+  defp printable_text?(key), do: Breeze.Printable.text?(key)
 
   defp modified_input?(event) do
     Enum.any?(@modifier_keys, fn key ->
