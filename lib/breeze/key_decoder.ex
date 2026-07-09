@@ -191,7 +191,7 @@ defmodule Breeze.KeyDecoder do
 
   defp split_trailing_ascii(value) when is_binary(value) and byte_size(value) > 0 do
     length = byte_size(value) - 1
-    <<prefix::binary-size(length), suffix::binary-size(1)>> = value
+    <<prefix::binary-size(^length), suffix::binary-size(1)>> = value
     {prefix, suffix}
   end
 
