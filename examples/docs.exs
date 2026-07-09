@@ -79,8 +79,15 @@ defmodule Docs do
               head = elem(doc, 0)
 
               case head do
-                {:function, fun, arity} -> ["#{fun}/#{arity}" | acc]
-                _ -> acc
+                {:function, fun, arity} ->
+                  if documented_function?(fun) do
+                    ["#{fun}/#{arity}" | acc]
+                  else
+                    acc
+                  end
+
+                _ ->
+                  acc
               end
             end)
 
@@ -110,6 +117,13 @@ defmodule Docs do
   end
 
   def handle_event(_, _, term), do: {:noreply, term}
+
+  defp documented_function?(fun) do
+    fun
+    |> Atom.to_string()
+    |> String.starts_with?("__")
+    |> Kernel.not()
+  end
 
   defp fetch_function_doc(module_str, function_str) do
     module =
