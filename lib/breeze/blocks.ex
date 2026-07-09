@@ -59,6 +59,10 @@ defmodule Breeze.Blocks do
   attr :id, :string, required: true
   attr :loop, :boolean, default: true
   attr :variant, :string, default: nil
+  attr :virtual, :boolean, default: false
+  attr :virtual_overscan, :integer, default: 24
+  attr :offset, :integer, default: nil
+  attr :virtual_window, :integer, default: nil
   attr :"selected-indicator", :string, default: ">"
   attr :class, :string, default: nil
   attr :style, :any, default: nil
@@ -71,6 +75,7 @@ defmodule Breeze.Blocks do
   end
 
   def list(assigns) do
+    items = Map.get(assigns, :item, [])
     selected_indicator = Map.get(assigns, :"selected-indicator", ">") || ">"
     selected_indicator_width = max(Ucwidth.width(selected_indicator), 1)
 
@@ -90,8 +95,16 @@ defmodule Breeze.Blocks do
         list_variant_item_class(Map.get(assigns, :variant))
       )
 
+    {render_items, top_spacer, bottom_spacer, windowed?} = list_render_window(items, assigns)
+
     assigns =
       assigns
+      |> assign(item: items)
+      |> assign(render_items: render_items)
+      |> assign(top_spacer: top_spacer)
+      |> assign(bottom_spacer: bottom_spacer)
+      |> assign(list_values: Enum.map(items, & &1.value))
+      |> assign(list_offset: if(windowed?, do: top_spacer, else: assigns.offset))
       |> assign(selected_indicator: selected_indicator)
       |> assign(selected_indicator_width: selected_indicator_width)
       |> assign(item_visual_defaults: item_visual_defaults)
@@ -117,13 +130,17 @@ defmodule Breeze.Blocks do
       implicit={Breeze.Implicit.List}
       list-loop={@loop}
       list-scroll-padding={1}
+      list-offset={@list_offset}
+      list-values={@list_values}
       focusable
       class={@class}
       style={Breeze.Blocks.inline_style(assigns)}
       {@rest}
     >
+      <box :if={@top_spacer > 0} class={"width-full height-#{@top_spacer} overflow-hidden"}>
+      </box>
       <box
-        :for={item <- @item}
+        :for={item <- @render_items}
         value={item.value}
         focus-with-owner
         class="inline"
@@ -132,8 +149,137 @@ defmodule Breeze.Blocks do
         <box selected-with-owner class={@marker_class}>{@selected_indicator}</box>
         <box selected-with-owner class={@item_class}>{render_slot(item, %{})}</box>
       </box>
+      <box :if={@bottom_spacer > 0} class={"width-full height-#{@bottom_spacer} overflow-hidden"}>
+      </box>
     </box>
     """
+  end
+
+  defp list_render_window(items, assigns) do
+    total = length(items)
+
+    with window_size when is_integer(window_size) <-
+           list_window_size(assigns),
+         offset when is_integer(offset) <- list_window_offset(items, assigns, window_size),
+         true <- total > window_size do
+      render_items = Enum.slice(items, offset, window_size)
+      bottom_spacer = max(total - offset - length(render_items), 0)
+
+      {render_items, offset, bottom_spacer, true}
+    else
+      _ -> {items, 0, 0, false}
+    end
+  end
+
+  defp list_window_size(assigns) do
+    explicit = normalize_tree_window_size(assigns.virtual_window)
+
+    cond do
+      is_integer(explicit) ->
+        explicit
+
+      assigns.virtual in [true, "true", "1", ""] ->
+        inferred_list_window_size(assigns)
+
+      true ->
+        nil
+    end
+  end
+
+  defp inferred_list_window_size(assigns) do
+    overscan = normalize_tree_overscan(assigns.virtual_overscan)
+
+    height =
+      Breeze.Style.resolve_dimensions(Map.get(assigns, :class), inline_style(assigns)).height
+
+    visible_rows =
+      case height do
+        height when is_integer(height) and height > 0 ->
+          height
+
+        height when height in [:full, :screen] ->
+          assigns
+          |> caller_terminal_height()
+          |> case do
+            height when is_integer(height) and height > 0 -> height
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    if is_integer(visible_rows), do: max(visible_rows + overscan, 1)
+  end
+
+  defp list_window_offset(_items, _assigns, window_size) when window_size <= 0, do: nil
+
+  defp list_window_offset(items, assigns, window_size) do
+    total = length(items)
+
+    assigns
+    |> explicit_or_implicit_list_offset()
+    |> case do
+      offset when is_integer(offset) ->
+        normalize_tree_window_offset(offset, total)
+
+      _ ->
+        selected = explicit_or_implicit_list_selected(assigns)
+        selected_index = Enum.find_index(items, &(&1.value == selected))
+
+        case selected_index do
+          index when is_integer(index) ->
+            normalize_tree_window_offset(index - div(window_size, 2), total)
+
+          _ ->
+            0
+        end
+    end
+  end
+
+  defp explicit_or_implicit_list_offset(assigns) do
+    case assigns.offset do
+      nil -> get_in(list_implicit_state(assigns), [:offset])
+      offset -> offset
+    end
+  end
+
+  defp explicit_or_implicit_list_selected(assigns) do
+    case list_selected_attr(assigns) do
+      nil -> get_in(list_implicit_state(assigns), [:selected])
+      selected -> selected
+    end
+  end
+
+  defp list_selected_attr(assigns) do
+    rest = Map.get(assigns, :rest)
+
+    Map.get(assigns, :"list-selected") ||
+      attr_value(rest, :"list-selected") ||
+      attr_value(rest, "list-selected")
+  end
+
+  defp attr_value(attrs, key) when is_map(attrs), do: Map.get(attrs, key)
+
+  defp attr_value(attrs, key) when is_list(attrs) do
+    Enum.find_value(attrs, fn
+      {^key, value} -> value
+      _ -> nil
+    end)
+  end
+
+  defp attr_value(_attrs, _key), do: nil
+
+  defp list_implicit_state(assigns) do
+    id = assigns.id
+
+    with id when not is_nil(id) <- id,
+         {Breeze.Implicit.List, state} <-
+           get_in(assigns, [:__breeze_caller_assigns__, :breeze, :implicit_state, id]) do
+      state
+    else
+      _ -> nil
+    end
   end
 
   attr :id, :string, required: true
@@ -394,6 +540,7 @@ defmodule Breeze.Blocks do
           selected-with-owner
           class={"inline width-#{row.indent_width} height-1 overflow-hidden"}
         >
+          {row.indent}
         </box>
         <box
           :if={@controlled_expanded?}
@@ -595,6 +742,7 @@ defmodule Breeze.Blocks do
     label = tree_node_label(node, value)
     children = tree_node_children(node)
     expandable? = tree_node_expandable(node, children != [])
+    indent_width = depth * 2
 
     row = %{
       value: value,
@@ -604,7 +752,8 @@ defmodule Breeze.Blocks do
       parent: parent,
       parents: parents,
       depth: depth,
-      indent_width: depth * 2,
+      indent: String.duplicate(" ", indent_width),
+      indent_width: indent_width,
       expandable?: expandable?
     }
 
@@ -941,12 +1090,17 @@ defmodule Breeze.Blocks do
   attr :row_value, :any, default: :id
   attr :loop, :boolean, default: true
   attr :scroll_padding, :integer, default: 0
+  attr :virtual, :boolean, default: false
+  attr :virtual_overscan, :integer, default: 24
+  attr :offset, :integer, default: nil
+  attr :virtual_window, :integer, default: nil
   attr :empty, :string, default: "No rows"
+  attr :class, :string, default: nil
   attr :rest, :global
 
   slot :col do
     attr :label, :string, default: nil
-    attr :width, :integer, default: nil
+    attr :width, :any, default: nil
     attr :align, :any, default: "left"
     attr :class, :string, default: nil
     attr :style, :any, default: nil
@@ -956,22 +1110,25 @@ defmodule Breeze.Blocks do
     rows = Map.get(assigns, :rows, [])
     columns = normalize_table_columns(assigns.col, rows)
     rows = normalize_table_rows(rows, columns, Map.get(assigns, :row_value, :id))
+    {render_rows, top_spacer, bottom_spacer, windowed?} = table_render_window(rows, assigns)
 
     assigns =
       assigns
       |> assign(columns: columns)
       |> assign(rows: rows)
-      |> assign(cell_class: "height-1 overflow-hidden selected:bg-primary selected:text-bg")
+      |> assign(render_rows: render_rows)
+      |> assign(top_spacer: top_spacer)
+      |> assign(bottom_spacer: bottom_spacer)
+      |> assign(list_values: Enum.map(rows, & &1.value))
+      |> assign(list_offset: if(windowed?, do: top_spacer, else: assigns.offset))
+      |> assign(class: table_class(assigns))
+      |> assign(header_class: table_header_class(columns))
+      |> assign(body_class: table_body_class())
+      |> assign(row_class: table_row_class(columns))
 
     ~H"""
-    <box
-      class="border width-full height-8 overflow-hidden bg-panel focus:border-primary"
-      focus-within="true"
-    >
-      <box
-        :if={@columns != []}
-        class="inline width-full height-1 overflow-hidden bold bg-emphasize-20"
-      >
+    <box class={@class} focus-within="true">
+      <box :if={@columns != []} class={@header_class}>
         <box :for={column <- @columns} class={column.header_class}>{column.label}</box>
       </box>
       <box
@@ -981,28 +1138,52 @@ defmodule Breeze.Blocks do
         list-loop={@loop}
         list-selected={@selected}
         list-scroll-padding={@scroll_padding}
-        class="height-full width-full overflow-scroll scrollbar-arrows focus:scrollbar-primary"
+        list-offset={@list_offset}
+        list-values={@list_values}
+        class={@body_class}
         {@rest}
       >
         <box :if={@rows == []} class="width-full height-1 text-muted">{@empty}</box>
-        <box
-          :for={row <- @rows}
-          value={row.value}
-          focus-with-owner
-          class="inline width-full height-1 overflow-hidden selected:bg-primary selected:text-bg"
-        >
-          <box
-            :for={cell <- row.cells}
-            selected-with-owner
-            class={Breeze.Blocks.merge_class(@cell_class, cell.class)}
-            style={cell.style}
-          >
+        <box :if={@top_spacer > 0} class={"width-full height-#{@top_spacer} overflow-hidden"}>
+        </box>
+        <box :for={row <- @render_rows} value={row.value} focus-with-owner class={@row_class}>
+          <box :for={cell <- row.cells} selected-with-owner class={cell.class} style={cell.style}>
             {render_slot(cell.slot, cell.row)}
           </box>
+        </box>
+        <box :if={@bottom_spacer > 0} class={"width-full height-#{@bottom_spacer} overflow-hidden"}>
         </box>
       </box>
     </box>
     """
+  end
+
+  defp table_render_window(rows, assigns) do
+    assigns
+    |> Map.put(:"list-selected", assigns.selected)
+    |> then(&list_render_window(rows, &1))
+  end
+
+  defp table_class(assigns) do
+    merge_class(
+      "border width-full height-8 overflow-hidden bg-panel focus:border-primary",
+      class_override(assigns, :class, nil)
+    )
+  end
+
+  defp table_header_class(columns) do
+    table_row_layout_class(columns, "height-1 overflow-hidden bold bg-emphasize-20")
+  end
+
+  defp table_body_class do
+    "height-full width-full overflow-scroll scrollbar-arrows mute-scrollbar-40 focus:scrollbar-primary focus:mute-scrollbar-0"
+  end
+
+  defp table_row_class(columns) do
+    table_row_layout_class(
+      columns,
+      "height-1 overflow-hidden selected:bg-primary selected:text-bg"
+    )
   end
 
   defp normalize_table_columns(columns, rows) do
@@ -1020,26 +1201,35 @@ defmodule Breeze.Blocks do
 
     Enum.map(columns, fn column ->
       width = column.width || inferred_table_column_width(column, rows)
+      width_class = table_column_width_class(column.width)
       align_class = table_align_class(column.align)
 
       column
       |> Map.put(:width, width)
       |> Map.put(
         :header_class,
-        "width-#{width} padding-left-1 padding-right-1 overflow-hidden #{align_class}"
+        "#{width_class} padding-left-1 padding-right-1 overflow-hidden #{align_class}"
       )
       |> Map.put(
         :cell_class,
-        "width-#{width} padding-left-1 padding-right-1 overflow-hidden #{align_class}"
+        "#{width_class} padding-left-1 padding-right-1 overflow-hidden selected:bg-primary selected:text-bg #{align_class}"
       )
     end)
   end
 
+  defp table_row_layout_class(columns, class) do
+    "grid grid-cols-#{max(length(columns), 1)} width-full #{class}"
+  end
+
+  defp table_column_width_class(nil), do: ""
+  defp table_column_width_class(width), do: "width-#{width}"
+
   defp inferred_table_column_width(column, rows) do
     rows
-    |> Enum.map(fn row -> render_slot(column.slot, row) |> Ucwidth.width() end)
-    |> Kernel.++([Ucwidth.width(column.label), 4])
+    |> Enum.map(fn row -> render_slot(column.slot, row) |> BackBreeze.Utils.string_length() end)
+    |> Kernel.++([BackBreeze.Utils.string_length(column.label), 4])
     |> Enum.max()
+    |> Kernel.+(2)
   end
 
   defp normalize_table_rows(rows, columns, row_value) do
@@ -1315,11 +1505,19 @@ defmodule Breeze.Blocks do
         class_override(assigns)
       )
 
+    title? = panel_slot_present?(assigns[:title])
+    frame_style = inline_style(assigns)
+    title_style = panel_title_style(frame_style, Map.get(assigns, :title_style))
+    title_wrapper? = title? and panel_frame_clips_title?(panel_class, frame_style)
+
     assigns =
       assigns
       |> assign(
         focus_within: Map.get(assigns, :focus_within, true),
         class: panel_class,
+        frame_style: frame_style,
+        title_style: title_style,
+        title_wrapper?: title_wrapper?,
         title_class:
           merge_class(
             "bold #{panel_title_class(panel_class)}",
@@ -1338,7 +1536,17 @@ defmodule Breeze.Blocks do
       assign(
         assigns,
         frame_class:
-          panel_frame_class(assigns.class, Map.get(assigns, :width), Map.get(assigns, :height))
+          assigns.class
+          |> panel_frame_class(Map.get(assigns, :width), Map.get(assigns, :height))
+      )
+      |> assign(
+        title_wrapper_class:
+          panel_title_wrapper_class(
+            assigns.class,
+            Map.get(assigns, :width),
+            Map.get(assigns, :height)
+          ),
+        title_wrapper_style: panel_title_wrapper_style(assigns.frame_style)
       )
 
     if assigns[:scroll] do
@@ -1346,52 +1554,164 @@ defmodule Breeze.Blocks do
         raise ArgumentError, "panel requires an id when scroll: true"
       end
 
-      ~H"""
-      <box
-        class={@frame_class}
-        style={Breeze.Blocks.inline_style(assigns)}
-        focus-within={@focus_within}
-        {@rest}
-      >
-        <box
-          :if={assigns[:title]}
-          focus-within="true"
-          class={"absolute left-2 top-0 #{@title_class}"}
-          style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
-        >
-          {render_slot(@title)}
+      if assigns.title_wrapper? do
+        ~H"""
+        <box class={@title_wrapper_class} style={@title_wrapper_style} focus-within={@focus_within}>
+          <box class={@frame_class} style={@frame_style} focus-within={@focus_within} {@rest}>
+            <.scroll
+              id={@id}
+              class={@scroll_class}
+              style={Breeze.Blocks.inline_style(assigns, :scroll_class, :scroll_style)}
+            >
+              {render_slot(@inner_block)}
+            </.scroll>
+          </box>
+          <box
+            focus-within="true"
+            class={"absolute left-2 top-0 layer-1 #{@title_class}"}
+            style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
+          >
+            {render_slot(@title)}
+          </box>
         </box>
-        <.scroll
-          id={@id}
-          class={@scroll_class}
-          style={Breeze.Blocks.inline_style(assigns, :scroll_class, :scroll_style)}
-        >
-          {render_slot(@inner_block)}
-        </.scroll>
-      </box>
-      """
+        """
+      else
+        ~H"""
+        <box class={@frame_class} style={@frame_style} focus-within={@focus_within} {@rest}>
+          <box
+            :if={assigns[:title]}
+            focus-within="true"
+            class={"absolute left-2 top-0 layer-1 #{@title_class}"}
+            style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
+          >
+            {render_slot(@title)}
+          </box>
+          <.scroll
+            id={@id}
+            class={@scroll_class}
+            style={Breeze.Blocks.inline_style(assigns, :scroll_class, :scroll_style)}
+          >
+            {render_slot(@inner_block)}
+          </.scroll>
+        </box>
+        """
+      end
     else
-      ~H"""
-      <box
-        id={@id}
-        class={@frame_class}
-        style={Breeze.Blocks.inline_style(assigns)}
-        focus-within={@focus_within}
-        {@rest}
-      >
-        {render_slot(@inner_block)}
-        <box
-          :if={assigns[:title]}
-          focus-within="true"
-          class={"absolute left-2 top-0 #{@title_class}"}
-          style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
-        >
-          {render_slot(@title)}
+      if assigns.title_wrapper? do
+        ~H"""
+        <box class={@title_wrapper_class} style={@title_wrapper_style} focus-within={@focus_within}>
+          <box id={@id} class={@frame_class} style={@frame_style} focus-within={@focus_within} {@rest}>
+            {render_slot(@inner_block)}
+          </box>
+          <box
+            focus-within="true"
+            class={"absolute left-2 top-0 layer-1 #{@title_class}"}
+            style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
+          >
+            {render_slot(@title)}
+          </box>
         </box>
-      </box>
-      """
+        """
+      else
+        ~H"""
+        <box id={@id} class={@frame_class} style={@frame_style} focus-within={@focus_within} {@rest}>
+          {render_slot(@inner_block)}
+          <box
+            :if={assigns[:title]}
+            focus-within="true"
+            class={"absolute left-2 top-0 layer-1 #{@title_class}"}
+            style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
+          >
+            {render_slot(@title)}
+          </box>
+        </box>
+        """
+      end
     end
   end
+
+  defp panel_slot_present?(slot), do: slot not in [nil, []]
+
+  defp panel_frame_clips_title?(class, style) do
+    panel_class_clips_title?(class) or panel_style_clips_title?(style)
+  end
+
+  defp panel_class_clips_title?(class) do
+    class
+    |> to_string()
+    |> String.split()
+    |> Enum.any?(&(&1 in ["overflow-hidden", "overflow-scroll"]))
+  end
+
+  defp panel_style_clips_title?(%BackBreeze.Style{overflow: overflow}), do: overflow == :hidden
+
+  defp panel_style_clips_title?(style) when is_map(style) do
+    Map.get(style, :overflow) in [:hidden, :scroll, "hidden", "scroll"] or
+      Map.get(style, "overflow") in [:hidden, :scroll, "hidden", "scroll"]
+  end
+
+  defp panel_style_clips_title?(_style), do: false
+
+  defp panel_title_wrapper_class(class, width, height) do
+    class
+    |> to_string()
+    |> String.split()
+    |> Enum.filter(&panel_title_wrapper_token?/1)
+    |> Enum.join(" ")
+    |> panel_frame_class(width, height)
+  end
+
+  defp panel_title_wrapper_token?(token) do
+    token in ["inline", "absolute", "fixed"] or
+      String.starts_with?(token, "width-") or
+      String.starts_with?(token, "height-") or
+      String.starts_with?(token, "left-") or
+      String.starts_with?(token, "right-") or
+      String.starts_with?(token, "top-") or
+      String.starts_with?(token, "bottom-") or
+      String.starts_with?(token, "inset-") or
+      String.starts_with?(token, "inset-x-") or
+      String.starts_with?(token, "inset-y-") or
+      String.starts_with?(token, "layer-")
+  end
+
+  defp panel_title_wrapper_style(%BackBreeze.Style{} = style) do
+    %{}
+    |> maybe_put_wrapper_style(:width, style.width, :auto)
+    |> maybe_put_wrapper_style(:height, style.height, 0)
+  end
+
+  defp panel_title_wrapper_style(style) when is_map(style) do
+    style
+    |> Map.take([:width, :height, :position, :left, :right, :top, :bottom, :layer])
+    |> Map.merge(
+      Map.take(style, ["width", "height", "position", "left", "right", "top", "bottom", "layer"])
+    )
+  end
+
+  defp panel_title_wrapper_style(_style), do: nil
+
+  defp maybe_put_wrapper_style(style, _key, value, value), do: style
+  defp maybe_put_wrapper_style(style, key, value, _default), do: Map.put(style, key, value)
+
+  defp panel_title_style(_frame_style, title_style) when not is_nil(title_style), do: title_style
+
+  defp panel_title_style(%BackBreeze.Style{background_color: nil}, nil), do: nil
+
+  defp panel_title_style(%BackBreeze.Style{background_color: background_color}, nil),
+    do: %{background_color: background_color}
+
+  defp panel_title_style(%{background_color: nil}, nil), do: nil
+
+  defp panel_title_style(%{background_color: background_color}, nil),
+    do: %{background_color: background_color}
+
+  defp panel_title_style(%{"background_color" => nil}, nil), do: nil
+
+  defp panel_title_style(%{"background_color" => background_color}, nil),
+    do: %{background_color: background_color}
+
+  defp panel_title_style(_frame_style, _title_style), do: nil
 
   defp panel_frame_class(class, width, height) do
     class
@@ -1405,6 +1725,18 @@ defmodule Breeze.Blocks do
     |> String.split()
     |> Enum.reduce([], fn token, acc ->
       case token do
+        "bg" ->
+          [token | acc]
+
+        "bg-" <> _rest ->
+          [token | acc]
+
+        "focus:bg" ->
+          [token | acc]
+
+        "focus:bg-" <> _rest ->
+          [token | acc]
+
         "border-" <> rest when rest not in ["rounded", "square", "none", "invisible"] ->
           ["text-" <> rest | acc]
 

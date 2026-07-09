@@ -38,6 +38,22 @@ defmodule Breeze.Implicit.ListTest do
       assert state.selected == "three"
       assert state.selected_index == 2
     end
+
+    test "reads full values and offset from root attrs for windowed lists" do
+      children = [%{value: "two"}, %{value: "three"}]
+
+      state =
+        Implicit.List.init(
+          children,
+          %{:"list-values" => ["one", "two", "three", "four"], :"list-offset" => 1},
+          %{selected: "three", selected_index: 2, offset: 0}
+        )
+
+      assert state.values == ["one", "two", "three", "four"]
+      assert state.selected == "three"
+      assert state.selected_index == 2
+      assert state.offset == 1
+    end
   end
 
   describe "handle_event/3" do

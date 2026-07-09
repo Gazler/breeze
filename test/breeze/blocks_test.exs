@@ -74,6 +74,27 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule ModalBackdropExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen bg">
+        <box>Background should stay put</box>
+        <box class="height-1 width-full overflow-hidden">
+          <.modal id="modal" width={24} height={7} dim>
+            <:title>Dialog</:title>
+            <box class="padding-left-2 padding-top-2">Modal body</box>
+          </.modal>
+        </box>
+        <box>Footer should stay put</box>
+        <box class="fixed right-0 bottom-0">CORNER</box>
+      </box>
+      """
+    end
+  end
+
   defmodule ButtonExample do
     use Breeze.View
     import Breeze.Blocks
@@ -107,6 +128,26 @@ defmodule Breeze.BlocksTest do
 
     def handle_event(_, _, term), do: {:noreply, term}
     def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule PanelTitleOverlayExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def render(assigns) do
+      ~H"""
+      <.panel id="panel" class="width-32 height-6 overflow-hidden bg-panel">
+        <:title>Packages</:title>
+        <box class="width-full bg-panel padding-left-1 padding-top-1">
+          <box>Body</box>
+          <box>Second</box>
+          <box>Third</box>
+          <box>Fourth</box>
+          <box>Hidden</box>
+        </box>
+      </.panel>
+      """
+    end
   end
 
   defmodule FlashGroupExample do
@@ -332,6 +373,42 @@ defmodule Breeze.BlocksTest do
       </.list>
       """
     end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule VirtualListExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    @items Enum.map(0..9, fn index ->
+             id = "item-#{index}"
+             %{id: id, label: "Item #{index}"}
+           end)
+
+    def mount(_opts, term) do
+      {:ok, term |> focus("items") |> assign(selected: "item-5")}
+    end
+
+    def render(assigns) do
+      assigns = assign(assigns, items: @items)
+
+      ~H"""
+      <.list
+        id="items"
+        list-selected={@selected}
+        virtual_window={3}
+        br-change="change"
+        style="width-16 height-5"
+      >
+        <:item :for={item <- @items} value={item.id}>{item.label}</:item>
+      </.list>
+      """
+    end
+
+    def handle_event("change", %{value: value}, term),
+      do: {:noreply, assign(term, selected: value)}
 
     def handle_event(_, _, term), do: {:noreply, term}
     def handle_info(_, term), do: {:noreply, term}
@@ -586,12 +663,15 @@ defmodule Breeze.BlocksTest do
   end
 
   defp rendered_cell(box, point) do
-    layer_cell(box.fixed_layer_map, point) || layer_cell(box.layer_map, point)
+    layer_cell(Map.get(box, :fixed_layer_map), point) ||
+      layer_cell(Map.get(box, :layer_map), point)
   end
 
   defp layer_cell(layer_map, point) when is_map(layer_map) do
     Map.get(layer_map, point) || default_fill_cell(Map.get(layer_map, :__default_fill__), point)
   end
+
+  defp layer_cell(_layer_map, _point), do: nil
 
   defp default_fill_cell(nil, _point), do: nil
 
@@ -608,6 +688,58 @@ defmodule Breeze.BlocksTest do
       _fill ->
         nil
     end)
+  end
+
+  defmodule InferredTableExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term |> focus("packages")}
+
+    def render(assigns) do
+      rows = [
+        %{id: "jason", name: "jason", version: "1.5.0-alpha.2", downloads: "202.6m"}
+      ]
+
+      assigns = assign(assigns, rows: rows)
+
+      ~H"""
+      <.table id="packages" rows={@rows}>
+        <:col :let={package} label="Name">{package.name}</:col>
+        <:col :let={package} label="Latest">{package.version}</:col>
+        <:col :let={package} label="Downloads" align="right">{package.downloads}</:col>
+      </.table>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule StretchTableExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term |> focus("packages")}
+
+    def render(assigns) do
+      rows = [
+        %{id: "jason", name: "jason", version: "1.5.0-alpha.2", downloads: "202.6m"}
+      ]
+
+      assigns = assign(assigns, rows: rows)
+
+      ~H"""
+      <.table id="packages" rows={@rows} class="width-60 height-4 border-none">
+        <:col :let={package} label="Name">{package.name}</:col>
+        <:col :let={package} label="Latest">{package.version}</:col>
+        <:col :let={package} label="Downloads" align="right">{package.downloads}</:col>
+      </.table>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
   end
 
   describe "merge_class/2" do
@@ -702,6 +834,28 @@ defmodule Breeze.BlocksTest do
     assert box.content =~ "48;2;50;48;47;"
   end
 
+  test "dimmed modal preserves background content" do
+    {_acc, box} =
+      Renderer.render(ModalBackdropExample, %{},
+        terminal: %Termite.Terminal{size: %{width: 48, height: 16}},
+        theme: :system,
+        theme_source: :system
+      )
+
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+
+    assert plain_content =~ "Dialog"
+    assert plain_content =~ "Modal body"
+    assert plain_content =~ "Background should stay put"
+    assert plain_content =~ "Footer should stay put"
+    assert plain_content =~ "CORNER"
+
+    lines = String.split(plain_content, "\n")
+
+    assert lines |> Enum.at(0) |> String.starts_with?("Background should stay put")
+    assert lines |> Enum.at(2) |> String.starts_with?("Footer should stay put")
+  end
+
   test "button renders with primary styling and a focused inverse state" do
     {:ok, pid} = ChildServer.start(view: ButtonExample, start_opts: [])
 
@@ -721,6 +875,21 @@ defmodule Breeze.BlocksTest do
     assert box.content =~ "Details"
     assert box.content =~ ~r/\e\[[0-9;]*38;5;4m[╭│╰]/
     assert box.content =~ ~r/\e\[[0-9;]*38;5;4mDetails/
+  end
+
+  test "panel title renders above full-size panel content" do
+    {_acc, box} =
+      Renderer.render(PanelTitleOverlayExample, %{},
+        terminal: %Termite.Terminal{size: %{width: 40, height: 8}},
+        theme: Breeze.Theme.builtin(:nebula)
+      )
+
+    content = BackBreeze.Utils.strip_escape_chars(box.content)
+
+    assert content =~ "╭─Packages"
+    assert content =~ "Body"
+    refute content =~ "Hidden"
+    assert box.content =~ ~r/\e\[[0-9;]*48;2;31;70;98[0-9;]*mPackages/
   end
 
   test "flash_group renders a fixed bottom-right stack with custom highlights" do
@@ -962,15 +1131,28 @@ defmodule Breeze.BlocksTest do
     assert box.content =~ " Two"
   end
 
+  test "list virtual window derives the item slice from selection" do
+    {:ok, pid} = ChildServer.start(view: VirtualListExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "items", implicit_state: %{})
+
+    assert box.content =~ "Item 4"
+    assert box.content =~ "Item 5"
+    assert box.content =~ "Item 6"
+    refute box.content =~ "Item 3"
+    refute box.content =~ "Item 7"
+  end
+
   test "tree renders visible rows with collapsed and expanded prefixes" do
     {:ok, pid} = ChildServer.start(view: TreeExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+    content = BackBreeze.Utils.strip_escape_chars(box.content)
 
-    assert box.content =~ "⌄breeze"
-    assert box.content =~ ">src"
-    assert box.content =~ " mix.exs"
-    refute box.content =~ "lib"
+    assert content =~ "⌄breeze"
+    assert content =~ "│  >src"
+    assert content =~ "│   mix.exs"
+    refute content =~ "lib"
   end
 
   test "tree expands selected rows through the implicit lifecycle" do
@@ -1056,6 +1238,30 @@ defmodule Breeze.BlocksTest do
     assert box.content =~ ~r/\e\[[0-9;]*48;5;4/
   end
 
+  test "table inferred widths include full text and cell padding" do
+    {:ok, pid} = ChildServer.start(view: InferredTableExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "packages", implicit_state: %{})
+    content = BackBreeze.Utils.strip_escape_chars(box.content)
+
+    assert content =~ "Downloads"
+    assert content =~ "1.5.0-alpha.2"
+    assert content =~ "202.6m"
+    refute content =~ "Down "
+  end
+
+  test "table distributes unbounded columns across the available row width" do
+    {:ok, pid} = ChildServer.start(view: StretchTableExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "packages", implicit_state: %{})
+    lines = box.content |> BackBreeze.Utils.strip_escape_chars() |> String.split("\n")
+    header = Enum.find(lines, &String.contains?(&1, "Downloads"))
+    row = Enum.find(lines, &String.contains?(&1, "202.6m"))
+
+    assert text_column(header, "Downloads") >= 48
+    assert text_column(row, "202.6m") >= 52
+  end
+
   test "table emits change events from keyboard navigation" do
     {:ok, pid} = ChildServer.start(view: TableExample, start_opts: [])
 
@@ -1064,5 +1270,12 @@ defmodule Breeze.BlocksTest do
 
     term = :sys.get_state(pid)
     assert term.assigns.selected_city == "shanghai"
+  end
+
+  defp text_column(line, text) do
+    line
+    |> String.split(text, parts: 2)
+    |> hd()
+    |> BackBreeze.Utils.string_length()
   end
 end
