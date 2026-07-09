@@ -1009,6 +1009,14 @@ defmodule Breeze.View do
     end)
   end
 
+  @doc """
+  Set the implicit state for the given element ID.
+  """
+  @spec put_implicit(map(), String.t(), module(), map()) :: map()
+  def put_implicit(term, id, mod, state) when is_binary(id) and is_atom(mod) do
+    update_in(term.implicit_state, &Map.put(&1, id, {mod, state}))
+  end
+
   defp update_flash(%{assigns: assigns} = term, fun) when is_map(assigns) do
     breeze = flash_breeze_assign(assigns)
 

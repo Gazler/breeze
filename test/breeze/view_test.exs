@@ -88,6 +88,19 @@ defmodule Breeze.ViewTest do
     assert update_implicit(term, "missing", fn {_mod, state} -> state end) == term
   end
 
+  test "put_implicit sets implicit state" do
+    term = %{implicit_state: %{}}
+
+    updated =
+      put_implicit(term, "dropdown", Breeze.Implicit.Dropdown, %{
+        open?: true,
+        selected_index: 2
+      })
+
+    assert updated.implicit_state["dropdown"] ==
+             {Breeze.Implicit.Dropdown, %{open?: true, selected_index: 2}}
+  end
+
   test "put_local_keybindings and put_focus_keybindings normalize keybinding hints" do
     term = %Breeze.Term{assigns: %{}, local_keybindings: [], focus_keybindings: %{}}
 
