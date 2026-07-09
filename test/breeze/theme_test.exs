@@ -159,6 +159,21 @@ defmodule Breeze.ThemeTest do
     assert Theme.color(theme, :background) == 0
   end
 
+  test "runtime palette query uses ST terminators instead of BEL" do
+    ref = make_ref()
+
+    terminal = %Termite.Terminal{
+      reader: ref,
+      adapter: {PaletteAdapter, %{ref: ref}},
+      size: %{width: 80, height: 24}
+    }
+
+    assert {:start, {:reader, ^ref}, query} = Theme.start_runtime_palette_probe(terminal)
+    refute query =~ "\a"
+    assert query =~ "\e]10;?\e\\"
+    assert query =~ "\e]4;14;?\e\\"
+  end
+
   test "system can derive colors from a probed runtime palette" do
     ref = make_ref()
 
