@@ -154,6 +154,23 @@ defmodule Breeze.Server do
   end
 
   @doc false
+  def live_snapshot(pid, child_id, opts \\ []) when is_pid(pid) and is_binary(child_id) do
+    GenServer.call(pid, {:live_snapshot, child_id, opts})
+  end
+
+  @doc false
+  def dispatch_live_input(pid, child_id, input, opts \\ [])
+      when is_pid(pid) and is_binary(child_id) do
+    GenServer.call(pid, {:live_input, child_id, input, opts})
+  end
+
+  @doc false
+  def request_live_snapshot(pid, child_id, recipient, ref, opts \\ [])
+      when is_pid(pid) and is_binary(child_id) and is_pid(recipient) do
+    GenServer.cast(pid, {:live_snapshot, child_id, recipient, ref, opts})
+  end
+
+  @doc false
   def focused_implicit_metadata(pid) do
     GenServer.call(pid, :focused_implicit_meta)
   end
@@ -297,6 +314,16 @@ defmodule Breeze.Server do
     {:reply, Debug.snapshot(state), state}
   end
 
+  def handle_call({:live_snapshot, child_id, opts}, _from, state) do
+    {reply, state} = render_live_snapshot(state, child_id, opts)
+    {:reply, reply, state}
+  end
+
+  def handle_call({:live_input, child_id, input, opts}, _from, state) do
+    {reply, state} = dispatch_live_child_input(state, child_id, input, opts)
+    {:reply, reply, state}
+  end
+
   def handle_call(:inspector_snapshot, _from, state) do
     {:reply, Breeze.Inspector.snapshot(state), state}
   end
@@ -307,6 +334,22 @@ defmodule Breeze.Server do
 
   def handle_call(:focused_implicit_meta, _from, state) do
     {:reply, focused_implicit_meta(state), state}
+  end
+
+  @impl true
+  def handle_cast({:live_snapshot, child_id, recipient, ref, opts}, state) do
+    if is_pid(recipient) do
+      {reply, state} = render_live_snapshot(state, child_id, opts)
+
+      send(
+        recipient,
+        {:breeze_live_snapshot, ref, child_id, reply}
+      )
+
+      {:noreply, state}
+    else
+      {:noreply, state}
+    end
   end
 
   @impl true
@@ -1164,6 +1207,73 @@ defmodule Breeze.Server do
       {:crash_state, crash_state} -> {:crash, crash_state}
     end
   end
+
+  defp render_live_snapshot(state, child_id, opts) do
+    result =
+      try do
+        with {:ok, ctx} <- invalidated_child_context(state, child_id),
+             {:ok, ctx} <- render_invalidated_child_snapshot(ctx) do
+          {:ok, live_snapshot_from_context(ctx, opts)}
+        end
+      catch
+        {:crash_state, crash_state} -> {:crash, crash_state}
+      end
+
+    case result do
+      {:crash, crash_state} -> {{:crash, crash_state.crash}, crash_state}
+      reply -> {reply, state}
+    end
+  end
+
+  defp live_snapshot_from_context(ctx, _opts) do
+    child_box = ctx.child_box
+
+    %{
+      id: ctx.child_id,
+      content: child_box.content || "",
+      width: child_box.width || ctx.viewport.width,
+      height: child_box.height || ctx.viewport.height
+    }
+  end
+
+  defp dispatch_live_child_input(state, child_id, input, opts) do
+    with true <- patchable_live_child?(child_id),
+         %{pid: pid} when is_pid(pid) <- Map.get(state.children, child_id),
+         true <- Process.alive?(pid) do
+      case safe_call(fn -> Breeze.ChildServer.dispatch_input(pid, input, opts) end) do
+        {:ok, reply} ->
+          reply = namespace_child_reply(reply, child_id)
+          {reply, apply_live_input_reply(state, child_id, reply)}
+
+        {:crash, crash} ->
+          {{:crash, crash}, enter_crash_state(state, crash)}
+      end
+    else
+      false -> {{:error, :not_patchable}, state}
+      nil -> {{:error, :missing_child}, state}
+      _other -> {{:error, :missing_child}, state}
+    end
+  end
+
+  defp apply_live_input_reply(state, child_id, {:noreply, focused, true}) do
+    state
+    |> Map.put(:focused, focused)
+    |> maybe_render_invalidated_child(child_id)
+  end
+
+  defp apply_live_input_reply(state, _child_id, {:noreply, focused, _render?}) do
+    %{state | focused: focused}
+  end
+
+  defp apply_live_input_reply(state, _child_id, {:stop, focused}) do
+    %{state | focused: focused}
+  end
+
+  defp apply_live_input_reply(state, _child_id, {:stop, focused, _consumed}) do
+    %{state | focused: focused}
+  end
+
+  defp apply_live_input_reply(state, _child_id, _reply), do: state
 
   defp invalidated_child_context(state, child_id) do
     with true <- patchable_live_child?(child_id),

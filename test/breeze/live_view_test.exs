@@ -151,6 +151,42 @@ defmodule Breeze.LiveViewTest do
     end
   end
 
+  defmodule SnapshotCrashingChild do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok, term |> assign(crash?: false) |> focus("root")}
+    end
+
+    def render(assigns) do
+      if Map.get(assigns, :crash?, false), do: raise("snapshot boom")
+
+      ~H"""
+      <box id="root" focusable>snapshot ready</box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "c"}, term) do
+      {:noreply, assign(term, crash?: true), invalidate: false}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule SnapshotCrashingRoot do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <live id="child" view={SnapshotCrashingChild} start_opts={[]} focusable>
+        </live>
+      </box>
+      """
+    end
+  end
+
   defmodule RenderOnlyChild do
     use Breeze.View
 
@@ -1233,6 +1269,86 @@ defmodule Breeze.LiveViewTest do
     assert state.frame.base_output =~ "Count: 1"
 
     Process.exit(pid, :normal)
+  end
+
+  test "server can snapshot and dispatch input to a live child by id" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: FocusableLiveRootExample,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    assert {:ok, snapshot} = Breeze.Server.live_snapshot(pid, "child")
+    assert snapshot.content =~ "Root count: 0"
+
+    ref = make_ref()
+    Breeze.Server.request_live_snapshot(pid, "child", self(), ref)
+    assert_receive {:breeze_live_snapshot, ^ref, "child", {:ok, async_snapshot}}, 500
+    assert async_snapshot.content =~ "Root count: 0"
+
+    assert {:noreply, "child", true} = Breeze.Server.dispatch_live_input(pid, "child", "+")
+
+    assert {:ok, snapshot} = Breeze.Server.live_snapshot(pid, "child")
+    assert snapshot.content =~ "Root count: 1"
+
+    Process.exit(pid, :normal)
+  end
+
+  test "live snapshot call adopts crash state when child render crashes" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+      {:ok, pid} =
+        Breeze.Server.start_app_link(
+          view: SnapshotCrashingRoot,
+          terminal: terminal
+        )
+
+      assert {:ok, snapshot} = Breeze.Server.live_snapshot(pid, "child")
+      assert snapshot.content =~ "snapshot ready"
+
+      assert {:noreply, _focused, false} = Breeze.Server.dispatch_live_input(pid, "child", "c")
+      assert {:crash, crash} = Breeze.Server.live_snapshot(pid, "child")
+      assert %RuntimeError{message: "snapshot boom"} = crash.reason
+
+      state = :sys.get_state(pid)
+      assert state.crash
+      assert state.crash.reason == crash.reason
+      assert state.frame.base_output =~ "Breeze Error"
+      assert state.frame.base_output =~ "snapshot boom"
+
+      Process.exit(pid, :normal)
+    end)
+  end
+
+  test "requested live snapshot adopts crash state when child render crashes" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+      {:ok, pid} =
+        Breeze.Server.start_app_link(
+          view: SnapshotCrashingRoot,
+          terminal: terminal
+        )
+
+      assert {:noreply, _focused, false} = Breeze.Server.dispatch_live_input(pid, "child", "c")
+
+      ref = make_ref()
+      Breeze.Server.request_live_snapshot(pid, "child", self(), ref)
+      assert_receive {:breeze_live_snapshot, ^ref, "child", {:crash, crash}}, 500
+      assert %RuntimeError{message: "snapshot boom"} = crash.reason
+
+      state = :sys.get_state(pid)
+      assert state.crash
+      assert state.crash.reason == crash.reason
+      assert state.frame.base_output =~ "Breeze Error"
+      assert state.frame.base_output =~ "snapshot boom"
+
+      Process.exit(pid, :normal)
+    end)
   end
 
   test "server updates live child assigns in place when dynamic assigns change" do
