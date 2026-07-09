@@ -56,17 +56,17 @@ defmodule BreezeBench.PostingServerBenchmark do
 
     send(pid, {reader, {:data, key}})
     state = await_settle(pid)
+    stats = state.debug.stats
 
     sample = %{
-      root_us: state.debug_stats[:last_root_snapshot_app_us] || state.debug_stats[:last_root_snapshot_us],
-      live_us:
-        state.debug_stats[:last_live_children_app_us] || state.debug_stats[:last_live_children_us],
-      base_us: state.debug_stats[:last_render_base_app_us] || state.debug_stats[:last_render_base_us],
-      flushes: state.debug_stats[:flush_input_batch_count] || 0,
-      invalidations: state.debug_stats[:child_invalidated_count] || 0,
-      animations: state.debug_stats[:animation_tick_count] || 0,
-      renders: state.debug_stats[:render_base_count] || 0,
-      cause: state.debug_stats[:last_render_cause]
+      root_us: stats[:last_root_snapshot_app_us] || stats[:last_root_snapshot_us],
+      live_us: stats[:last_live_children_app_us] || stats[:last_live_children_us],
+      base_us: stats[:last_render_base_app_us] || stats[:last_render_base_us],
+      flushes: stats[:flush_input_batch_count] || 0,
+      invalidations: stats[:child_invalidated_count] || 0,
+      animations: stats[:animation_tick_count] || 0,
+      renders: stats[:render_base_count] || 0,
+      cause: stats[:last_render_cause]
     }
 
     Process.exit(pid, :normal)
@@ -89,8 +89,8 @@ defmodule BreezeBench.PostingServerBenchmark do
   defp await_settle(pid, 0), do: :sys.get_state(pid)
 
   defp settled?(state) do
-    state.queued_input == [] and not state.input_flush_scheduled? and is_nil(state.pending_ref) and
-      is_nil(state.animation_timer)
+    :queue.is_empty(state.input.queued_input) and not state.input.flush_scheduled? and
+      is_nil(state.input.pending_ref) and is_nil(state.frame.animation_timer)
   end
 
   defp report(label, samples) do
