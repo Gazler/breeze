@@ -196,6 +196,20 @@ defmodule Breeze.LiveViewTest do
     end
   end
 
+  defmodule LiveThenSiblingExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <live id="child" view={RenderOnlyChild} start_opts={[]}>
+        </live>
+        <box id="after">After</box>
+      </box>
+      """
+    end
+  end
+
   defmodule PrivateUseGlyphRoot do
     use Breeze.View
 
@@ -846,6 +860,20 @@ defmodule Breeze.LiveViewTest do
 
     assert {:ok, _acc, _box, [%{box: %BackBreeze.Box{}, every_ms: 120, id: "spinner"}]} =
              ChildServer.render_snapshot(pid, focused: nil, implicit_state: %{})
+  end
+
+  test "live child layout does not shift following sibling elements" do
+    terminal = %Termite.Terminal{size: %{width: 40, height: 10}}
+    {:ok, pid} = ChildServer.start(view: LiveThenSiblingExample, terminal: terminal)
+
+    assert {:ok, _acc, _box, _decorations} =
+             ChildServer.render_snapshot(pid, terminal: terminal)
+
+    elements = ChildServer.layout_snapshot(pid).elements
+
+    assert %Breeze.Viewport{top: child_top, height: child_height} = elements["child"]
+    assert %Breeze.Viewport{left: 0, top: after_top, width: 5, height: 1} = elements["after"]
+    assert after_top == child_top + child_height
   end
 
   test "focused child keybindings are exposed to the parent footer assign" do

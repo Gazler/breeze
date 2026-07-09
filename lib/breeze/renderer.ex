@@ -467,6 +467,7 @@ defmodule Breeze.Renderer do
 
                 {
                   acc
+                  |> add_live_box_element(full_id, flags, current_id)
                   |> merge_live_acc(child_acc, current_id)
                   |> maybe_add_live_root_focus(attrs, full_id),
                   child_box
@@ -478,6 +479,7 @@ defmodule Breeze.Renderer do
 
                 {
                   acc
+                  |> add_live_box_element(full_id, flags, current_id)
                   |> merge_live_acc(child_acc, current_id)
                   |> maybe_add_live_root_focus(attrs, full_id),
                   child_box
@@ -854,6 +856,23 @@ defmodule Breeze.Renderer do
     end
   end
 
+  defp add_live_box_element(acc, full_id, flags, current_id) do
+    live_flags =
+      [id: full_id, __live_dimension__: true]
+      |> inherit_focus_scope_path(flags)
+      |> inherit_focus_within_path(flags)
+
+    child_id = acc.id + 1
+
+    acc
+    |> Map.merge(%{
+      flags: live_flags,
+      id: child_id,
+      elements: Map.put(acc.elements, acc.id, acc.flags)
+    })
+    |> put_render_tree_child(current_id, {:id, child_id})
+  end
+
   defp maybe_add_live_root_focus(acc, attrs, full_id) do
     if truthy_live_attr?(fetch_live_attr(attrs, :focusable, false)) do
       %{
@@ -1204,6 +1223,7 @@ defmodule Breeze.Renderer do
     resolved_dimensions =
       acc.elements
       |> Enum.sort()
+      |> Enum.reject(fn {_idx, flags} -> Keyword.get(flags, :__live_dimension__) == true end)
       |> Enum.zip(dimensions)
       |> Enum.reduce(%{}, fn {{_idx, flags}, dims}, resolved ->
         case Keyword.get(flags, :id) do
@@ -1565,6 +1585,7 @@ defmodule Breeze.Renderer do
 
   defp namespace_element_flags(flags, prefix, live_focus_within_path) do
     flags
+    |> Keyword.put(:__live_dimension__, true)
     |> Keyword.update(:id, nil, &namespace_id(&1, prefix))
     |> Keyword.update(:implicit_owner, nil, &namespace_id(&1, prefix))
     |> Keyword.update(:"focus-scope-path", [], &namespace_ids(&1, prefix))

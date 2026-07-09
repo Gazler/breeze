@@ -18,4 +18,15 @@ defmodule Breeze.Server.FrameTest do
     assert Frame.build_payload([""], [line], [], [], 20) ==
              "\e[1;1H\e[48;5;8mASCII\e[0m\e[1;6H\e[K"
   end
+
+  test "row patches re-emit multi-row overlays when covered rows change" do
+    overlay = %{x: 4, y: 2, height: 3, content: "image-command"}
+    previous_lines = ["one", "two", "three", "four", "five"]
+    next_lines = ["one", "two", "three", "changed", "five"]
+
+    payload = Frame.build_payload(previous_lines, next_lines, [overlay], [overlay], 20)
+
+    assert payload =~ "\e[4;1Hchanged"
+    assert payload =~ "\e[3;5Himage-command"
+  end
 end

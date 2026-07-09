@@ -34,7 +34,7 @@ defmodule Breeze.Server.Frame do
           MapSet.union(changed_base_rows, repaired_overlay_rows),
           screen_width
         ),
-        overlay_patch_payload(overlays, changed_overlay_rows)
+        overlay_patch_payload(overlays, changed_rows)
       ])
     end
   end
@@ -118,9 +118,11 @@ defmodule Breeze.Server.Frame do
 
   defp overlay_row_map(overlays) do
     Enum.reduce(overlays, %{}, fn overlay, acc ->
-      row = Map.get(overlay, :y, 0)
       sig = overlay_signature(overlay)
-      Map.update(acc, row, MapSet.new([sig]), &MapSet.put(&1, sig))
+
+      Enum.reduce(overlay_rows(overlay), acc, fn row, row_acc ->
+        Map.update(row_acc, row, MapSet.new([sig]), &MapSet.put(&1, sig))
+      end)
     end)
   end
 
@@ -153,7 +155,9 @@ defmodule Breeze.Server.Frame do
 
   defp overlay_row_map_by_row(overlays) do
     Enum.reduce(overlays, %{}, fn overlay, acc ->
-      Map.update(acc, Map.get(overlay, :y, 0), [overlay], &[overlay | &1])
+      Enum.reduce(overlay_rows(overlay), acc, fn row, row_acc ->
+        Map.update(row_acc, row, [overlay], &[overlay | &1])
+      end)
     end)
   end
 
@@ -233,8 +237,26 @@ defmodule Breeze.Server.Frame do
 
   defp overlay_patch_payload(overlays, changed_rows) do
     overlays
-    |> Enum.filter(&MapSet.member?(changed_rows, Map.get(&1, :y, 0)))
+    |> Enum.filter(&overlay_intersects_rows?(&1, changed_rows))
     |> Breeze.TerminalOverlay.render_overlays()
+  end
+
+  defp overlay_intersects_rows?(overlay, rows) do
+    Enum.any?(overlay_rows(overlay), &MapSet.member?(rows, &1))
+  end
+
+  defp overlay_rows(overlay) do
+    y = Map.get(overlay, :y, 0)
+    height = Map.get(overlay, :height, 1)
+
+    height =
+      if is_integer(height) and height > 0 do
+        height
+      else
+        1
+      end
+
+    y..(y + height - 1)
   end
 
   # Child patches must repaint the full live viewport height so stale rows from a

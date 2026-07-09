@@ -84,6 +84,8 @@ defmodule Breeze.RenderState do
   end
 
   defp build_dimensions(sorted_elements, dimensions) do
+    sorted_elements = Enum.reject(sorted_elements, fn {_idx, flags} -> live_dimension?(flags) end)
+
     Enum.zip(sorted_elements, dimensions)
     |> Enum.reduce(%{}, fn {{_idx, flags}, dims}, elements ->
       case Keyword.get(flags, :id) do
@@ -92,6 +94,8 @@ defmodule Breeze.RenderState do
       end
     end)
   end
+
+  defp live_dimension?(flags), do: Keyword.get(flags, :__live_dimension__) == true
 
   defp build_layout_maps(raw_dimensions) do
     Enum.reduce(raw_dimensions, {%{}, %{}}, fn {id, dims}, {elements, mouse_targets} ->
