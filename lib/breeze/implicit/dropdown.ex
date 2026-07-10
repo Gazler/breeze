@@ -1,7 +1,7 @@
 defmodule Breeze.Implicit.Dropdown do
   @moduledoc false
 
-  def init(children, last_state), do: init(children, %{}, last_state)
+  @behaviour Breeze.Implicit
 
   def init(children, root_attrs, last_state) do
     items = Enum.filter(children, &Map.get(&1, :"dropdown-item"))

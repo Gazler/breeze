@@ -1,7 +1,7 @@
 defmodule Breeze.Implicit.Tabs do
   @moduledoc false
 
-  def init(children, last_state), do: init(children, %{}, last_state)
+  @behaviour Breeze.Implicit
 
   def init(children, root_attrs, last_state) do
     tab_items = Enum.filter(children, &Map.has_key?(&1, :"tab-label"))

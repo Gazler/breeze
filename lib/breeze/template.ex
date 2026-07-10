@@ -11,6 +11,9 @@ defmodule Breeze.Template do
 
   defstruct [:nodes, :env]
 
+  @type t :: %__MODULE__{nodes: list(), env: Macro.Env.t()}
+  @type rendered :: t() | {t(), map()}
+
   defguardp is_name_char(char)
             when (char >= ?a and char <= ?z) or (char >= ?A and char <= ?Z) or
                    (char >= ?0 and char <= ?9) or char == ?_ or char == ?- or char == ?: or

@@ -313,14 +313,7 @@ defmodule Breeze.RenderState do
   defp normalize_route_change_result({:stop, term}), do: {:stop, term}
 
   defp add_implicit_item(acc, meta_acc, term, id, mod, items, root_attrs) do
-    screen_width = if term.terminal, do: term.terminal.size.width, else: 0
-    screen_height = if term.terminal, do: term.terminal.size.height, else: 0
-
-    root_attrs =
-      root_attrs
-      |> Map.put(:id, id)
-      |> Map.put(:"screen-width", screen_width)
-      |> Map.put(:"screen-height", screen_height)
+    root_attrs = Map.put(root_attrs, :id, id)
 
     last_state =
       case term.implicit_state[id] do
@@ -337,16 +330,7 @@ defmodule Breeze.RenderState do
     {implicit_state, implicit_meta} =
       case Code.ensure_loaded(mod) do
         {:module, _module} ->
-          cond do
-            function_exported?(mod, :init, 3) ->
-              normalize_init_result(mod.init(items, root_attrs, last_state))
-
-            function_exported?(mod, :init, 2) ->
-              normalize_init_result(mod.init(items, last_state))
-
-            true ->
-              raise ArgumentError, "implicit #{inspect(mod)} must implement init/2 or init/3"
-          end
+          normalize_init_result(mod.init(items, root_attrs, last_state))
 
         {:error, reason} ->
           raise ArgumentError,

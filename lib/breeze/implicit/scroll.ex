@@ -1,6 +1,8 @@
 defmodule Breeze.Implicit.Scroll do
   @moduledoc false
 
+  @behaviour Breeze.Implicit
+
   _ = """
   Built-in implicit module for keyboard-scrollable content areas.
 
@@ -9,8 +11,6 @@ defmodule Breeze.Implicit.Scroll do
 
   alias Breeze.Implicit.Common
   alias Breeze.Viewport
-
-  def init(children, last_state), do: init(children, %{}, last_state)
 
   def init(_children, root_attrs, last_state) do
     autoscroll =

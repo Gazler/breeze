@@ -1,5 +1,7 @@
 defmodule Breeze.Implicit.List do
   @moduledoc false
+
+  @behaviour Breeze.Implicit
   _ = """
   Built-in implicit module for keyboard-navigable list views.
 
@@ -18,26 +20,6 @@ defmodule Breeze.Implicit.List do
   alias Breeze.Implicit.Common
   alias Breeze.Viewport
 
-  @type state :: %{
-          values: list(),
-          selected: term() | nil,
-          selected_index: non_neg_integer() | nil,
-          offset: non_neg_integer(),
-          loop: boolean(),
-          scroll_padding: non_neg_integer(),
-          width: non_neg_integer(),
-          count: non_neg_integer(),
-          value_index: map(),
-          value_tuple: tuple(),
-          row_starts: tuple(),
-          row_heights: tuple(),
-          total_rows: non_neg_integer()
-        }
-
-  @spec init(list(map()), map()) :: state()
-  def init(children, last_state), do: init(children, %{}, last_state)
-
-  @spec init(list(map()), map(), map()) :: state()
   def init(children, root_attrs, last_state) do
     values = values_from_attrs(root_attrs, children)
 
@@ -75,7 +57,6 @@ defmodule Breeze.Implicit.List do
     })
   end
 
-  @spec handle_event(term(), map(), state()) :: {:noreply, state()} | {{:change, map()}, state()}
   def handle_event(_, %{"key" => key, "element" => element}, state)
       when key in ["ArrowDown", "j"] do
     state
@@ -161,7 +142,6 @@ defmodule Breeze.Implicit.List do
 
   def handle_event(_, _, state), do: {:noreply, state}
 
-  @spec handle_modifiers(:root | :child, keyword(), state()) :: keyword()
   def handle_modifiers(:root, _flags, state), do: Common.root_scroll_modifier(state)
 
   def handle_modifiers(:child, flags, state), do: Common.selected_modifier(flags, state)

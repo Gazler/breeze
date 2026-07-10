@@ -1,17 +1,11 @@
 defmodule Breeze.Implicit.Input do
   @moduledoc false
 
+  @behaviour Breeze.Implicit
+
   alias BackBreeze.Ucwidth
   alias Breeze.Implicit.TextEditor
   alias Breeze.Theme
-
-  @type state :: %{
-          value: String.t(),
-          cursor: non_neg_integer(),
-          placeholder: String.t() | nil
-        }
-
-  def init(items, last_state), do: init(items, %{}, last_state)
 
   def init(_items, root_attrs, last_state) do
     value = Map.get(root_attrs, :"input-value", "")
@@ -52,7 +46,6 @@ defmodule Breeze.Implicit.Input do
      requires_layout_rerender: true}
   end
 
-  @spec handle_event(term(), map(), state()) :: {:noreply, state()} | {{:change, map()}, state()}
   def handle_event(_, %{"key" => "\x7f"}, state), do: TextEditor.backspace(state)
 
   def handle_event(_, %{"key" => key}, %{cursor: cursor} = state)

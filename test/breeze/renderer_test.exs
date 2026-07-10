@@ -144,6 +144,32 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule ThemeAnimationImplicit do
+    @behaviour Breeze.Implicit
+
+    def init(_children, _root_attrs, last_state), do: last_state
+    def handle_modifiers(_type, _flags, _state), do: []
+
+    def animate(:root, box, _flags, _state, %{
+          phase: :base,
+          theme: %Breeze.Theme{name: name}
+        }) do
+      %{box | content: name}
+    end
+
+    def animate(:child, box, _flags, _state, _ctx), do: box
+  end
+
+  defmodule ThemeAnimationExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box id="theme-animation" implicit={ThemeAnimationImplicit}>fallback</box>
+      """
+    end
+  end
+
   defmodule ScreenDimBackdropExample do
     use Breeze.View
     import Breeze.Blocks
@@ -159,7 +185,8 @@ defmodule Breeze.RendererTest do
   end
 
   defmodule ScrollImplicit do
-    def init(_children, last_state), do: %{offset_y: last_state[:offset_y] || 0, offset_x: 0}
+    def init(_children, _root_attrs, last_state),
+      do: %{offset_y: last_state[:offset_y] || 0, offset_x: 0}
 
     def handle_event(_, _, state), do: {:noreply, state}
 
@@ -195,7 +222,9 @@ defmodule Breeze.RendererTest do
   end
 
   defmodule SelectedOwnerImplicit do
-    def init(_children, last_state), do: %{selected: last_state[:selected] || "two"}
+    def init(_children, _root_attrs, last_state),
+      do: %{selected: last_state[:selected] || "two"}
+
     def handle_event(_, _, state), do: {:noreply, state}
     def handle_modifiers(:root, _flags, _state), do: []
 
@@ -415,7 +444,7 @@ defmodule Breeze.RendererTest do
   end
 
   defmodule ParentImplicit do
-    def init(_children, last_state), do: %{offset_x: last_state[:offset_x] || 0}
+    def init(_children, _root_attrs, last_state), do: %{offset_x: last_state[:offset_x] || 0}
     def handle_event(_, _, state), do: {:noreply, state}
     def handle_modifiers(:root, _flags, state), do: [scroll_x: state.offset_x]
     def handle_modifiers(:child, _flags, _state), do: []
@@ -549,6 +578,18 @@ defmodule Breeze.RendererTest do
   end
 
   describe "render/3" do
+    test "includes the theme in the base animation context" do
+      theme = Breeze.Theme.builtin(:gruvbox)
+
+      {_acc, box} =
+        Renderer.render(ThemeAnimationExample, %{},
+          theme: theme,
+          implicit_state: %{"theme-animation" => {ThemeAnimationImplicit, %{}}}
+        )
+
+      assert box.content =~ theme.name
+    end
+
     test "supports virtual text as child content" do
       content =
         Source.lazy(

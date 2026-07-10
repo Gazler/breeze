@@ -1,6 +1,8 @@
 defmodule Breeze.Implicit.AsyncSpinner do
   @moduledoc false
 
+  @behaviour Breeze.Implicit
+
   @frames ["|", "/", "-", "\\"]
 
   def init(_items, _root_attrs, last_state),

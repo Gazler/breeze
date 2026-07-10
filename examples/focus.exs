@@ -10,7 +10,9 @@ updated_config =
 :ok = :logger.add_handler(:default, :logger_std_h, updated_config)
 
 defmodule Breeze.List do
-  def init(children, last_state) do
+  @behaviour Breeze.Implicit
+
+  def init(children, _root_attrs, last_state) do
     %{values: Enum.map(children, & &1.value), selected: last_state[:selected]}
   end
 

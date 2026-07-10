@@ -1694,6 +1694,7 @@ defmodule Breeze.Renderer do
       focused?: focused,
       last_render_at: Keyword.get(opts, :last_render_at),
       last_interaction_at: Keyword.get(opts, :last_interaction_at),
+      theme: Keyword.get(opts, :theme),
       id: id,
       layout: previous_layout
     }

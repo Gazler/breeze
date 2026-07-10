@@ -1,7 +1,7 @@
 defmodule Breeze.Implicit.Modal do
   @moduledoc false
 
-  def init(_items, last_state), do: last_state
+  @behaviour Breeze.Implicit
 
   def init(_items, _root_attrs, last_state), do: last_state
 

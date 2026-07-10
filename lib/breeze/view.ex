@@ -26,6 +26,10 @@ defmodule Breeze.View do
   end
   ```
 
+  `use Breeze.View` declares the `Breeze.View` behaviour. The callbacks are
+  optional because the same module is also used to define component-only
+  modules, but a root view must implement `render/1`.
+
   ## Initial state
 
   The initial state can be set in the mount callback:
@@ -191,6 +195,7 @@ defmodule Breeze.View do
 
   ```
   defmodule MyAppList do
+    @behaviour Breeze.Implicit
 
     def init(children, root_attrs, last_state) do
       %{values: Enum.map(children, &(&1.value)), selected: last_state[:selected], root: root_attrs}
@@ -264,8 +269,26 @@ defmodule Breeze.View do
 
   """
 
+  @type assigns :: map()
+  @type event_name :: term()
+  @type event :: map()
+  @type reply_option :: {:invalidate, boolean()}
+  @type reply ::
+          {:noreply, Breeze.Term.t()}
+          | {:noreply, Breeze.Term.t(), [reply_option()]}
+          | {:stop, Breeze.Term.t()}
+          | {:stop, Breeze.Term.t(), [reply_option()]}
+
+  @callback mount(keyword(), Breeze.Term.t()) :: {:ok, Breeze.Term.t()}
+  @callback render(assigns()) :: Breeze.Template.rendered()
+  @callback handle_event(event_name(), event(), Breeze.Term.t()) :: reply()
+  @callback handle_info(term(), Breeze.Term.t()) :: reply()
+
+  @optional_callbacks mount: 2, render: 1, handle_event: 3, handle_info: 2
+
   defmacro __using__(_opts) do
     quote do
+      @behaviour Breeze.View
       import Breeze.View
       Module.register_attribute(__MODULE__, :breeze_components, accumulate: true)
       Module.register_attribute(__MODULE__, :__attrs__, accumulate: true)
