@@ -1,10 +1,9 @@
 defmodule Breeze.Theme.Builtin do
-  @moduledoc """
-  Built-in Breeze themes.
-  """
+  @moduledoc false
 
   alias Breeze.Theme
 
+  @doc false
   @spec fetch!(atom(), atom() | nil) :: Theme.t()
   def fetch!(name, variant \\ nil)
 
@@ -26,7 +25,7 @@ defmodule Breeze.Theme.Builtin do
             if(variant, do: " with variant #{inspect(variant)}", else: "")
   end
 
-  def nebula do
+  defp nebula do
     Theme.new(
       name: "nebula",
       defaults: %{
@@ -49,7 +48,7 @@ defmodule Breeze.Theme.Builtin do
     )
   end
 
-  def catppuccin do
+  defp catppuccin do
     Theme.new(
       name: "catppuccin-mocha",
       defaults: %{
@@ -72,7 +71,7 @@ defmodule Breeze.Theme.Builtin do
     )
   end
 
-  def dracula do
+  defp dracula do
     Theme.new(
       name: "dracula",
       defaults: %{
@@ -95,7 +94,7 @@ defmodule Breeze.Theme.Builtin do
     )
   end
 
-  def gruvbox do
+  defp gruvbox do
     Theme.new(
       name: "gruvbox-dark",
       defaults: %{
@@ -118,7 +117,7 @@ defmodule Breeze.Theme.Builtin do
     )
   end
 
-  def nord do
+  defp nord do
     Theme.new(
       name: "nord",
       defaults: %{
@@ -141,7 +140,7 @@ defmodule Breeze.Theme.Builtin do
     )
   end
 
-  def solarized_light do
+  defp solarized_light do
     Theme.new(
       name: "solarized-light",
       defaults: %{
@@ -164,7 +163,7 @@ defmodule Breeze.Theme.Builtin do
     )
   end
 
-  def solarized_dark do
+  defp solarized_dark do
     Theme.new(
       name: "solarized-dark",
       defaults: %{

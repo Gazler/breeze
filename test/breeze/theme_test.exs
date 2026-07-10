@@ -313,6 +313,12 @@ defmodule Breeze.ThemeTest do
     assert Theme.color(dark, :cursor) == {131, 148, 150}
   end
 
+  test "built-in constructors stay behind the Theme.builtin API" do
+    for constructor <- ~w(nebula catppuccin dracula gruvbox nord solarized_light solarized_dark)a do
+      refute function_exported?(Breeze.Theme.Builtin, constructor, 0)
+    end
+  end
+
   test "views can switch themes at runtime" do
     session = Breeze.Test.start!(ToggleView)
     on_exit(fn -> Breeze.Test.stop(session) end)

@@ -49,6 +49,24 @@ defmodule Breeze.Theme do
   @spec default(keyword()) :: t()
   def default(opts \\ []), do: system16(opts)
 
+  @doc """
+  Returns a built-in theme.
+
+  The available themes are:
+
+    * `:nebula`
+    * `:catppuccin` or `:catppuccin` with the `:dark` variant
+    * `:dracula`
+    * `:gruvbox` or `:gruvbox` with the `:dark` variant
+    * `:nord`
+    * `:solarized` with either the `:light` or `:dark` variant
+    * `:solarized_light` and `:solarized_dark` as variant aliases
+
+  ## Examples
+
+      Breeze.Theme.builtin(:nebula)
+      Breeze.Theme.builtin(:solarized, :light)
+  """
   @spec builtin(atom(), atom() | nil) :: t()
   def builtin(name, variant \\ nil),
     do: Breeze.Theme.Builtin.fetch!(name, variant)

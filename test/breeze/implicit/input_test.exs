@@ -273,7 +273,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "animate can return geometry-aware overlay data" do
     box = %Box{style: %BackBreeze.Style{border: BackBreeze.Border.line(), padding_left: 1}}
-    theme = Breeze.Theme.Builtin.nebula()
+    theme = Breeze.Theme.builtin(:nebula)
 
     assert {:ok, %Box{content: "hello"},
             overlays: [
