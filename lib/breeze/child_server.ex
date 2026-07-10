@@ -7,6 +7,10 @@ defmodule Breeze.ChildServer do
     GenServer.start(__MODULE__, opts)
   end
 
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, opts)
+  end
+
   def metadata(pid, opts \\ []) do
     GenServer.call(pid, {:metadata, opts})
   end
@@ -307,6 +311,12 @@ defmodule Breeze.ChildServer do
         maybe_notify_invalidate(next_term, opts)
         {:stop, :normal, next_term}
     end
+  end
+
+  @impl true
+  def terminate(_reason, term) do
+    Breeze.ChildViewSupervisor.stop(term.child_view_supervisor)
+    :ok
   end
 
   defp reply_from_result({:noreply, next_term}, term) do
@@ -1060,7 +1070,7 @@ defmodule Breeze.ChildServer do
       |> Enum.reverse()
       |> Enum.uniq_by(&elem(&1, 0))
 
-    term = ensure_children(term, discovered)
+    term = term |> reconcile_children(discovered) |> ensure_children(discovered)
 
     if discovered == [] do
       {term, opts}
@@ -1090,15 +1100,18 @@ defmodule Breeze.ChildServer do
   end
 
   defp ensure_children(term, live_children) do
+    term = ensure_child_view_supervisor(term, live_children)
+
     Enum.reduce(live_children, term, fn {id, attrs}, acc ->
       view = fetch_live_attr!(attrs, :view)
       start_opts = fetch_live_attr(attrs, :start_opts, [])
       assigns = fetch_live_attr(attrs, :assigns, %{}) |> Map.new()
 
       case Map.get(acc.children, id) do
-        %{pid: pid, view: ^view, start_opts: ^start_opts} when is_pid(pid) ->
+        %{pid: pid, view: ^view, start_opts: ^start_opts} = child when is_pid(pid) ->
           cond do
             not Process.alive?(pid) ->
+              shutdown_child(acc.child_view_supervisor, child)
               put_in(acc.children[id], start_child!(id, attrs, acc))
 
             true ->
@@ -1110,15 +1123,53 @@ defmodule Breeze.ChildServer do
               end
           end
 
-        %{pid: pid, ref: ref} ->
-          if is_pid(pid) and Process.alive?(pid), do: Process.exit(pid, :normal)
-          if is_reference(ref), do: Process.demonitor(ref, [:flush])
+        %{pid: _pid, ref: _ref} = child ->
+          shutdown_child(acc.child_view_supervisor, child)
           put_in(acc.children[id], start_child!(id, attrs, acc))
 
         nil ->
           put_in(acc.children[id], start_child!(id, attrs, acc))
       end
     end)
+  end
+
+  defp ensure_child_view_supervisor(term, []), do: term
+
+  defp ensure_child_view_supervisor(%{child_view_supervisor: supervisor} = term, _children)
+       when is_pid(supervisor) do
+    term
+  end
+
+  defp ensure_child_view_supervisor(term, _children) do
+    {:ok, supervisor} = Breeze.ChildViewSupervisor.start_link()
+    %{term | child_view_supervisor: supervisor}
+  end
+
+  defp reconcile_children(term, live_children) do
+    seen = Map.new(live_children)
+
+    children =
+      Enum.reduce(term.children, %{}, fn {id, child}, acc ->
+        case Map.fetch(seen, id) do
+          {:ok, attrs} ->
+            child =
+              child
+              |> Map.put(:attrs, attrs)
+              |> Map.put(:persistent, fetch_live_attr(attrs, :persistent, false))
+
+            Map.put(acc, id, child)
+
+          :error ->
+            if Map.get(child, :persistent, false) do
+              Map.put(acc, id, child)
+            else
+              shutdown_child(term.child_view_supervisor, child)
+              acc
+            end
+        end
+      end)
+
+    %{term | children: children}
   end
 
   defp put_child_themes(term, theme_input) do
@@ -1170,7 +1221,8 @@ defmodule Breeze.ChildServer do
     end
 
     {:ok, pid} =
-      Breeze.ChildServer.start(
+      Breeze.ChildViewSupervisor.start_child(
+        term.child_view_supervisor,
         view: view,
         start_opts: start_opts,
         assigns: assigns,
@@ -1184,7 +1236,15 @@ defmodule Breeze.ChildServer do
         invalidate: invalidate
       )
 
-    %{pid: pid, ref: Process.monitor(pid), view: view, start_opts: start_opts, assigns: assigns}
+    %{
+      pid: pid,
+      ref: Process.monitor(pid),
+      view: view,
+      start_opts: start_opts,
+      assigns: assigns,
+      attrs: attrs,
+      persistent: fetch_live_attr(attrs, :persistent, false)
+    }
   end
 
   defp render_live_child(attrs, child_opts, term) do
@@ -1235,6 +1295,17 @@ defmodule Breeze.ChildServer do
       |> Map.new()
 
     %{term | children: alive_children}
+  end
+
+  defp shutdown_child(supervisor, child) do
+    Breeze.ChildViewSupervisor.terminate_child(supervisor, Map.get(child, :pid))
+
+    case Map.get(child, :ref) do
+      ref when is_reference(ref) -> Process.demonitor(ref, [:flush])
+      _ref -> :ok
+    end
+
+    :ok
   end
 
   defp focused_child_chain(%{focused: nil}), do: []

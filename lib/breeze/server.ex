@@ -57,6 +57,8 @@ defmodule Breeze.Server do
     :terminal,
     :reader,
     :input_router,
+    :child_view_supervisor,
+    :owns_child_view_supervisor?,
     :view_pid,
     :view,
     :start_opts,
@@ -221,6 +223,17 @@ defmodule Breeze.Server do
     end
   end
 
+  defp child_view_supervisor(internal_opts) do
+    case Keyword.get(internal_opts, :child_view_supervisor) do
+      supervisor when is_pid(supervisor) ->
+        {supervisor, false}
+
+      _supervisor ->
+        {:ok, supervisor} = Breeze.ChildViewSupervisor.start_link()
+        {supervisor, true}
+    end
+  end
+
   @impl true
   def init(opts) do
     view = Keyword.fetch!(opts, :view)
@@ -228,6 +241,10 @@ defmodule Breeze.Server do
     internal_opts = internal_opts(opts)
     child_process_flags = Keyword.get(internal_opts, :child_process_flags, [])
     terminal_size_override = Keyword.get(internal_opts, :terminal_size_override)
+
+    {child_view_supervisor, owns_child_view_supervisor?} =
+      child_view_supervisor(internal_opts)
+
     render_errors = Error.normalize(render_errors_opts(opts))
 
     terminal =
@@ -245,7 +262,8 @@ defmodule Breeze.Server do
     session = self()
 
     child_start_result =
-      Breeze.ChildServer.start(
+      Breeze.ChildViewSupervisor.start_child(
+        child_view_supervisor,
         view: view,
         start_opts: start_opts,
         terminal: terminal,
@@ -278,6 +296,8 @@ defmodule Breeze.Server do
         terminal: terminal,
         reader: terminal.reader,
         input_router: Keyword.get(opts, :input_router),
+        child_view_supervisor: child_view_supervisor,
+        owns_child_view_supervisor?: owns_child_view_supervisor?,
         view_pid: view_pid,
         view: view,
         start_opts: start_opts,
@@ -523,7 +543,7 @@ defmodule Breeze.Server do
   end
 
   def handle_info({:reload, :compile_error, reason, _files}, state) do
-    shutdown_root_view(state.view_pid)
+    shutdown_view_processes(state)
     {:noreply, enter_crash_state(state, crash_info(:error, reason, []))}
   end
 
@@ -875,11 +895,13 @@ defmodule Breeze.Server do
 
       %{
         missing: missing,
+        seen: seen,
         decorations: child_decorations,
         child_timings: child_timings
       } = RenderTracking.finish(tracking_ref)
 
       profile_entries = Breeze.DebugProfiler.snapshot(profile_scope)
+      state = reconcile_live_children(state, seen)
       {state, started?} = ensure_children(state, missing)
 
       continue_base_render(state, %{
@@ -1073,6 +1095,7 @@ defmodule Breeze.Server do
 
   defp render_live_child(attrs, opts, state, profile_scope, tracking_ref) do
     ctx = live_child_context(attrs, opts, state)
+    RenderTracking.track_seen_live_child(tracking_ref, {ctx.full_id, ctx.attrs})
 
     case Map.get(state.children, ctx.full_id) do
       nil ->
@@ -1742,7 +1765,7 @@ defmodule Breeze.Server do
   defp live_placeholder_style(_child, _state, _terminal), do: %{}
 
   defp stop(state) do
-    shutdown_root_view(state.view_pid)
+    shutdown_root_view(state.child_view_supervisor, state.view_pid)
 
     terminal =
       state.terminal
@@ -1753,6 +1776,16 @@ defmodule Breeze.Server do
 
     terminal = Termite.Terminal.write(terminal, "\r")
     {:stop, :normal, %{state | terminal: terminal}}
+  end
+
+  @impl true
+  def terminate(_reason, state) do
+    shutdown_view_processes(state)
+
+    if state.owns_child_view_supervisor?,
+      do: Breeze.ChildViewSupervisor.stop(state.child_view_supervisor)
+
+    :ok
   end
 
   defp maybe_exit_alt_screen(terminal, true), do: Termite.Screen.exit_alt_screen(terminal)
@@ -2025,7 +2058,7 @@ defmodule Breeze.Server do
       |> restore_terminal_after_crash_scrollback()
       |> then(&%{&1 | terminal: apply_mouse_mode(&1.terminal, &1.mouse_mode)})
 
-    shutdown_root_view(state.view_pid)
+    shutdown_view_processes(state)
 
     case start_root_view(state) do
       {:ok, pid, focused, theme} ->
@@ -2067,7 +2100,8 @@ defmodule Breeze.Server do
     session = self()
 
     case safe_call(fn ->
-           Breeze.ChildServer.start(
+           Breeze.ChildViewSupervisor.start_child(
+             state.child_view_supervisor,
              view: state.view,
              start_opts: state.start_opts || [],
              terminal: state.terminal,
@@ -2104,15 +2138,25 @@ defmodule Breeze.Server do
     end
   end
 
-  defp shutdown_root_view(nil), do: :ok
+  defp shutdown_root_view(_supervisor, nil), do: :ok
 
-  defp shutdown_root_view(pid) do
-    if Process.alive?(pid) do
-      GenServer.stop(pid, :normal)
-    else
-      :ok
-    end
+  defp shutdown_root_view(supervisor, pid) do
+    shutdown_view_process(supervisor, pid)
   end
+
+  defp shutdown_view_processes(state) do
+    state.children
+    |> Map.values()
+    |> Enum.map(&Map.get(&1, :pid))
+    |> then(&[state.view_pid | &1])
+    |> Enum.uniq()
+    |> Enum.each(&shutdown_view_process(state.child_view_supervisor, &1))
+  end
+
+  defp shutdown_view_process(supervisor, pid) when is_pid(pid),
+    do: Breeze.ChildViewSupervisor.terminate_child(supervisor, pid)
+
+  defp shutdown_view_process(_supervisor, _pid), do: :ok
 
   defp refresh_reload_state(state) do
     case Keyword.get(state.reload_opts || [], :refresh_server_opts) do
@@ -2310,9 +2354,8 @@ defmodule Breeze.Server do
             {%{state | children: Map.put(state.children, id, child)}, true}
           end
 
-        %{pid: pid, ref: ref} ->
-          if is_pid(pid) and Process.alive?(pid), do: Process.exit(pid, :normal)
-          if is_reference(ref), do: Process.demonitor(ref, [:flush])
+        %{pid: _pid, ref: _ref} = child ->
+          shutdown_tracked_child(state.child_view_supervisor, child)
 
           child = start_child!(attrs, state.terminal, state.theme, state)
           {%{state | children: Map.put(state.children, id, child)}, true}
@@ -2322,6 +2365,44 @@ defmodule Breeze.Server do
           {%{state | children: Map.put(state.children, id, child)}, true}
       end
     end)
+  end
+
+  defp reconcile_live_children(state, :disabled), do: state
+
+  defp reconcile_live_children(state, seen) do
+    seen = Map.new(seen)
+
+    children =
+      Enum.reduce(state.children, %{}, fn {id, child}, acc ->
+        case Map.fetch(seen, id) do
+          {:ok, attrs} ->
+            child =
+              child
+              |> Map.put(:attrs, attrs)
+              |> Map.put(:persistent, fetch_live_attr(attrs, :persistent, false))
+
+            Map.put(acc, id, child)
+
+          :error ->
+            if Map.get(child, :persistent, false) do
+              Map.put(acc, id, child)
+            else
+              shutdown_tracked_child(state.child_view_supervisor, child)
+              acc
+            end
+        end
+      end)
+
+    %{state | children: children}
+  end
+
+  defp shutdown_tracked_child(supervisor, child) do
+    shutdown_view_process(supervisor, Map.get(child, :pid))
+
+    case Map.get(child, :ref) do
+      ref when is_reference(ref) -> Process.demonitor(ref, [:flush])
+      _ref -> :ok
+    end
   end
 
   defp start_async_dispatch(state, key) do
@@ -2349,7 +2430,8 @@ defmodule Breeze.Server do
     invalidate = fn -> send(parent, {:child_invalidated, child_id}) end
 
     {:ok, pid} =
-      Breeze.ChildServer.start(
+      Breeze.ChildViewSupervisor.start_child(
+        state.child_view_supervisor,
         view: view,
         start_opts: start_opts,
         assigns: assigns,

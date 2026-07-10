@@ -722,6 +722,27 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule PersistentToggleRoot do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, assign(term, show_child: true)}
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <live :if={@show_child} id="persistent" view={CounterChild} persistent={true}>
+        </live>
+      </box>
+      """
+    end
+
+    def handle_event("toggle", _event, term) do
+      {:noreply, assign(term, show_child: !term.assigns.show_child)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
   defmodule DecoratedDebugChild do
     use Breeze.View
 
@@ -1250,6 +1271,55 @@ defmodule Breeze.LiveViewTest do
     assert ChildServer.metadata(leaf).theme.name == "nebula"
   end
 
+  test "child server stops nested live children when it terminates" do
+    {:ok, pid} = ChildServer.start(view: ThemeSwitchingParent, start_opts: [])
+    assert {:ok, _acc, _box} = ChildServer.render(pid, [])
+
+    branch = :sys.get_state(pid).children["branch"].pid
+    leaf = :sys.get_state(branch).children["leaf"].pid
+
+    GenServer.stop(pid, :normal)
+
+    refute Process.alive?(branch)
+    refute Process.alive?(leaf)
+  end
+
+  test "child server stops inactive non-persistent live children" do
+    {:ok, pid} = ChildServer.start(view: DebugToggleRoot, start_opts: [])
+    assert {:ok, _acc, _box} = ChildServer.render(pid, [])
+
+    assert {:noreply, _, true} = ChildServer.dispatch_input(pid, "F2")
+    assert {:ok, _acc, _box} = ChildServer.render(pid, [])
+    child = :sys.get_state(pid).children["debug"].pid
+
+    assert {:noreply, _, true} = ChildServer.dispatch_input(pid, "F2")
+    assert {:ok, _acc, _box} = ChildServer.render(pid, [])
+
+    refute Map.has_key?(:sys.get_state(pid).children, "debug")
+    refute Process.alive?(child)
+
+    GenServer.stop(pid, :normal)
+  end
+
+  test "child server retains inactive persistent live children" do
+    {:ok, pid} = ChildServer.start(view: PersistentToggleRoot, start_opts: [])
+    assert {:ok, _acc, _box} = ChildServer.render(pid, [])
+    child = :sys.get_state(pid).children["persistent"].pid
+
+    assert {:noreply, _, true} = ChildServer.dispatch_event(pid, "toggle", %{})
+    assert {:ok, _acc, _box} = ChildServer.render(pid, [])
+
+    assert :sys.get_state(pid).children["persistent"].pid == child
+    assert Process.alive?(child)
+
+    assert {:noreply, _, true} = ChildServer.dispatch_event(pid, "toggle", %{})
+    assert {:ok, _acc, _box} = ChildServer.render(pid, [])
+    assert :sys.get_state(pid).children["persistent"].pid == child
+
+    GenServer.stop(pid, :normal)
+    refute Process.alive?(child)
+  end
+
   test "unfocused live children do not render their own local focus ring" do
     {:ok, pid} = ChildServer.start(view: FocusedChild, start_opts: [])
 
@@ -1361,6 +1431,58 @@ defmodule Breeze.LiveViewTest do
     assert state.frame.base_output =~ "Count: 1"
 
     Process.exit(pid, :normal)
+  end
+
+  test "server stops inactive non-persistent live children" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: DebugToggleRoot,
+        terminal: terminal
+      )
+
+    send(pid, {reader, {:data, "\eOQ"}})
+
+    child =
+      wait_until(fn ->
+        case :sys.get_state(pid).children["debug"] do
+          %{pid: child} -> child
+          _ -> nil
+        end
+      end)
+
+    send(pid, {reader, {:data, "\eOQ"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      not Map.has_key?(state.children, "debug")
+    end)
+
+    refute Process.alive?(child)
+    GenServer.stop(pid, :normal)
+  end
+
+  test "server stops its root view and live children when it terminates" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: FocusableLiveRootExample,
+        terminal: terminal
+      )
+
+    state = :sys.get_state(pid)
+    root = state.view_pid
+    child = state.children["child"].pid
+
+    Process.unlink(pid)
+
+    capture_log(fn ->
+      Process.exit(pid, :kill)
+      wait_until(fn -> not Process.alive?(root) and not Process.alive?(child) end)
+    end)
   end
 
   test "server can snapshot and dispatch input to a live child by id" do
@@ -2811,6 +2933,7 @@ defmodule Breeze.LiveViewTest do
     on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
 
     drain_terminal_writes()
+    previous_child = :sys.get_state(pid).children["preview"].pid
 
     send(pid, {terminal.reader, {:data, "s"}})
 
@@ -2821,5 +2944,7 @@ defmodule Breeze.LiveViewTest do
       end)
 
     assert IO.iodata_to_binary(writes) =~ "Alternate child"
+    refute Process.alive?(previous_child)
+    assert :sys.get_state(pid).children["preview"].pid != previous_child
   end
 end

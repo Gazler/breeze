@@ -33,6 +33,46 @@ defmodule Breeze.RouterTest do
     end
   end
 
+  defmodule RouterLifecycleView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok, assign(term, name: Keyword.fetch!(opts, :name))}
+    end
+
+    def render(assigns) do
+      ~H"<box>{@name}</box>"
+    end
+  end
+
+  defmodule RouterLifecycleRoot do
+    use Breeze.View
+    import Breeze.Router
+
+    def mount(opts, term) do
+      settings_persistence = Keyword.get(opts, :settings_persistence, false)
+
+      routes = [
+        home: {RouterLifecycleView, [name: "home"]},
+        settings: {RouterLifecycleView, [name: "settings"], persistence: settings_persistence}
+      ]
+
+      {:ok, Router.init(term, routes, current: :home)}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <.router routes={@router} id="main"/>
+      </box>
+      """
+    end
+
+    def handle_event("navigate", %{"route" => route}, term) do
+      {:noreply, Router.navigate(term, String.to_existing_atom(route))}
+    end
+  end
+
   defmodule NestedLeafView do
     use Breeze.View
 
@@ -145,6 +185,60 @@ defmodule Breeze.RouterTest do
 
     assert attrs.id == "main:settings"
     assert attrs.view == SettingsView
+  end
+
+  test "routing away stops a non-persistent view and routing back remounts it" do
+    {:ok, root} = Breeze.ChildServer.start(view: RouterLifecycleRoot, start_opts: [])
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(root, [])
+
+    home = :sys.get_state(root).children["main:home"].pid
+
+    assert {:noreply, _, true} =
+             Breeze.ChildServer.dispatch_event(root, "navigate", %{"route" => "settings"})
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(root, [])
+    settings = :sys.get_state(root).children["main:settings"].pid
+
+    refute Process.alive?(home)
+
+    assert {:noreply, _, true} =
+             Breeze.ChildServer.dispatch_event(root, "navigate", %{"route" => "home"})
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(root, [])
+    remounted_home = :sys.get_state(root).children["main:home"].pid
+
+    refute Process.alive?(settings)
+    assert remounted_home != home
+
+    GenServer.stop(root, :normal)
+  end
+
+  test "preloaded routes stay supervised across navigation" do
+    {:ok, root} =
+      Breeze.ChildServer.start(
+        view: RouterLifecycleRoot,
+        start_opts: [settings_persistence: :preload]
+      )
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(root, [])
+    initial_children = :sys.get_state(root).children
+    home = initial_children["main:home"].pid
+    settings = initial_children["main:persistent:settings"].pid
+
+    assert Process.alive?(home)
+    assert Process.alive?(settings)
+
+    assert {:noreply, _, true} =
+             Breeze.ChildServer.dispatch_event(root, "navigate", %{"route" => "settings"})
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(root, [])
+
+    refute Process.alive?(home)
+    assert :sys.get_state(root).children["main:persistent:settings"].pid == settings
+    assert Process.alive?(settings)
+
+    GenServer.stop(root, :normal)
+    refute Process.alive?(settings)
   end
 
   test "nested routers can emit nested live nodes inside routed views" do

@@ -10,6 +10,7 @@ defmodule Breeze.InputRouter do
     :terminal,
     :reader,
     :server_pid,
+    :child_view_supervisor,
     :halt_fun,
     :theme_probe,
     :iex_shell_proxy,
@@ -51,10 +52,13 @@ defmodule Breeze.InputRouter do
     {terminal, deferred_messages} =
       maybe_complete_initial_theme_probe(terminal, Keyword.get(opts, :theme))
 
+    {:ok, child_view_supervisor} = Breeze.ChildViewSupervisor.start_link()
+
     server_opts =
       opts
       |> Keyword.put(:terminal, terminal)
       |> Keyword.put(:input_router, self())
+      |> put_internal(:child_view_supervisor, child_view_supervisor)
 
     {:ok, server_pid} = Breeze.Server.start_app_link(server_opts)
     Process.monitor(server_pid)
@@ -63,6 +67,7 @@ defmodule Breeze.InputRouter do
       terminal: terminal,
       reader: reader,
       server_pid: server_pid,
+      child_view_supervisor: child_view_supervisor,
       halt_fun: Keyword.get_lazy(opts, :halt_fun, &default_halt_fun/0),
       alt_screen?: alt_screen?,
       enhanced_keyboard?: enhanced_keyboard?,
@@ -124,6 +129,7 @@ defmodule Breeze.InputRouter do
 
   @impl true
   def terminate(_reason, state) do
+    Breeze.ChildViewSupervisor.stop(state.child_view_supervisor)
     IExShellProxy.stop(state.iex_shell_proxy)
     SilentGroupLeader.stop(state.silent_group_leader)
     state.halt_fun.()
@@ -426,6 +432,10 @@ defmodule Breeze.InputRouter do
     else
       Keyword.put(opts, :internal, Keyword.put(keyword_group(opts, :internal), key, value))
     end
+  end
+
+  defp put_internal(opts, key, value) do
+    Keyword.put(opts, :internal, Keyword.put(keyword_group(opts, :internal), key, value))
   end
 
   defp keyword_group(opts, key) do

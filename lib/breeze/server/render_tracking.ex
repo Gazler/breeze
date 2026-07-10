@@ -14,15 +14,18 @@ defmodule Breeze.Server.RenderTracking do
   end
 
   def finish(:disabled) do
-    empty()
+    %{empty() | seen: :disabled}
   end
 
   def finish({table, ref}) do
     entries = :ets.take(table, ref)
 
-    Enum.reduce(entries, %{missing: [], decorations: [], child_timings: []}, fn
+    Enum.reduce(entries, %{missing: [], seen: [], decorations: [], child_timings: []}, fn
       {^ref, :missing, item}, tracking ->
         %{tracking | missing: [item | tracking.missing]}
+
+      {^ref, :seen, item}, tracking ->
+        %{tracking | seen: [item | tracking.seen]}
 
       {^ref, :decoration, decoration}, tracking ->
         %{tracking | decorations: [decoration | tracking.decorations]}
@@ -33,6 +36,7 @@ defmodule Breeze.Server.RenderTracking do
     |> then(fn tracking ->
       %{
         missing: Enum.reverse(tracking.missing),
+        seen: dedupe_live_children(tracking.seen),
         decorations: dedupe_decorations(tracking.decorations),
         child_timings: Enum.reverse(tracking.child_timings)
       }
@@ -48,6 +52,10 @@ defmodule Breeze.Server.RenderTracking do
 
   def track_missing_live_child(ref, item) do
     track(ref, :missing, item)
+  end
+
+  def track_seen_live_child(ref, item) do
+    track(ref, :seen, item)
   end
 
   def track_decoration(ref, decoration) do
@@ -75,7 +83,14 @@ defmodule Breeze.Server.RenderTracking do
   end
 
   defp empty do
-    %{missing: [], decorations: [], child_timings: []}
+    %{missing: [], seen: [], decorations: [], child_timings: []}
+  end
+
+  defp dedupe_live_children(children) do
+    children
+    |> Enum.reverse()
+    |> Enum.uniq_by(&elem(&1, 0))
+    |> Enum.reverse()
   end
 
   defp tracked_decoration_identity(decoration) do

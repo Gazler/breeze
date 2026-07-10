@@ -209,6 +209,76 @@ defmodule Breeze.InputRouterTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule SessionChildView do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box>child</box>
+      """
+    end
+  end
+
+  defmodule SessionRootView do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <live id="child" view={SessionChildView}>
+        </live>
+      </box>
+      """
+    end
+  end
+
+  test "input router owns the session view supervisor and stops it on hangup" do
+    parent = self()
+
+    {:ok, router} =
+      Breeze.InputRouter.start_link(
+        view: SessionRootView,
+        alt_screen: false,
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter],
+        halt_fun: fn -> send(parent, :halted) end
+      )
+
+    router_state = :sys.get_state(router)
+    server = router_state.server_pid
+    supervisor = router_state.child_view_supervisor
+
+    server_state =
+      wait_until(fn ->
+        state = :sys.get_state(server)
+        if Map.has_key?(state.children, "child"), do: state
+      end)
+
+    root = server_state.view_pid
+    child = server_state.children["child"].pid
+
+    assert server_state.child_view_supervisor == supervisor
+    refute server_state.owns_child_view_supervisor?
+
+    supervised_pids =
+      supervisor
+      |> DynamicSupervisor.which_children()
+      |> Enum.map(fn {_id, pid, _type, _modules} -> pid end)
+
+    assert root in supervised_pids
+    assert child in supervised_pids
+
+    router_ref = Process.monitor(router)
+    send(router, {router_state.reader, {:signal, :hup}})
+
+    assert_receive :halted
+    assert_receive {:DOWN, ^router_ref, :process, ^router, :normal}
+
+    wait_until(fn ->
+      Enum.all?([supervisor, server, root, child], &(not Process.alive?(&1)))
+    end)
+  end
+
   test "stop global keys are handled even while the app server is blocked" do
     parent = self()
 
