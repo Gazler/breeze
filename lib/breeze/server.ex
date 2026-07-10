@@ -302,7 +302,8 @@ defmodule Breeze.Server do
         input: %State.Input{},
         frame: %State.Frame{},
         debug: %State.Debug{},
-        inspector_state: %State.Inspector{config: Keyword.get(opts, :inspector, false)}
+        inspector_state: %State.Inspector{config: Keyword.get(opts, :inspector, false)},
+        rendered: %State.Rendered{tracking_table: RenderTracking.new_table()}
       }
 
     state = maybe_start_reloader(state)
@@ -852,7 +853,7 @@ defmodule Breeze.Server do
 
   defp render_base(state, cause, attempts) do
     try do
-      tracking_ref = RenderTracking.begin()
+      tracking_ref = RenderTracking.begin(state.rendered.tracking_table)
       started_at = System.monotonic_time(:microsecond)
       profile_scope = make_ref()
       Breeze.DebugProfiler.reset(profile_scope)
@@ -1299,7 +1300,7 @@ defmodule Breeze.Server do
          view: view,
          viewport: viewport,
          terminal: terminal,
-         tracking_ref: RenderTracking.begin(),
+         tracking_ref: RenderTracking.begin(state.rendered.tracking_table),
          profile_scope: profile_scope,
          started_at: System.monotonic_time(:microsecond)
        }}

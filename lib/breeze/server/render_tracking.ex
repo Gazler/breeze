@@ -1,14 +1,15 @@
 defmodule Breeze.Server.RenderTracking do
   @moduledoc false
 
-  @table __MODULE__
+  def new_table do
+    :ets.new(__MODULE__, [:public, :bag, write_concurrency: true])
+  end
 
-  def begin do
+  def begin(table) do
     if disabled?() do
       :disabled
     else
-      ensure_table!()
-      make_ref()
+      {table, make_ref()}
     end
   end
 
@@ -16,10 +17,8 @@ defmodule Breeze.Server.RenderTracking do
     empty()
   end
 
-  def finish(ref) do
-    ensure_table!()
-
-    entries = :ets.take(@table, ref)
+  def finish({table, ref}) do
+    entries = :ets.take(table, ref)
 
     Enum.reduce(entries, %{missing: [], decorations: [], child_timings: []}, fn
       {^ref, :missing, item}, tracking ->
@@ -59,15 +58,16 @@ defmodule Breeze.Server.RenderTracking do
     track(ref, :child_timing, child_timing)
   end
 
-  defp track(ref, kind, item) do
-    if ref == :disabled or disabled?() do
-      :ok
-    else
-      ensure_table!()
-      true = :ets.insert(@table, {ref, kind, item})
+  defp track(:disabled, _kind, _item), do: :ok
+
+  defp track({table, ref}, kind, item) do
+    unless disabled?() do
+      :ets.insert(table, {ref, kind, item})
     end
 
     :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   defp disabled? do
@@ -84,19 +84,5 @@ defmodule Breeze.Server.RenderTracking do
       Map.get(decoration, :owner_id),
       Map.get(decoration, :mod)
     }
-  end
-
-  defp ensure_table! do
-    case :ets.whereis(@table) do
-      :undefined ->
-        try do
-          :ets.new(@table, [:named_table, :public, :bag])
-        rescue
-          ArgumentError -> :ok
-        end
-
-      _tid ->
-        :ok
-    end
   end
 end

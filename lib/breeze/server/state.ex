@@ -50,7 +50,8 @@ end
 defmodule Breeze.Server.State.Rendered do
   @moduledoc false
 
-  defstruct boxes: %{},
+  defstruct tracking_table: nil,
+            boxes: %{},
             elements: %{},
             render_tree: nil,
             render_tree_meta: %{},

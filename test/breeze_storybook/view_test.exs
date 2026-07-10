@@ -428,7 +428,7 @@ defmodule Breeze.Storybook.ViewTest do
         theme: Breeze.Theme.builtin(:gruvbox)
       )
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+    on_exit(fn -> stop_server(pid) end)
 
     view_pid = :sys.get_state(pid).view_pid
 
@@ -462,7 +462,7 @@ defmodule Breeze.Storybook.ViewTest do
         inspector: true
       )
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+    on_exit(fn -> stop_server(pid) end)
 
     refute :sys.get_state(pid).inspector_state.visible?
 
@@ -668,7 +668,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     view_pid = :sys.get_state(pid).view_pid
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+    on_exit(fn -> stop_server(pid) end)
 
     wait_until(fn ->
       :sys.get_state(view_pid).assigns.current_story_id == "button"
@@ -965,13 +965,20 @@ defmodule Breeze.Storybook.ViewTest do
       |> Keyword.merge(opts)
       |> Breeze.Server.start_app_link()
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+    on_exit(fn -> stop_server(pid) end)
 
     {terminal, pid}
   end
 
   defp send_mouse(pid, reader, code, x, y) do
     send(pid, {reader, {:data, "\e[<#{code};#{x};#{y}M"}})
+  end
+
+  defp stop_server(pid) do
+    if Process.alive?(pid), do: GenServer.stop(pid, :normal)
+  catch
+    :exit, :noproc -> :ok
+    :exit, {:noproc, _call} -> :ok
   end
 
   defp wait_for_preview_child(pid, story_id) do
