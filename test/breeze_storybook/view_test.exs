@@ -90,6 +90,29 @@ defmodule Breeze.Storybook.ViewTest do
     assert state.assigns.current_story_id == "dropdown"
   end
 
+  test "story details wrap long sources and notes to the panel width" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 40}}
+
+    {:ok, pid} =
+      Breeze.ChildServer.start(
+        view: Breeze.Storybook.View,
+        terminal: terminal,
+        start_opts: [directory: "storybook", file: "tabs.story.exs"]
+      )
+
+    assert {:ok, acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert Map.fetch!(acc.boxes, "storybook-detail-source").height > 1
+    assert Map.fetch!(acc.boxes, "storybook-detail-note-0").height > 1
+    assert Map.fetch!(acc.boxes, "storybook-detail-note-1").height > 1
+
+    lines = box.content |> then(&Regex.replace(~r/\e\[[0-9;]*m/u, &1, "")) |> String.split("\n")
+    source_label_row = Enum.find_index(lines, &String.contains?(&1, "Source:"))
+    source_content_row = Enum.find_index(lines, &String.contains?(&1, "<.tabs"))
+
+    assert source_content_row == source_label_row + 1
+  end
+
   test "dropdown story does not duplicate the trigger row in the preview" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)

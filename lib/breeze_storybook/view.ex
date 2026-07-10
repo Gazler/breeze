@@ -2,7 +2,6 @@ defmodule Breeze.Storybook.View do
   use Breeze.View
   import Breeze.Blocks
 
-  alias Breeze.Storybook.Discovery
   alias Breeze.Storybook.Registry
 
   def mount(opts, term) do
@@ -22,9 +21,7 @@ defmodule Breeze.Storybook.View do
        stories: stories,
        current_story_id: current && current.id,
        current_variant_id: first_variant_id(current),
-       show_debug: false,
-       discovered_components: Discovery.components(),
-       undocumented_components: Discovery.undocumented_components(stories)
+       show_debug: false
      )
      |> focus("storybook-nav")
      |> sync_storybook_layout()}
@@ -43,11 +40,12 @@ defmodule Breeze.Storybook.View do
         nav_title: "Storybook",
         preview_title: preview_title(current_story, current_variant),
         details_title: "Story Details",
-        inventory_summary: inventory_summary(assigns.undocumented_components),
         variants: variants,
         variant_tabs?: variant_tabs?,
         story_description: variant_field(current_variant, current_story, :description),
         story_notes: variant_field(current_variant, current_story, :notes),
+        story_note_rows:
+          variant_field(current_variant, current_story, :notes) |> Enum.with_index(),
         story_source: variant_field(current_variant, current_story, :source),
         preview_story_assigns: preview_story_assigns(assigns[:current_variant_id]),
         preview_story_top: if(variant_tabs?, do: 3, else: 2)
@@ -119,26 +117,29 @@ defmodule Breeze.Storybook.View do
               implicit={Breeze.Implicit.Scroll}
               class="width-full height-full bg-panel overflow-scroll scrollbar-arrows"
             >
-              <box class="bold">Description</box>
-              <box class="text-muted">{@story_description}</box>
+              <box class="bold width-full">Description</box>
+              <box id="storybook-detail-description" class="text-muted width-full">
+                {@story_description}
+              </box>
               <box>
               </box>
-              <box class="text-muted">Group: {@current_story.group}</box>
-              <box class="text-muted">Module: {inspect(@current_story.module)}</box>
-              <box :if={@story_source} class="text-muted">Source: {@story_source}</box>
+              <box class="text-muted width-full">Group: {@current_story.group}</box>
+              <box class="text-muted width-full">Module: {inspect(@current_story.module)}</box>
+              <box :if={@story_source} class="text-muted width-full">Source:</box>
+              <box :if={@story_source} id="storybook-detail-source" class="text-muted width-full">
+                {@story_source}
+              </box>
               <box>
               </box>
-              <box class="bold">Notes</box>
-              <box :for={note <- @story_notes} class="text-muted">• {note}</box>
-              <box :if={@story_notes == []} class="text-muted">No notes yet.</box>
-              <box>
+              <box class="bold width-full">Notes</box>
+              <box
+                :for={{note, index} <- @story_note_rows}
+                id={"storybook-detail-note-#{index}"}
+                class="text-muted width-full"
+              >
+                • {note}
               </box>
-              <box class="bold">Discovered Blocks</box>
-              <box class="text-muted">{Enum.map_join(@discovered_components, ", ", & &1.id)}</box>
-              <box>
-              </box>
-              <box class="bold">Missing Stories</box>
-              <box class="text-muted">{@inventory_summary}</box>
+              <box :if={@story_notes == []} class="text-muted width-full">No notes yet.</box>
             </box>
           </.panel>
         </box>
@@ -270,12 +271,6 @@ defmodule Breeze.Storybook.View do
 
   defp preview_title(story, %{label: nil}), do: "Preview: #{story.title}"
   defp preview_title(story, variant), do: "Preview: #{story.title} / #{variant.label}"
-
-  defp inventory_summary([]), do: "All discovered Breeze.Blocks exports have stories."
-
-  defp inventory_summary(components) do
-    Enum.map_join(components, ", ", & &1.id)
-  end
 
   defp storybook_global_keybindings do
     [
