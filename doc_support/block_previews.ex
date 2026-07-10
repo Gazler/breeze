@@ -14,6 +14,7 @@ defmodule Breeze.Docs.BlockPreviews do
     {:nebula, "Nebula"},
     {:catppuccin, "Catppuccin Mocha"},
     {:dracula, "Dracula"},
+    {:commander, "Commander Blue"},
     {:gruvbox, "Gruvbox Dark"},
     {:nord, "Nord"},
     {:solarized_light, "Solarized Light"},

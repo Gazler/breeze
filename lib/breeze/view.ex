@@ -1005,7 +1005,7 @@ defmodule Breeze.View do
   Set a named theme and update `assigns.breeze.theme` metadata.
 
   The theme can be one of Breeze's built-in cycle names (`:system16`, `:system`,
-  `:nebula`, `:catppuccin`, `:dracula`, `:gruvbox`, `:nord`,
+  `:nebula`, `:catppuccin`, `:dracula`, `:commander`, `:gruvbox`, `:nord`,
   `:solarized_light`, or `:solarized_dark`) or a `{name, theme}` tuple.
   """
   @spec switch_theme(map(), atom() | {term(), term()}, keyword()) :: map()
