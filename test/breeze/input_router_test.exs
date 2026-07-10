@@ -790,7 +790,14 @@ defmodule Breeze.InputRouterThemeSyncTest do
   import Breeze.TestSupport.WaitUntil
 
   alias Breeze.ChildServer
-  alias Breeze.InputRouterTest.{PaletteAdapter, ThemeSwitchView}
+
+  alias Breeze.InputRouterTest.{
+    DelayedPaletteAdapter,
+    PaletteAdapter,
+    SplitPaletteAdapter,
+    ThemeProbeLeakView,
+    ThemeSwitchView
+  }
 
   test "switching to system theme after startup promotes to probed system mode" do
     parent = self()
