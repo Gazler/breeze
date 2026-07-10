@@ -882,19 +882,16 @@ defmodule Breeze.LiveViewTest do
 
   defmodule NestedReloadChild do
     use Breeze.View
-    import Breeze.Router
 
     def mount(_opts, term) do
-      {:ok,
-       term
-       |> Breeze.Router.init([inner: NestedReloadLeaf], current: :inner)
-       |> focus("child")}
+      {:ok, term |> assign(reload_marker: :initial) |> focus("child")}
     end
 
     def render(assigns) do
       ~H"""
       <box id="child" focusable>
-        <.router routes={@router} id="nested"/>
+        <live id="inner" view={NestedReloadLeaf} start_opts={[]}>
+        </live>
       </box>
       """
     end
@@ -903,7 +900,7 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
-  defmodule RootReloadWithNestedRouter do
+  defmodule RootReloadWithNestedChild do
     use Breeze.View
 
     def mount(_opts, term) do
@@ -2399,7 +2396,7 @@ defmodule Breeze.LiveViewTest do
       ]
     end)
 
-    send(pid, {:reload, :code_changed, ["examples/router.exs"]})
+    send(pid, {:reload, :code_changed, ["lib/breeze/view.ex"]})
 
     wait_until(fn ->
       state = :sys.get_state(pid)
@@ -2448,7 +2445,7 @@ defmodule Breeze.LiveViewTest do
       state.frame.base_output =~ "Count: 1"
     end)
 
-    send(pid, {:reload, :code_changed, ["examples/router.exs"]})
+    send(pid, {:reload, :code_changed, ["lib/breeze/view.ex"]})
 
     wait_until(fn ->
       state = :sys.get_state(pid)
@@ -2461,11 +2458,11 @@ defmodule Breeze.LiveViewTest do
     Process.exit(pid, :normal)
   end
 
-  test "reloaded root global keybindings do not corrupt nested router child state" do
+  test "reloaded root global keybindings do not corrupt nested live child state" do
     {:ok, config_pid} =
       Agent.start_link(fn ->
         [
-          view: RootReloadWithNestedRouter,
+          view: RootReloadWithNestedChild,
           global_keybindings: [
             {"x",
              fn _event, term ->
@@ -2484,7 +2481,7 @@ defmodule Breeze.LiveViewTest do
 
     {:ok, pid} =
       Breeze.Server.start_app_link(
-        view: RootReloadWithNestedRouter,
+        view: RootReloadWithNestedChild,
         terminal: terminal,
         reader: reader,
         global_keybindings: refresh.()[:global_keybindings],
@@ -2495,14 +2492,28 @@ defmodule Breeze.LiveViewTest do
         ]
       )
 
+    nested_pid =
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+
+        case state.children["nested"] do
+          %{pid: nested_pid} -> nested_pid
+          _ -> nil
+        end
+      end)
+
+    :ok = Breeze.ChildServer.update_assigns(nested_pid, reload_marker: :preserved)
+
     wait_until(fn ->
       state = :sys.get_state(pid)
-      Map.has_key?(state.children, "nested")
+
+      :sys.get_state(nested_pid).assigns.reload_marker == :preserved and
+        Map.has_key?(state.children, "nested")
     end)
 
     Agent.update(config_pid, fn _opts ->
       [
-        view: RootReloadWithNestedRouter,
+        view: RootReloadWithNestedChild,
         global_keybindings: [
           {"4",
            fn _event, term ->
@@ -2512,7 +2523,7 @@ defmodule Breeze.LiveViewTest do
       ]
     end)
 
-    send(pid, {:reload, :code_changed, ["examples/router.exs"]})
+    send(pid, {:reload, :code_changed, ["lib/breeze/view.ex"]})
 
     wait_until(fn ->
       state = :sys.get_state(pid)
@@ -2529,8 +2540,8 @@ defmodule Breeze.LiveViewTest do
     nested = :sys.get_state(pid).children["nested"]
     nested_term = :sys.get_state(nested.pid)
 
-    assert nested_term.assigns.router.current == :inner
-    assert Map.keys(nested_term.assigns.router.routes) == [:inner]
+    assert nested.pid == nested_pid
+    assert nested_term.assigns.reload_marker == :preserved
 
     Process.exit(pid, :normal)
   end
