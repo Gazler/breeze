@@ -4,10 +4,6 @@ defmodule Breeze.View do
   to the terminal. Breeze Views are inspired by Phoenix LiveView, but not 100%
   compatible.
 
-  > #### Warning {: .warning}
-  >
-  > This API is unstable and very likely to change.
-
   ## Prior art
 
   Breeze's template/component ergonomics are inspired by Phoenix LiveView.
@@ -272,6 +268,8 @@ defmodule Breeze.View do
   @type assigns :: map()
   @type event_name :: term()
   @type event :: map()
+  @typedoc "Compiled template output returned by the `~H` sigil."
+  @type rendered :: term()
   @type reply_option :: {:invalidate, boolean()}
   @type reply ::
           {:noreply, Breeze.Term.t()}
@@ -280,7 +278,7 @@ defmodule Breeze.View do
           | {:stop, Breeze.Term.t(), [reply_option()]}
 
   @callback mount(keyword(), Breeze.Term.t()) :: {:ok, Breeze.Term.t()}
-  @callback render(assigns()) :: Breeze.Template.rendered()
+  @callback render(assigns()) :: rendered()
   @callback handle_event(event_name(), event(), Breeze.Term.t()) :: reply()
   @callback handle_info(term(), Breeze.Term.t()) :: reply()
 

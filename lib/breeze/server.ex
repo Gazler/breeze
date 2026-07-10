@@ -42,7 +42,7 @@ defmodule Breeze.Server do
       Use `fn -> :ok end` for embedded or SSH sessions.
     * `:render_errors` - crash rendering options. Pass
       `view: MyErrorView` to override the crash screen view. Defaults
-      to `Breeze.ErrorView`. Pass `keybindings: [...]` to configure
+      to the built-in crash view. Pass `keybindings: [...]` to configure
       custom crash screen actions as `{key, label, action}` tuples.
       Supported actions are `:restart`, `:stop`, and `:copy_details`.
       Custom error views receive these assigns: `@view`, the crashed
@@ -58,6 +58,7 @@ defmodule Breeze.Server do
   alias Breeze.Server.State
 
   @flush_input_batch :flush_input_batch
+  @logger_collector_attempts 3
   defstruct [
     :terminal,
     :reader,
@@ -241,16 +242,33 @@ defmodule Breeze.Server do
     end
   end
 
-  defp logger_collector(config) when config in [false, nil], do: nil
+  defp logger_collector(config, _runtime_opts, _attempts) when config in [false, nil],
+    do: {:ok, nil}
 
-  defp logger_collector(_config) do
+  defp logger_collector(config, runtime_opts, attempts) do
+    with {:ok, pid} <- ensure_logger_collector(),
+         :ok <- Breeze.Logger.Collector.configure(self(), config, runtime_opts) do
+      {:ok, pid}
+    else
+      {:error, :not_started} when attempts > 1 ->
+        logger_collector(config, runtime_opts, attempts - 1)
+
+      other ->
+        other
+    end
+  end
+
+  defp ensure_logger_collector do
     case Process.whereis(Breeze.Logger.Collector) do
       pid when is_pid(pid) ->
-        pid
+        {:ok, pid}
 
       nil ->
-        {:ok, pid} = Breeze.Logger.Collector.start_link(ephemeral: true)
-        pid
+        case Breeze.Logger.Collector.start_link(ephemeral: true) do
+          {:ok, pid} -> {:ok, pid}
+          {:error, {:already_started, pid}} when is_pid(pid) -> {:ok, pid}
+          other -> other
+        end
     end
   end
 
@@ -286,15 +304,12 @@ defmodule Breeze.Server do
       _ = Breeze.RemoteInspector.ensure_app_distribution(view: view)
     end
 
-    logger_collector = logger_collector(logger_config)
-
-    if logger_collector do
-      :ok =
-        Breeze.Logger.Collector.configure(self(), logger_config,
-          remote_inspector: inspector_enabled?,
-          view: view
-        )
-    end
+    {:ok, logger_collector} =
+      logger_collector(
+        logger_config,
+        [remote_inspector: inspector_enabled?, view: view],
+        @logger_collector_attempts
+      )
 
     session = self()
 

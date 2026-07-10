@@ -60,6 +60,30 @@ defmodule Breeze.MixProject do
       source_ref: "v#{@version}",
       before_closing_head_tag: &before_closing_head_tag/1,
       before_closing_body_tag: &before_closing_body_tag/1,
+      groups_for_modules: [
+        "Applications and views": [
+          Breeze.Server,
+          Breeze.View,
+          Breeze.Term
+        ],
+        "Components and styling": [
+          Breeze.Blocks,
+          Breeze.Implicit,
+          Breeze.Theme,
+          Breeze.Viewport
+        ],
+        "Development tools": [
+          Breeze.IO,
+          Breeze.Logger,
+          Breeze.Logger.Collector,
+          Breeze.Test
+        ],
+        Storybook: [
+          Breeze.Storybook.Story,
+          Breeze.Storybook
+        ],
+        Tooling: [Breeze.HTMLFormatter]
+      ],
       groups_for_extras: [
         Guides: ["README.md"],
         Components: ["doc_src/generated/blocks.md"]

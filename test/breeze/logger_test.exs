@@ -69,6 +69,38 @@ defmodule Breeze.LoggerTest do
     refute Process.alive?(ephemeral)
   end
 
+  test "server retries configuration when an ephemeral collector is stopping", %{
+    collector: collector
+  } do
+    GenServer.stop(collector, :normal)
+
+    stopping_collector =
+      spawn(fn ->
+        receive do
+          {:"$gen_call", from, {:configure, _owner, _config}} ->
+            Process.unregister(Breeze.Logger.Collector)
+            GenServer.reply(from, {:error, :not_started})
+        end
+      end)
+
+    true = Process.register(stopping_collector, Breeze.Logger.Collector)
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+    assert {:ok, server} =
+             Breeze.Server.start_app_link(
+               view: EmptyView,
+               terminal: terminal,
+               logger: :attach
+             )
+
+    active_collector = Process.whereis(Breeze.Logger.Collector)
+    assert is_pid(active_collector)
+    refute active_collector == stopping_collector
+
+    GenServer.stop(server, :normal)
+    wait_until(fn -> is_nil(Process.whereis(Breeze.Logger.Collector)) end)
+  end
+
   test "attach capture preserves the default logger handler" do
     assert {:ok, before_config} = :logger.get_handler_config(:default)
 
@@ -79,6 +111,7 @@ defmodule Breeze.LoggerTest do
     assert after_config == before_config
   end
 
+  @tag capture_log: true
   test "Breeze.IO.inspect pretty-prints through the logger and returns its input" do
     value = %{alpha: Enum.to_list(1..5), beta: %{enabled: true}}
 
@@ -99,6 +132,7 @@ defmodule Breeze.LoggerTest do
     assert entry.line =~ "\e["
   end
 
+  @tag capture_log: true
   test "Breeze.IO.puts routes output through the logger" do
     assert :ok = Breeze.IO.puts(["logger", " ", "output"])
 
@@ -137,6 +171,7 @@ defmodule Breeze.LoggerTest do
     assert :logger.get_handler_config(:default) == {:ok, before_default}
   end
 
+  @tag capture_log: true
   test "collector captures Logger events" do
     :ok = Breeze.Logger.Collector.subscribe(self())
     assert_receive {:logger_snapshot, []}
@@ -162,6 +197,7 @@ defmodule Breeze.LoggerTest do
     assert line =~ "µs"
   end
 
+  @tag capture_log: true
   test "logger view renders recent log lines" do
     {:ok, pid} = ChildServer.start(view: Breeze.Logger, start_opts: [max_lines: 2])
     wait_until(fn -> true end)
@@ -245,6 +281,7 @@ defmodule Breeze.LoggerTest do
     assert logger_viewport(acc).scroll == {15, 0}
   end
 
+  @tag capture_log: true
   test "focused logger still receives non-scroll keys" do
     {:ok, pid} = ChildServer.start(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
     {:ok, _acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
@@ -266,6 +303,7 @@ defmodule Breeze.LoggerTest do
     end)
   end
 
+  @tag capture_log: true
   test "logger can disable the clear shortcut" do
     {:ok, pid} =
       ChildServer.start(
@@ -291,6 +329,7 @@ defmodule Breeze.LoggerTest do
     refute box.content =~ "Press c to clear."
   end
 
+  @tag capture_log: true
   test "logger autoscrolls while pinned to the bottom" do
     lines =
       for index <- 1..8 do
@@ -311,6 +350,7 @@ defmodule Breeze.LoggerTest do
     end)
   end
 
+  @tag capture_log: true
   test "logger stops autoscrolling after the user scrolls away" do
     lines =
       for index <- 1..8 do

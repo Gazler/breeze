@@ -1,5 +1,5 @@
-defmodule Breeze.Storybook.ViewTest do
-  use ExUnit.Case, async: true
+defmodule Breeze.StorybookTest do
+  use ExUnit.Case, async: false
   import Breeze.TestSupport.WaitUntil
 
   defmodule FakeAdapter do
@@ -59,7 +59,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "dropdown story renders a single visible closed indicator" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
@@ -77,7 +77,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     {:ok, pid} =
       Breeze.ChildServer.start(
-        view: Breeze.Storybook.View,
+        view: Breeze.Storybook,
         terminal: terminal,
         start_opts: [directory: "storybook", file: "dropdown.story.exs"]
       )
@@ -95,7 +95,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     {:ok, pid} =
       Breeze.ChildServer.start(
-        view: Breeze.Storybook.View,
+        view: Breeze.Storybook,
         terminal: terminal,
         start_opts: [directory: "storybook", file: "tabs.story.exs"]
       )
@@ -115,7 +115,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "dropdown story does not duplicate the trigger row in the preview" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
@@ -131,7 +131,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "dropdown story keeps the selected value after choosing an item" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
@@ -164,7 +164,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "input story cursor layout stays aligned with the rendered input row" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     select_story!(pid, "input")
@@ -192,7 +192,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "input story placeholder cursor layout stays aligned with the rendered placeholder row" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     select_story!(pid, "input")
@@ -220,7 +220,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "input story updates its value through delegated story events" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     select_story!(pid, "input")
@@ -248,7 +248,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     {:ok, pid} =
       Breeze.ChildServer.start(
-        view: Breeze.Storybook.View,
+        view: Breeze.Storybook,
         terminal: terminal,
         start_opts: [directory: "storybook", file: "textarea.story.exs"]
       )
@@ -280,7 +280,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     {:ok, pid} =
       Breeze.ChildServer.start(
-        view: Breeze.Storybook.View,
+        view: Breeze.Storybook,
         terminal: terminal,
         start_opts: [directory: "storybook", file: "textarea.story.exs"]
       )
@@ -325,7 +325,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "modal story opens the real modal from its trigger" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     select_story!(pid, "modal")
@@ -353,7 +353,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "preview panel highlights when a focused element lives inside the preview child" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
@@ -371,7 +371,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "storybook nav renders the selected marker and label without overlap" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
@@ -382,7 +382,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "F2 toggles the debug pane" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
     plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
@@ -400,7 +400,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     {:ok, pid} =
       Breeze.ChildServer.start(
-        view: Breeze.Storybook.View,
+        view: Breeze.Storybook,
         terminal: terminal,
         theme: Breeze.Theme.builtin(:gruvbox)
       )
@@ -425,7 +425,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     {:ok, pid} =
       Breeze.ChildServer.start(
-        view: Breeze.Storybook.View,
+        view: Breeze.Storybook,
         terminal: terminal,
         theme: Breeze.Theme.builtin(:gruvbox)
       )
@@ -446,7 +446,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     {:ok, pid} =
       Breeze.Server.start_app_link(
-        view: Breeze.Storybook.View,
+        view: Breeze.Storybook,
         terminal: terminal,
         theme: Breeze.Theme.builtin(:gruvbox)
       )
@@ -480,7 +480,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     {:ok, pid} =
       Breeze.Server.start_app_link(
-        view: Breeze.Storybook.View,
+        view: Breeze.Storybook,
         terminal: terminal,
         inspector: true
       )
@@ -498,7 +498,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "list story renders variant tabs below the description and switches variants" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     select_story!(pid, "list")
@@ -524,7 +524,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "list story variant tabs wrap left cleanly without collapsing to the trailing tab" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     select_story!(pid, "list")
@@ -545,7 +545,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "list story mouse wheel scrolls the preview list without changing selection" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     select_story!(pid, "list")
@@ -584,7 +584,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "table story mouse wheel scrolls the preview table without changing selection" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     select_story!(pid, "table")
@@ -616,7 +616,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "Ctrl+Up and Ctrl+Down navigate stories regardless of current focus" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
@@ -640,7 +640,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "Ctrl+H/L and Ctrl+Left/Right navigate variants regardless of current focus" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     select_story!(pid, "list")
@@ -684,7 +684,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     {:ok, pid} =
       Breeze.Server.start_app_link(
-        view: Breeze.Storybook.View,
+        view: Breeze.Storybook,
         terminal: terminal,
         reader: reader
       )
@@ -743,7 +743,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "preview panel highlights for the dropdown story when the dropdown is focused" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
@@ -763,7 +763,7 @@ defmodule Breeze.Storybook.ViewTest do
 
   test "preview panel highlights for the scroll story when the scroll region is focused" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook.View, terminal: terminal)
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     select_story!(pid, "scroll")
@@ -981,7 +981,7 @@ defmodule Breeze.Storybook.ViewTest do
 
     {:ok, pid} =
       [
-        view: Breeze.Storybook.View,
+        view: Breeze.Storybook,
         terminal: terminal,
         start_opts: [directory: "storybook", file: file]
       ]

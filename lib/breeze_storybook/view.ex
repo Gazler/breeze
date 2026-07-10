@@ -1,4 +1,22 @@
-defmodule Breeze.Storybook.View do
+defmodule Breeze.Storybook do
+  @moduledoc """
+  Root view for the interactive Breeze Storybook browser.
+
+  Start it like any other Breeze application and pass Storybook configuration
+  through `:start_opts`:
+
+      Breeze.Server.start_link(
+        view: Breeze.Storybook,
+        start_opts: [directory: "storybook"]
+      )
+
+  The supported options are:
+
+    * `:directory` - directory containing story files. Defaults to
+      `"storybook"`.
+    * `:file` - optional story file to load instead of scanning the directory.
+  """
+
   use Breeze.View
   import Breeze.Blocks
 

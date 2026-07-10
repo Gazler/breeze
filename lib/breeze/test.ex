@@ -10,7 +10,7 @@ defmodule Breeze.Test do
 
   alias Breeze.ChildServer
 
-  @type t :: %__MODULE__{pid: pid(), terminal: Termite.Terminal.t()}
+  @type t :: %__MODULE__{pid: pid(), terminal: %Termite.Terminal{}}
 
   @default_size %{width: 80, height: 24}
 

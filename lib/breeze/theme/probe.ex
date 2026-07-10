@@ -6,7 +6,7 @@ defmodule Breeze.Theme.Probe do
   @palette_probe_timeout_ms 120
   @required_palette_indexes [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14]
 
-  @spec cached_terminal_palette(Termite.Terminal.t() | nil) :: map() | nil
+  @spec cached_terminal_palette(%Termite.Terminal{} | nil) :: map() | nil
   def cached_terminal_palette(%Termite.Terminal{} = terminal) do
     with {:ok, key} <- terminal_cache_key(terminal),
          table <- ensure_palette_cache_table(),
@@ -19,7 +19,7 @@ defmodule Breeze.Theme.Probe do
 
   def cached_terminal_palette(_terminal), do: nil
 
-  @spec probe_status(Termite.Terminal.t() | nil) :: :ready | :pending | :unavailable
+  @spec probe_status(%Termite.Terminal{} | nil) :: :ready | :pending | :unavailable
   def probe_status(%Termite.Terminal{} = terminal) do
     cond do
       cached_palette_status(terminal) == :pending -> :pending
@@ -30,7 +30,7 @@ defmodule Breeze.Theme.Probe do
 
   def probe_status(_terminal), do: :unavailable
 
-  @spec ensure_runtime_palette_async(Termite.Terminal.t() | nil, pid()) :: :ok
+  @spec ensure_runtime_palette_async(%Termite.Terminal{} | nil, pid()) :: :ok
   def ensure_runtime_palette_async(%Termite.Terminal{} = terminal, notify_pid)
       when is_pid(notify_pid) do
     case terminal_cache_key(terminal) do
@@ -63,7 +63,7 @@ defmodule Breeze.Theme.Probe do
 
   def ensure_runtime_palette_async(_terminal, _notify_pid), do: :ok
 
-  @spec start_runtime_palette_probe(Termite.Terminal.t() | nil) ::
+  @spec start_runtime_palette_probe(%Termite.Terminal{} | nil) ::
           {:start, term(), binary()} | :ready | :pending | :unavailable | :error
   def start_runtime_palette_probe(%Termite.Terminal{} = terminal) do
     case terminal_cache_key(terminal) do
@@ -109,7 +109,7 @@ defmodule Breeze.Theme.Probe do
 
   def runtime_palette_probe_complete?(_palette), do: false
 
-  @spec finish_runtime_palette_probe(Termite.Terminal.t() | nil, map()) :: :ready | :unavailable
+  @spec finish_runtime_palette_probe(%Termite.Terminal{} | nil, map()) :: :ready | :unavailable
   def finish_runtime_palette_probe(%Termite.Terminal{} = terminal, palette)
       when is_map(palette) do
     case terminal_cache_key(terminal) do

@@ -7,6 +7,18 @@ defmodule Breeze.Theme do
   * `:system16` for legacy ANSI-slot-based themes
   * `:system` for richer themes derived from the terminal palette when available
   * custom maps/keywords/structs with explicit defaults, palette entries, and extras
+
+  ## Built-in themes
+
+  Pass these names to `builtin/2`:
+
+    * `:nebula`
+    * `:catppuccin` or `:catppuccin` with the `:dark` variant
+    * `:dracula`
+    * `:gruvbox` or `:gruvbox` with the `:dark` variant
+    * `:nord`
+    * `:solarized` with either the `:light` or `:dark` variant
+    * `:solarized_light` and `:solarized_dark` as variant aliases
   """
 
   @enforce_keys [:defaults, :palette, :extras]
@@ -221,7 +233,7 @@ defmodule Breeze.Theme do
     end
   end
 
-  @spec ensure_runtime_palette_async(Termite.Terminal.t() | nil, pid()) :: :ok
+  @spec ensure_runtime_palette_async(%Termite.Terminal{} | nil, pid()) :: :ok
   def ensure_runtime_palette_async(%Termite.Terminal{} = terminal, notify_pid)
       when is_pid(notify_pid) do
     Breeze.Theme.Probe.ensure_runtime_palette_async(terminal, notify_pid)
@@ -229,7 +241,7 @@ defmodule Breeze.Theme do
 
   def ensure_runtime_palette_async(_terminal, _notify_pid), do: :ok
 
-  @spec start_runtime_palette_probe(Termite.Terminal.t() | nil) ::
+  @spec start_runtime_palette_probe(%Termite.Terminal{} | nil) ::
           {:start, term(), binary()} | :ready | :pending | :unavailable | :error
   def start_runtime_palette_probe(%Termite.Terminal{} = terminal) do
     Breeze.Theme.Probe.start_runtime_palette_probe(terminal)
@@ -252,7 +264,7 @@ defmodule Breeze.Theme do
 
   def runtime_palette_probe_complete?(_palette), do: false
 
-  @spec finish_runtime_palette_probe(Termite.Terminal.t() | nil, map()) :: :ready | :unavailable
+  @spec finish_runtime_palette_probe(%Termite.Terminal{} | nil, map()) :: :ready | :unavailable
   def finish_runtime_palette_probe(%Termite.Terminal{} = terminal, palette)
       when is_map(palette) do
     Breeze.Theme.Probe.finish_runtime_palette_probe(terminal, palette)

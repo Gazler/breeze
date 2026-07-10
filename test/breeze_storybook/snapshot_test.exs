@@ -6,7 +6,7 @@ defmodule Breeze.Storybook.SnapshotTest do
 
   defp start_storybook!(file, opts \\ []) do
     session =
-      Breeze.Test.start!(Breeze.Storybook.View,
+      Breeze.Test.start!(Breeze.Storybook,
         size: Keyword.get(opts, :size, {120, 24}),
         theme: Keyword.get(opts, :theme, Breeze.Theme.builtin(:gruvbox)),
         start_opts: [directory: "storybook", file: file]

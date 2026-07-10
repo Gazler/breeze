@@ -1,8 +1,31 @@
 defmodule Breeze.Storybook.Story do
   @moduledoc """
-  Behaviour for a single storybook entry.
+  Defines a Storybook entry.
+
+  A story is a normal `Breeze.View` with a `story/0` metadata callback:
+
+      defmodule MyApp.ButtonStory do
+        use Breeze.Storybook.Story
+
+        def story do
+          %{
+            id: "button",
+            title: "Button",
+            description: "Primary action button",
+            source: ~s|<.button id="save">Save</.button>|,
+            notes: ["Use a view event to handle activation."]
+          }
+        end
+
+        def render(assigns), do: ~H"<.button id=\"save\">Save</.button>"
+      end
+
+  Story metadata supports `:id`, `:title`, `:group`, `:description`, `:source`,
+  `:notes`, and `:variants`. A variant is a map with an `:id` and `:label` and
+  can override `:description`, `:source`, and `:notes`.
   """
 
+  @doc "Returns the metadata used to list and describe the story."
   @callback story() :: map()
 
   defmacro __using__(_opts) do

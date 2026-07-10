@@ -4,7 +4,7 @@ end
 
 Breeze.Example.run(
   [
-    view: Breeze.Storybook.View,
+    view: Breeze.Storybook,
     start_opts: [directory: "storybook"],
     theme: Breeze.Theme.builtin(:gruvbox),
     hide_cursor: true,

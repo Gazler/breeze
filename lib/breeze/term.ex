@@ -1,7 +1,14 @@
 defmodule Breeze.Term do
-  @moduledoc false
+  @moduledoc """
+  Opaque runtime context passed to Breeze view callbacks.
 
-  @type t :: %__MODULE__{}
+  Views receive this value in `mount/2`, `handle_event/3`, and `handle_info/2`.
+  Treat its internal fields as implementation details and update it through
+  helpers from `Breeze.View`, such as `assign/2`, `focus/2`, and
+  `put_local_keybindings/2`.
+  """
+
+  @opaque t :: %__MODULE__{}
 
   defstruct [
     :view,
