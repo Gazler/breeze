@@ -201,11 +201,15 @@ defmodule Breeze.ViewTest do
 
     assert {:noreply, _focused, true} = Breeze.Test.event(session, "push_serial", %{})
 
-    Process.sleep(130)
-
     flash = Breeze.Test.metadata(session).assigns.breeze.flash
     assert Enum.map(Breeze.Flash.entries(flash), & &1.id) == ["first"]
     assert Enum.map(Breeze.Flash.queued_entries(flash), & &1.id) == ["second"]
+
+    [%{id: "first", timer_token: first_token}] = flash.entries
+    [%{id: "second"} = queued] = flash.queue
+    refute Map.has_key?(queued, :timer_token)
+
+    send(session.pid, {:breeze_flash_timeout, "first", first_token})
 
     wait_until(fn ->
       flash = Breeze.Test.metadata(session).assigns.breeze.flash
@@ -214,10 +218,10 @@ defmodule Breeze.ViewTest do
         Breeze.Flash.queued_entries(flash) == []
     end)
 
-    Process.sleep(50)
-
     flash = Breeze.Test.metadata(session).assigns.breeze.flash
-    assert Enum.map(Breeze.Flash.entries(flash), & &1.id) == ["second"]
+    assert [%{id: "second", timer_token: second_token}] = flash.entries
+
+    send(session.pid, {:breeze_flash_timeout, "second", second_token})
 
     wait_until(fn ->
       Breeze.Test.metadata(session).assigns.breeze.flash

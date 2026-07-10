@@ -675,6 +675,15 @@ defmodule Breeze.InputRouterTest do
 
     Process.exit(pid, :normal)
   end
+end
+
+defmodule Breeze.InputRouterThemeSyncTest do
+  use ExUnit.Case, async: false
+
+  import Breeze.TestSupport.WaitUntil
+
+  alias Breeze.ChildServer
+  alias Breeze.InputRouterTest.{PaletteAdapter, ThemeSwitchView}
 
   test "switching to system theme after startup promotes to probed system mode" do
     parent = self()
@@ -696,14 +705,22 @@ defmodule Breeze.InputRouterTest do
 
     send(pid, {reader, {:data, "t"}})
 
-    wait_until(fn ->
-      metadata = ChildServer.metadata(child_pid)
-      metadata.theme.mode == :system and metadata.theme.variables[:palette_probe_status] == :ready
-    end)
+    wait_until(
+      fn ->
+        metadata = ChildServer.metadata(child_pid)
 
-    wait_until(fn ->
-      :sys.get_state(server_pid).frame.base_output =~ "mode=system status=ready"
-    end)
+        metadata.theme.mode == :system and
+          metadata.theme.variables[:palette_probe_status] == :ready
+      end,
+      100
+    )
+
+    wait_until(
+      fn ->
+        :sys.get_state(server_pid).frame.base_output =~ "mode=system status=ready"
+      end,
+      100
+    )
 
     Process.exit(pid, :normal)
   end

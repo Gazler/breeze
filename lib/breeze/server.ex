@@ -17,8 +17,9 @@ defmodule Breeze.Server do
       `Application.get_env(:breeze, :reload, false)`. Pass `true`
       to enable reload in dev, or a keyword list for reload options.
     * `:inspector` - enables inspector support. Defaults to `false`.
-      Pass `true` or keyword options such as `:toggle_key` and
-      `:move_key`.
+      Pass `true` or keyword options such as `:toggle_key`, `:move_key`,
+      and `remote: false` to keep inspection local without starting
+      distributed Erlang.
     * `:logger` - configures Breeze log capture. Pass `:attach` to add a
       handler while preserving existing handlers, `:replace` to temporarily
       silence the default handler, a keyword list with `:mode` and
@@ -291,23 +292,27 @@ defmodule Breeze.Server do
     theme = Breeze.Theme.new(Keyword.get(opts, :theme), terminal: terminal)
     theme_source = Keyword.get(opts, :theme)
     apply_theme_defaults? = Breeze.Theme.defaults_enabled?(Keyword.get(opts, :theme))
-    inspector_enabled? = inspector_enabled?(Keyword.get(opts, :inspector, false))
+    inspector_config = Keyword.get(opts, :inspector, false)
+    inspector_enabled? = inspector_enabled?(inspector_config)
+
+    remote_inspector_enabled? =
+      inspector_enabled? and Breeze.Inspector.remote?(%{inspector: inspector_config})
 
     logger_config =
       if Keyword.has_key?(opts, :logger) do
         Keyword.fetch!(opts, :logger)
       else
-        if inspector_enabled?, do: :attach, else: false
+        if remote_inspector_enabled?, do: :attach, else: false
       end
 
-    if inspector_enabled? do
+    if remote_inspector_enabled? do
       _ = Breeze.RemoteInspector.ensure_app_distribution(view: view)
     end
 
     {:ok, logger_collector} =
       logger_collector(
         logger_config,
-        [remote_inspector: inspector_enabled?, view: view],
+        [remote_inspector: remote_inspector_enabled?, view: view],
         @logger_collector_attempts
       )
 
@@ -380,7 +385,9 @@ defmodule Breeze.Server do
       }
 
     state = maybe_start_reloader(state)
-    if Breeze.Inspector.enabled?(state), do: Breeze.RemoteInspector.register_app(self())
+
+    if Breeze.Inspector.enabled?(state) and Breeze.Inspector.remote?(state),
+      do: Breeze.RemoteInspector.register_app(self())
 
     {:ok, render_base(state)}
   end

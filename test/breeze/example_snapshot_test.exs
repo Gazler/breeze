@@ -1,5 +1,5 @@
 defmodule Breeze.ExampleSnapshotTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   use Breeze.SnapshotAssertions
   import Breeze.TestSupport.WaitUntil
 
@@ -44,22 +44,6 @@ defmodule Breeze.ExampleSnapshotTest do
     URI,
     Version
   ]
-
-  setup_all do
-    Application.put_env(:breeze, :example_mode, :load_only)
-    Application.put_env(:breeze, :example_user_host, "gazler@gazler-arch")
-
-    for file <- ~w(counter.exs docs.exs modal.exs posting.exs snake.exs tabs.exs) do
-      Code.require_file(Path.expand("../../examples/#{file}", __DIR__))
-    end
-
-    on_exit(fn ->
-      Application.delete_env(:breeze, :example_mode)
-      Application.delete_env(:breeze, :example_user_host)
-    end)
-
-    :ok
-  end
 
   defmodule SnapshotAdapter do
     @behaviour Termite.Terminal.Adapter

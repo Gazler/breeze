@@ -1,17 +1,6 @@
 defmodule PostingTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   import Breeze.TestSupport.WaitUntil
-
-  setup_all do
-    Application.put_env(:breeze, :example_mode, :load_only)
-    Code.require_file("examples/posting.exs")
-
-    on_exit(fn ->
-      Application.delete_env(:breeze, :example_mode)
-    end)
-
-    :ok
-  end
 
   test "F1 opens help modal and focuses it, Escape closes and restores url focus" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
@@ -364,6 +353,26 @@ defmodule PostingTest do
     Process.exit(pid, :normal)
   end
 
+  defp visible(content) do
+    String.replace(content, ~r/\e\[[0-9;]*m/u, "")
+  end
+
+  defp drain_terminal_writes(writes \\ []) do
+    receive do
+      {:terminal_write, str} -> drain_terminal_writes([str | writes])
+    after
+      10 -> Enum.reverse(writes)
+    end
+  end
+end
+
+defmodule PostingInspectorTest do
+  use ExUnit.Case, async: true
+
+  import Breeze.TestSupport.WaitUntil
+
+  alias PostingTest.{FakeAdapter, RecordingAdapter}
+
   test "posting inspector can be toggled and select an element with the mouse" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader
@@ -372,7 +381,7 @@ defmodule PostingTest do
       Breeze.Server.start_app_link(
         view: Posting,
         terminal: terminal,
-        inspector: true,
+        inspector: [remote: false],
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -415,7 +424,7 @@ defmodule PostingTest do
       Breeze.Server.start_app_link(
         view: Posting,
         terminal: terminal,
-        inspector: true,
+        inspector: [remote: false],
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -465,7 +474,7 @@ defmodule PostingTest do
         view: Posting,
         terminal: terminal,
         mouse: [mode: :motion],
-        inspector: true,
+        inspector: [remote: false],
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -496,7 +505,7 @@ defmodule PostingTest do
       Breeze.Server.start_app_link(
         view: Posting,
         terminal: terminal,
-        inspector: true,
+        inspector: [remote: false],
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -538,7 +547,7 @@ defmodule PostingTest do
       Breeze.Server.start_app_link(
         view: Posting,
         terminal: terminal,
-        inspector: true,
+        inspector: [remote: false],
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -577,7 +586,7 @@ defmodule PostingTest do
       Breeze.Server.start_app_link(
         view: Posting,
         terminal: terminal,
-        inspector: true,
+        inspector: [remote: false],
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -619,7 +628,7 @@ defmodule PostingTest do
       Breeze.Server.start_app_link(
         view: Posting,
         terminal: terminal,
-        inspector: true,
+        inspector: [remote: false],
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -682,7 +691,7 @@ defmodule PostingTest do
       Breeze.Server.start_app_link(
         view: Posting,
         terminal: terminal,
-        inspector: true,
+        inspector: [remote: false],
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -707,10 +716,6 @@ defmodule PostingTest do
     assert Breeze.Server.inspector_snapshot(pid).visible?
 
     Process.exit(pid, :normal)
-  end
-
-  defp visible(content) do
-    String.replace(content, ~r/\e\[[0-9;]*m/u, "")
   end
 
   defp assert_terminal_repaired_row(zero_based_row) do

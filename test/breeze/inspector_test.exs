@@ -55,6 +55,7 @@ defmodule Breeze.InspectorTest do
       })
 
     assert Inspector.enabled?(state)
+    assert Inspector.remote?(state)
     assert Inspector.toggle_key(state) == "F9"
     assert Inspector.move_key(state) == "F10"
 
@@ -67,6 +68,8 @@ defmodule Breeze.InspectorTest do
     refute closed.inspector_state.visible?
     assert closed.inspector_state.selected_id == "field"
     assert closed.inspector_state.hovered_id == nil
+
+    refute Inspector.remote?(base_state(%{inspector: [remote: false]}))
   end
 
   test "snapshot falls back to the focused element when the selected id is stale" do

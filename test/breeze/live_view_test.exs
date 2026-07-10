@@ -925,6 +925,46 @@ defmodule Breeze.LiveViewTest do
     send(parent, {:telemetry_event, event, measurements, metadata})
   end
 
+  defmodule DualLiveExample do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <live id="left" view={CounterChild} start_opts={[]}>
+        </live>
+        <live id="right" view={CounterChild} start_opts={[]}>
+        </live>
+      </box>
+      """
+    end
+  end
+
+  defmodule InlineLivePatchRoot do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <box style="inline">
+        <live id="left" view={CounterChild} start_opts={[]}>
+        </live>
+        <live id="right" view={CounterChild} start_opts={[]}>
+        </live>
+      </box>
+      """
+    end
+  end
+end
+
+defmodule Breeze.LiveView.CoreTest do
+  use Breeze.TestSupport.LiveViewCase, async: true
+
+  import Breeze.TestSupport.LiveViewHelpers
+
   test "render_to_tree preserves typed live attrs" do
     [{:box, _, [{:live, attrs}]}] =
       ParentLiveExample.render(%{start_opts: [seed: 1]})
@@ -1026,7 +1066,7 @@ defmodule Breeze.LiveViewTest do
           [:breeze, :render, :stop],
           [:breeze, :render, :metric]
         ],
-        &__MODULE__.telemetry_test_handler/4,
+        &Breeze.LiveViewTest.telemetry_test_handler/4,
         parent
       )
 
@@ -1081,40 +1121,6 @@ defmodule Breeze.LiveViewTest do
            end)
 
     assert Breeze.DebugProfiler.snapshot(profile_scope) == []
-  end
-
-  defmodule DualLiveExample do
-    use Breeze.View
-
-    def mount(_opts, term), do: {:ok, term}
-
-    def render(assigns) do
-      ~H"""
-      <box>
-        <live id="left" view={CounterChild} start_opts={[]}>
-        </live>
-        <live id="right" view={CounterChild} start_opts={[]}>
-        </live>
-      </box>
-      """
-    end
-  end
-
-  defmodule InlineLivePatchRoot do
-    use Breeze.View
-
-    def mount(_opts, term), do: {:ok, term}
-
-    def render(assigns) do
-      ~H"""
-      <box style="inline">
-        <live id="left" view={CounterChild} start_opts={[]}>
-        </live>
-        <live id="right" view={CounterChild} start_opts={[]}>
-        </live>
-      </box>
-      """
-    end
   end
 
   test "root child tab traverses namespaced live child focusables" do
@@ -1274,9 +1280,13 @@ defmodule Breeze.LiveViewTest do
 
     branch = :sys.get_state(pid).children["branch"].pid
     leaf = :sys.get_state(branch).children["leaf"].pid
+    branch_ref = Process.monitor(branch)
+    leaf_ref = Process.monitor(leaf)
 
     GenServer.stop(pid, :normal)
 
+    assert_receive {:DOWN, ^branch_ref, :process, ^branch, _reason}, 500
+    assert_receive {:DOWN, ^leaf_ref, :process, ^leaf, _reason}, 500
     refute Process.alive?(branch)
     refute Process.alive?(leaf)
   end
@@ -1621,6 +1631,12 @@ defmodule Breeze.LiveViewTest do
 
     Process.exit(pid, :normal)
   end
+end
+
+defmodule Breeze.LiveView.CrashTest do
+  use Breeze.TestSupport.LiveViewCase, async: true
+
+  import Breeze.TestSupport.LiveViewHelpers
 
   test "server renders a crash screen instead of tearing down the terminal on view exceptions" do
     capture_log(fn ->
@@ -2006,7 +2022,8 @@ defmodule Breeze.LiveViewTest do
         :sys.get_state(pid).frame.base_output =~ "Copied crash details to test-clipboard."
       end)
 
-      Process.sleep(1_050)
+      notice_ref = :sys.get_state(pid).crash.notice_ref
+      send(pid, {:clear_crash_notice, notice_ref})
 
       wait_until(fn ->
         output = :sys.get_state(pid).frame.base_output
@@ -2221,6 +2238,10 @@ defmodule Breeze.LiveViewTest do
 
     Process.exit(pid, :normal)
   end
+end
+
+defmodule Breeze.LiveView.ReloadAndFrameTest do
+  use Breeze.TestSupport.LiveViewCase, async: true
 
   test "server rerenders the current root view when the code reloader detects changes" do
     parent = self()
@@ -2566,12 +2587,12 @@ defmodule Breeze.LiveViewTest do
       Map.has_key?(state.children, "debug")
     end)
 
-    Process.sleep(40)
+    flush_debug_stats(pid)
     drain_terminal_writes()
 
     invalidations_before = :sys.get_state(pid).debug.stats[:child_invalidated_count] || 0
 
-    Process.sleep(40)
+    flush_debug_stats(pid)
     writes = drain_terminal_writes()
     invalidations_after = :sys.get_state(pid).debug.stats[:child_invalidated_count] || 0
 
@@ -2817,12 +2838,12 @@ defmodule Breeze.LiveViewTest do
       (state.debug.stats[:render_base_count] || 0) > initial_render_count
     end)
 
-    Process.sleep(40)
+    flush_debug_stats(pid)
     drain_terminal_writes()
 
     invalidations_before = :sys.get_state(pid).debug.stats[:child_invalidated_count] || 0
 
-    Process.sleep(40)
+    flush_debug_stats(pid)
     writes = drain_terminal_writes()
     invalidations_after = :sys.get_state(pid).debug.stats[:child_invalidated_count] || 0
 
@@ -2871,6 +2892,15 @@ defmodule Breeze.LiveViewTest do
     end)
   end
 
+  defp flush_debug_stats(pid) do
+    send(pid, :debug_push)
+    state = :sys.get_state(pid)
+    debug_pid = state.children["debug"].pid
+    _ = :sys.get_state(debug_pid)
+    _ = :sys.get_state(pid)
+    :ok
+  end
+
   defp drain_terminal_writes(writes \\ []) do
     receive do
       {:terminal_write, str} -> drain_terminal_writes([str | writes])
@@ -2897,24 +2927,6 @@ defmodule Breeze.LiveViewTest do
   end
 
   defp wait_until(_fun, 0), do: flunk("condition not met")
-
-  defp wheel_event(button, bounds) do
-    {x, y} = mouse_center(bounds)
-
-    %{
-      "mouse" => %{
-        button: button,
-        action: :press,
-        modifiers: [],
-        x: x,
-        y: y
-      }
-    }
-  end
-
-  defp mouse_center(bounds) do
-    {div(bounds.left + bounds.right, 2) + 1, div(bounds.top + bounds.bottom, 2) + 1}
-  end
 
   defp make_reload_fixture_path(label) do
     dir =

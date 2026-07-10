@@ -80,6 +80,25 @@ defmodule Breeze.Storybook.Registry do
   end
 
   defp file_modules(file) do
+    with {:ok, stat} <- File.stat(file, time: :posix) do
+      cache_key = {__MODULE__, :file_modules, file}
+      signature = {stat.mtime, stat.ctime, stat.size}
+
+      case :persistent_term.get(cache_key, nil) do
+        {^signature, modules} ->
+          modules
+
+        _ ->
+          modules = parse_file_modules(file)
+          :persistent_term.put(cache_key, {signature, modules})
+          modules
+      end
+    else
+      _ -> []
+    end
+  end
+
+  defp parse_file_modules(file) do
     with {:ok, contents} <- File.read(file),
          {:ok, ast} <- Code.string_to_quoted(contents, file: file) do
       ast

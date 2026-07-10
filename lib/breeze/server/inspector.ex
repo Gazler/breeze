@@ -54,7 +54,10 @@ defmodule Breeze.Server.Inspector do
 
   def push_snapshot_now(%{inspector_state: %{subscribers: subscribers}} = state) do
     snapshot = Breeze.Inspector.snapshot(state)
-    Breeze.RemoteInspector.publish(snapshot)
+
+    if Breeze.Inspector.remote?(state) do
+      Breeze.RemoteInspector.publish(snapshot)
+    end
 
     if MapSet.size(subscribers) > 0 do
       Enum.each(subscribers, fn subscriber ->

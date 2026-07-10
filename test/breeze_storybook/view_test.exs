@@ -1,61 +1,5 @@
-defmodule Breeze.StorybookTest do
-  use ExUnit.Case, async: false
-  import Breeze.TestSupport.WaitUntil
-
-  defmodule FakeAdapter do
-    @behaviour Termite.Terminal.Adapter
-
-    def start(_opts), do: {:ok, %{ref: make_ref(), size: %{width: 80, height: 24}}}
-    def reader(term), do: {:ok, term.ref}
-    def write(term, _str), do: {:ok, term}
-    def resize(term), do: term.size
-  end
-
-  defmodule RecordingAdapter do
-    @behaviour Termite.Terminal.Adapter
-
-    def start(opts) do
-      {:ok,
-       %{
-         ref: make_ref(),
-         size: %{width: 80, height: 24},
-         owner: Keyword.fetch!(opts, :owner)
-       }}
-    end
-
-    def reader(term), do: {:ok, term.ref}
-
-    def write(term, str) do
-      send(term.owner, {:terminal_write, str})
-      {:ok, term}
-    end
-
-    def resize(term), do: term.size
-  end
-
-  defp select_story!(pid, story_id) do
-    state = :sys.get_state(pid)
-    stories = state.assigns.stories
-    current = Enum.find_index(stories, &(&1.id == state.assigns.current_story_id))
-    target = Enum.find_index(stories, &(&1.id == story_id))
-
-    assert is_integer(current)
-    assert is_integer(target)
-
-    move_story!(pid, target - current)
-    assert :sys.get_state(pid).assigns.current_story_id == story_id
-  end
-
-  defp move_story!(_pid, 0), do: :ok
-
-  defp move_story!(pid, steps) do
-    key = if steps > 0, do: "ArrowDown", else: "ArrowUp"
-
-    1..abs(steps)
-    |> Enum.each(fn _ ->
-      assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, key)
-    end)
-  end
+defmodule Breeze.Storybook.RenderingTest do
+  use Breeze.TestSupport.StorybookCase, async: true
 
   test "dropdown story renders a single visible closed indicator" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
@@ -350,6 +294,10 @@ defmodule Breeze.StorybookTest do
     assert plain_content =~ "Confirm Action"
     assert plain_content =~ "Escape closes it normally."
   end
+end
+
+defmodule Breeze.Storybook.LayoutTest do
+  use Breeze.TestSupport.StorybookCase, async: true
 
   test "preview panel highlights when a focused element lives inside the preview child" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
@@ -475,27 +423,6 @@ defmodule Breeze.StorybookTest do
     end)
   end
 
-  test "F4 toggles the inspector in the storybook server" do
-    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
-
-    {:ok, pid} =
-      Breeze.Server.start_app_link(
-        view: Breeze.Storybook,
-        terminal: terminal,
-        inspector: true
-      )
-
-    on_exit(fn -> stop_server(pid) end)
-
-    refute :sys.get_state(pid).inspector_state.visible?
-
-    send(pid, {terminal.reader, {:data, "\e[S"}})
-
-    wait_until(fn ->
-      :sys.get_state(pid).inspector_state.visible?
-    end)
-  end
-
   test "list story renders variant tabs below the description and switches variants" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
@@ -613,6 +540,10 @@ defmodule Breeze.StorybookTest do
     assert :sys.get_state(child).assigns.selected_city == "delhi"
     assert :sys.get_state(pid).assigns.current_story_id == "table"
   end
+end
+
+defmodule Breeze.Storybook.NavigationTest do
+  use Breeze.TestSupport.StorybookCase, async: true
 
   test "Ctrl+Up and Ctrl+Down navigate stories regardless of current focus" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
@@ -780,6 +711,10 @@ defmodule Breeze.StorybookTest do
     assert box.content =~ ~r/\e\[[0-9;]*38;5;4m╭─/
     assert box.content =~ "Preview: Scroll"
   end
+end
+
+defmodule Breeze.Storybook.ServerRenderingTest do
+  use Breeze.TestSupport.StorybookCase, async: true
 
   test "storybook preview child patches clear the full viewport height when the dropdown collapses" do
     {terminal, pid} = start_storybook_server!("dropdown.story.exs")
@@ -966,89 +901,5 @@ defmodule Breeze.StorybookTest do
 
     assert patched_rows(writes, viewport.left + 1) ==
              Enum.to_list((viewport.top + 1)..(viewport.top + viewport.height))
-  end
-
-  defp drain_terminal_writes(writes \\ []) do
-    receive do
-      {:terminal_write, str} -> drain_terminal_writes([str | writes])
-    after
-      10 -> Enum.reverse(writes)
-    end
-  end
-
-  defp start_storybook_server!(file, opts \\ []) do
-    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
-
-    {:ok, pid} =
-      [
-        view: Breeze.Storybook,
-        terminal: terminal,
-        start_opts: [directory: "storybook", file: file]
-      ]
-      |> Keyword.merge(opts)
-      |> Breeze.Server.start_app_link()
-
-    on_exit(fn -> stop_server(pid) end)
-
-    {terminal, pid}
-  end
-
-  defp send_mouse(pid, reader, code, x, y) do
-    send(pid, {reader, {:data, "\e[<#{code};#{x};#{y}M"}})
-  end
-
-  defp stop_server(pid) do
-    if Process.alive?(pid), do: GenServer.stop(pid, :normal)
-  catch
-    :exit, :noproc -> :ok
-    :exit, {:noproc, _call} -> :ok
-  end
-
-  defp wait_for_preview_child(pid, story_id) do
-    %{module: expected_view} = Breeze.Storybook.Registry.story(story_id, "storybook")
-
-    wait_until(
-      fn ->
-        state = :sys.get_state(pid)
-
-        with %{pid: preview_pid, view: ^expected_view} <-
-               Map.get(state.children, "storybook-preview"),
-             %Breeze.Viewport{} = viewport <-
-               Map.get(state.rendered.elements, "storybook-preview"),
-             true <- Process.alive?(preview_pid) do
-          {preview_pid, viewport}
-        else
-          _ -> false
-        end
-      end,
-      100
-    )
-  end
-
-  defp patched_rows(writes, column) do
-    pattern = ~r/\e\[(\d+);#{column}H/
-
-    writes
-    |> IO.iodata_to_binary()
-    |> then(&Regex.scan(pattern, &1, capture: :all_but_first))
-    |> Enum.map(fn [row] -> String.to_integer(row) end)
-    |> Enum.uniq()
-    |> Enum.sort()
-  end
-
-  defp redraw_or_full_viewport_patch?(writes, viewport) do
-    payload = IO.iodata_to_binary(writes)
-
-    String.contains?(payload, "\e[2J\e[H") or
-      patched_rows(writes, viewport.left + 1) ==
-        Enum.to_list((viewport.top + 1)..(viewport.top + viewport.height))
-  end
-
-  defp await_terminal_writes(acc \\ []) do
-    receive do
-      {:terminal_write, str} -> drain_terminal_writes([str | acc])
-    after
-      200 -> flunk("expected terminal writes")
-    end
   end
 end

@@ -1,16 +1,5 @@
 defmodule DocsTest do
-  use ExUnit.Case, async: false
-
-  setup_all do
-    Application.put_env(:breeze, :example_mode, :load_only)
-    Code.require_file("examples/docs.exs")
-
-    on_exit(fn ->
-      Application.delete_env(:breeze, :example_mode)
-    end)
-
-    :ok
-  end
+  use ExUnit.Case, async: true
 
   test "function list hides generated double-underscore docs entries" do
     session = Breeze.Test.start!(Docs, size: {80, 14}, start_opts: [docs: [URI]])

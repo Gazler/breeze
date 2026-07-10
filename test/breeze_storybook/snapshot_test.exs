@@ -1,5 +1,5 @@
 defmodule Breeze.Storybook.SnapshotTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   use Breeze.SnapshotAssertions
 
   alias Breeze.ChildServer

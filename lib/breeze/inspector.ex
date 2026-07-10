@@ -21,6 +21,7 @@ defmodule Breeze.Inspector do
 
   def toggle_key(state), do: Keyword.get(config(state), :toggle_key, "F4")
   def move_key(state), do: Keyword.get(config(state), :move_key, "PageUp")
+  def remote?(state), do: Keyword.get(config(state), :remote, true)
 
   def panel_position(state),
     do: inspector_field(state, :panel_position, :inspector_panel_position, :bottom)

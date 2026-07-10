@@ -1,5 +1,5 @@
 defmodule Breeze.RemoteInspectorTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import Breeze.TestSupport.WaitUntil
 
@@ -538,6 +538,23 @@ defmodule Breeze.RemoteInspectorTest do
              )
   end
 
+  test "distribution names default for apps and the remote inspector" do
+    assert Breeze.RemoteInspector.default_distribution_name(:inspector) == :inspector
+    assert Breeze.RemoteInspector.default_distribution_name(:app, []) == :app
+
+    assert Breeze.RemoteInspector.default_distribution_name(:app,
+             view: Breeze.RemoteInspector.View
+           ) == :breeze
+  end
+end
+
+defmodule Breeze.RemoteInspectorSyncTest do
+  use ExUnit.Case, async: false
+
+  import Breeze.TestSupport.WaitUntil
+
+  alias Breeze.RemoteInspectorTest.{FakeInspectorServer, InspectorAppView}
+
   test "local remote inspector server does not count as a remote delegate" do
     {:ok, pid} = Breeze.RemoteInspector.ensure_server()
 
@@ -548,15 +565,6 @@ defmodule Breeze.RemoteInspectorTest do
     end)
 
     refute Breeze.RemoteInspector.available?()
-  end
-
-  test "distribution names default for apps and the remote inspector" do
-    assert Breeze.RemoteInspector.default_distribution_name(:inspector) == :inspector
-    assert Breeze.RemoteInspector.default_distribution_name(:app, []) == :app
-
-    assert Breeze.RemoteInspector.default_distribution_name(:app,
-             view: Breeze.RemoteInspector.View
-           ) == :breeze
   end
 
   test "publishing to the local server updates subscribers" do
