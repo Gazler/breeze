@@ -813,7 +813,7 @@ defmodule Breeze.ChildServer do
   defp process_input(%{"mouse" => mouse} = event, term, opts) do
     case mouse_target(term, mouse) do
       nil ->
-        handle_view_event(term.view, :ignore_me, event, term)
+        handle_view_event(term.view, :input, event, term)
 
       target ->
         event = put_mouse_target_fields(term, target, event)
@@ -824,7 +824,7 @@ defmodule Breeze.ChildServer do
             reply
 
           :bubble ->
-            normalize_result(term.view.handle_event(:ignore_me, event, term), term)
+            normalize_result(term.view.handle_event(:input, event, term), term)
 
           :not_live ->
             dispatch_mouse_target(event, mouse, target, term)
@@ -843,7 +843,7 @@ defmodule Breeze.ChildServer do
         focused -> %{term | focused: focused}
       end
 
-    handle_event(:ignore_me, event, term, target)
+    handle_event(:input, event, term, target)
   end
 
   defp put_mouse_target_fields(term, target, %{"mouse" => mouse} = event) do
@@ -991,11 +991,11 @@ defmodule Breeze.ChildServer do
   end
 
   defp dispatch_input_steps([:view | _rest], event, _key, term) do
-    handle_event(:ignore_me, event, term)
+    handle_event(:input, event, term)
   end
 
   defp dispatch_input_steps([:view_direct | _rest], event, _key, term) do
-    handle_view_event(term.view, :ignore_me, event, term)
+    handle_view_event(term.view, :input, event, term)
   end
 
   defp dispatch_local_keybindings(event, term) do

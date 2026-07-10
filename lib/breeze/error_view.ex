@@ -195,7 +195,7 @@ defmodule Breeze.ErrorView do
       {Breeze.Implicit.List, implicit} ->
         payload = %{"key" => key, "element" => list_element(assigns)}
 
-        case Breeze.Implicit.List.handle_event(:ignore_me, payload, implicit) do
+        case Breeze.Implicit.List.handle_event(:input, payload, implicit) do
           {{:change, %{index: index}}, updated} ->
             put_crash_implicit(crash, @stacktrace_id, Breeze.Implicit.List, updated, index)
 
@@ -219,7 +219,7 @@ defmodule Breeze.ErrorView do
       {Breeze.Implicit.Scroll, implicit} ->
         payload = %{"key" => key, "element" => scroll_element(assigns)}
 
-        case Breeze.Implicit.Scroll.handle_event(:ignore_me, payload, implicit) do
+        case Breeze.Implicit.Scroll.handle_event(:input, payload, implicit) do
           {:noreply, updated} ->
             put_crash_implicit(
               crash,

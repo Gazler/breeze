@@ -161,7 +161,7 @@ defmodule Breeze.Implicit.ScrollTest do
 
       assert {:noreply, next_state} =
                Scroll.handle_event(
-                 :ignore_me,
+                 :input,
                  %{"key" => "ArrowUp", "element" => viewport},
                  state
                )
@@ -175,7 +175,7 @@ defmodule Breeze.Implicit.ScrollTest do
       state = %{offset_y: 6, autoscroll: "bottom", pinned_bottom: false}
 
       assert {:noreply, next_state} =
-               Scroll.handle_event(:ignore_me, %{"key" => "End", "element" => viewport}, state)
+               Scroll.handle_event(:input, %{"key" => "End", "element" => viewport}, state)
 
       assert next_state.offset_y == 8
       assert next_state.pinned_bottom == true
@@ -187,7 +187,7 @@ defmodule Breeze.Implicit.ScrollTest do
 
       assert {:noreply, next_state} =
                Scroll.handle_event(
-                 :ignore_me,
+                 :input,
                  %{"mouse" => %{button: :wheel_down}, "element" => viewport},
                  state
                )
@@ -202,7 +202,7 @@ defmodule Breeze.Implicit.ScrollTest do
 
       assert {:noreply, next_state} =
                Scroll.handle_event(
-                 :ignore_me,
+                 :input,
                  %{"mouse" => %{button: :wheel_down, repeat: 3}, "element" => viewport},
                  state
                )

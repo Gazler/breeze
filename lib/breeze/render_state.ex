@@ -229,7 +229,7 @@ defmodule Breeze.RenderState do
           {mod, implicit} ->
             payload = Map.put(payload, "element", Map.get(term.elements, id))
 
-            case mod.handle_event(:ignore_me, payload, implicit) do
+            case mod.handle_event(:input, payload, implicit) do
               {{:change, event}, val, opts} when is_list(opts) ->
                 term = put_implicit_state(term, id, mod, val)
                 term = apply_implicit_term_options(term, opts)

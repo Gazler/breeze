@@ -321,7 +321,7 @@ defmodule Breeze.LoggerTest do
     assert elem(bottom_scroll, 1) == 0
 
     assert {:noreply, "logger", true} =
-             ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "k"})
+             ChildServer.dispatch_event(pid, :input, %{"key" => "k"})
 
     {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
     assert logger_viewport(acc).scroll == {17, 0}
@@ -341,7 +341,7 @@ defmodule Breeze.LoggerTest do
     end)
 
     assert {:noreply, "logger", true} =
-             ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "c"})
+             ChildServer.dispatch_event(pid, :input, %{"key" => "c"})
 
     wait_until(fn ->
       {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
@@ -368,7 +368,7 @@ defmodule Breeze.LoggerTest do
     end)
 
     assert {:noreply, "logger", false} =
-             ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "c"})
+             ChildServer.dispatch_event(pid, :input, %{"key" => "c"})
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
     assert box.content =~ "dont-clear-me-"
@@ -409,7 +409,7 @@ defmodule Breeze.LoggerTest do
     bottom_scroll = logger_viewport(acc).scroll
 
     assert {:noreply, "logger", true} =
-             ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "k"})
+             ChildServer.dispatch_event(pid, :input, %{"key" => "k"})
 
     Logger.info("no-autofollow-#{System.unique_integer([:positive])}")
     Logger.flush()

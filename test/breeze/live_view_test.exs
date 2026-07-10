@@ -981,7 +981,7 @@ defmodule Breeze.LiveView.CoreTest do
     assert %{focused: "button", view: CounterChild} = ChildServer.metadata(pid)
 
     assert {:noreply, "button", true} =
-             ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "+"})
+             ChildServer.dispatch_event(pid, :input, %{"key" => "+"})
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "button", implicit_state: %{})
     assert box.content =~ "Count: 2"
@@ -1687,7 +1687,7 @@ defmodule Breeze.LiveView.CrashTest do
     assert {:noreply, "root", false} = ChildServer.dispatch_input(pid, "x")
 
     assert {:noreply, "root", false} =
-             ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "x"})
+             ChildServer.dispatch_event(pid, :input, %{"key" => "x"})
 
     assert {:noreply, "root"} = ChildServer.dispatch_info(pid, :message)
   end
