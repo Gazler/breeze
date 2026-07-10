@@ -5,14 +5,110 @@ defmodule Breeze.LoggerTest do
   alias Breeze.Renderer
   require Logger
 
+  defmodule EmptyView do
+    use Breeze.View
+
+    def render(assigns), do: ~H"<box>logger lifecycle</box>"
+  end
+
+  defmodule FakeAdapter do
+    @behaviour Termite.Terminal.Adapter
+
+    def start(_opts), do: {:ok, %{ref: make_ref(), size: %{width: 40, height: 8}}}
+    def reader(term), do: {:ok, term.ref}
+    def write(term, _str), do: {:ok, term}
+    def resize(term), do: term.size
+  end
+
   setup do
-    {:ok, _pid} = Breeze.LoggerCollector.ensure_started()
-    :ok = Breeze.LoggerCollector.clear()
-    :ok
+    owner = self()
+    existing_collector = Process.whereis(Breeze.Logger.Collector)
+    {:ok, collector} = Breeze.Logger.Collector.ensure_started()
+    :ok = Breeze.Logger.Collector.configure(owner, :attach)
+    :ok = Breeze.Logger.Collector.clear()
+
+    on_exit(fn ->
+      _ = Breeze.Logger.Collector.release(owner)
+
+      if is_nil(existing_collector) and Process.alive?(collector) do
+        GenServer.stop(collector, :normal)
+      end
+    end)
+
+    %{collector: collector}
+  end
+
+  test "server reuses a collector owned by the caller supervision hierarchy", %{
+    collector: collector
+  } do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+    {:ok, server} =
+      Breeze.Server.start_app_link(view: EmptyView, terminal: terminal, logger: :attach)
+
+    assert Process.whereis(Breeze.Logger.Collector) == collector
+    GenServer.stop(server, :normal)
+    assert Process.alive?(collector)
+  end
+
+  test "server starts and stops an ephemeral collector when none is supervised", %{
+    collector: collector
+  } do
+    GenServer.stop(collector, :normal)
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+    {:ok, server} =
+      Breeze.Server.start_app_link(view: EmptyView, terminal: terminal, logger: :attach)
+
+    ephemeral = Process.whereis(Breeze.Logger.Collector)
+    assert is_pid(ephemeral)
+    assert %{configured?: true, modes: [:attach]} = Breeze.Logger.Collector.status()
+
+    GenServer.stop(server, :normal)
+    wait_until(fn -> is_nil(Process.whereis(Breeze.Logger.Collector)) end)
+    refute Process.alive?(ephemeral)
+  end
+
+  test "attach capture preserves the default logger handler" do
+    assert {:ok, before_config} = :logger.get_handler_config(:default)
+
+    assert %{handler_installed?: true, replacing_default?: false, modes: [:attach]} =
+             Breeze.Logger.Collector.status()
+
+    assert {:ok, after_config} = :logger.get_handler_config(:default)
+    assert after_config == before_config
+  end
+
+  test "replace capture restores the exact default handler configuration" do
+    assert {:ok, original_config} = :logger.get_handler_config(:default)
+
+    assert :ok = Breeze.Logger.Collector.configure(self(), mode: :replace, max_entries: 25)
+    assert {:ok, %{level: :none}} = :logger.get_handler_config(:default)
+
+    assert %{
+             handler_installed?: true,
+             replacing_default?: true,
+             max_entries: 25,
+             modes: [:replace]
+           } = Breeze.Logger.Collector.status()
+
+    assert :ok = Breeze.Logger.Collector.configure(self(), :attach)
+    assert {:ok, restored_config} = :logger.get_handler_config(:default)
+    assert restored_config == original_config
+  end
+
+  test "mounting the logger view does not change logger handler configuration" do
+    before_status = Breeze.Logger.Collector.status()
+    assert {:ok, before_default} = :logger.get_handler_config(:default)
+
+    {:ok, _pid} = ChildServer.start(view: Breeze.Logger, start_opts: [])
+
+    assert Breeze.Logger.Collector.status() == before_status
+    assert :logger.get_handler_config(:default) == {:ok, before_default}
   end
 
   test "collector captures Logger events" do
-    :ok = Breeze.LoggerCollector.subscribe(self())
+    :ok = Breeze.Logger.Collector.subscribe(self())
     assert_receive {:logger_snapshot, []}
 
     message = "collector-log-#{System.unique_integer([:positive])}"
@@ -24,12 +120,12 @@ defmodule Breeze.LoggerTest do
   end
 
   test "collector normalizes unicode logger chardata before rendering" do
-    {:ok, collector} = Breeze.LoggerCollector.ensure_started()
-    :ok = Breeze.LoggerCollector.subscribe(self())
+    {:ok, collector} = Breeze.Logger.Collector.ensure_started()
+    :ok = Breeze.Logger.Collector.subscribe(self())
     assert_receive {:logger_snapshot, []}
 
     event = %{level: :info, msg: {:string, [181, ?s]}, meta: %{}}
-    Breeze.LoggerHandler.log(event, %{config: %{collector: collector}})
+    Breeze.Logger.Handler.log(event, %{config: %{collector: collector}})
 
     assert_receive {:logger_entry, %{level: :info, line: line}}, 1_000
     assert String.valid?(line)

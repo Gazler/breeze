@@ -6,8 +6,9 @@ defmodule Breeze.Logger do
 
       <live id="logs" view={Breeze.Logger} start_opts={[title: "Logs"]} />
 
-  This view hooks into Erlang's `:logger` and keeps a bounded list of recent
-  entries in its own state so it can be routed, persisted, or preloaded.
+  Configure log capture when starting `Breeze.Server`, then mount this view to
+  display the captured entries. Mounting the view does not alter the VM's logger
+  handlers.
   """
 
   use Breeze.View
@@ -16,9 +17,14 @@ defmodule Breeze.Logger do
   @level_order [:debug, :info, :notice, :warning, :error, :critical, :alert, :emergency]
 
   def mount(opts, term) do
-    max_entries = Keyword.get(opts, :max_entries, 1000)
-    {:ok, _collector} = Breeze.LoggerCollector.ensure_started(max_entries: max_entries)
-    :ok = Breeze.LoggerCollector.subscribe(self())
+    case Breeze.Logger.Collector.subscribe(self()) do
+      :ok ->
+        :ok
+
+      {:error, :not_started} ->
+        raise ArgumentError,
+              "Breeze.Logger requires logger capture to be configured when starting Breeze.Server"
+    end
 
     {:ok,
      assign(term,
@@ -57,7 +63,7 @@ defmodule Breeze.Logger do
 
   def handle_event(_, %{"key" => key}, %{assigns: %{clear_key: key}} = term)
       when is_binary(key) do
-    :ok = Breeze.LoggerCollector.clear()
+    :ok = Breeze.Logger.Collector.clear()
     {:noreply, assign(term, lines: [])}
   end
 

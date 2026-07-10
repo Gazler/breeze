@@ -3,7 +3,9 @@ defmodule Breeze.RemoteInspector.View do
 
   use Breeze.View
   import Breeze.Blocks
+  import Breeze.RemoteInspector.Logs, only: [logs_tab: 1]
   alias BackBreeze.TextSpan
+  alias Breeze.RemoteInspector.Logs
 
   @render_tree_limit 600
 
@@ -21,10 +23,13 @@ defmodule Breeze.RemoteInspector.View do
     {:ok, _pid} = Breeze.RemoteInspector.ensure_server()
     :ok = Breeze.RemoteInspector.subscribe(self())
     state = Breeze.RemoteInspector.snapshot()
+    log_sources = Logs.build_sources(state.logs)
 
     {:ok,
      assign(term,
        snapshots: state.snapshots,
+       logs: state.logs,
+       log_sources: log_sources,
        latest_source: state.latest_source,
        active_source: state.latest_source,
        panel_tab: "overview",
@@ -45,6 +50,9 @@ defmodule Breeze.RemoteInspector.View do
     breeze = assigns |> Map.get(:breeze, %{}) |> Map.put_new(:keybindings, [])
     now = System.system_time(:millisecond)
     active_render_tree = active_render_tree(assigns, active_source, active, render_tree_kind)
+    logs = Map.get(assigns, :logs, %{})
+    log_sources = Logs.build_sources(logs, Map.get(assigns, :log_sources, %{}))
+    log_source = Logs.source(logs, active_source)
 
     assigns =
       Map.merge(assigns, %{
@@ -99,6 +107,13 @@ defmodule Breeze.RemoteInspector.View do
           if(active, do: render_tree_selected(active_render_tree, active.snapshot), else: nil),
         active_render_tree_expanded:
           if(active, do: render_tree_expanded(active_render_tree), else: []),
+        logs: logs,
+        log_sources: log_sources,
+        active_log_source: log_source,
+        active_log_source_text: Logs.source_text(logs, log_source),
+        active_log_status_text: Logs.status_line(logs, log_source, now),
+        active_log_count: Logs.count(logs, log_source),
+        active_log_content: Logs.content(log_sources, log_source),
         render_tree_kind: render_tree_kind,
         breeze: breeze,
         panel_tab: panel_tab
@@ -130,6 +145,15 @@ defmodule Breeze.RemoteInspector.View do
               class="width-full height-full border-rounded bg"
               item_class="width-9"
             >
+              <:tab value="logs" label="Logs">
+                <.logs_tab
+                  scroll_id="remote-inspector-tabs-panel-logs"
+                  source_text={@active_log_source_text}
+                  status_text={@active_log_status_text}
+                  line_count={@active_log_count}
+                  content={@active_log_content}
+                />
+              </:tab>
               <:tab value="tree" label="Tree">
                 <.tree_tab
                   active={@active}
@@ -529,10 +553,11 @@ defmodule Breeze.RemoteInspector.View do
   end
 
   def handle_info(
-        {:remote_inspector, %{snapshots: snapshots, latest_source: latest_source}},
+        {:remote_inspector, %{snapshots: snapshots, latest_source: latest_source} = state},
         term
       ) do
     active_source = normalize_active_source(term.assigns.active_source, snapshots, latest_source)
+    logs = Map.get(state, :logs, Map.get(term.assigns, :logs, %{}))
 
     term =
       term
@@ -541,9 +566,27 @@ defmodule Breeze.RemoteInspector.View do
         latest_source: latest_source,
         active_source: active_source
       )
+      |> assign_logs(logs)
       |> refresh_active_render_tree()
 
     {:noreply, term}
+  end
+
+  def handle_info({:remote_inspector_logs, {:snapshot, key, entry}}, term) do
+    logs = Map.put(Map.get(term.assigns, :logs, %{}), key, entry)
+    {:noreply, assign_logs(term, logs)}
+  end
+
+  def handle_info(
+        {:remote_inspector_logs, {:entry, key, source, entry, updated_at}},
+        term
+      ) do
+    logs =
+      term.assigns
+      |> Map.get(:logs, %{})
+      |> Logs.append(key, source, entry, updated_at)
+
+    {:noreply, assign_logs(term, logs)}
   end
 
   def handle_info(:resize, term) do
@@ -613,6 +656,11 @@ defmodule Breeze.RemoteInspector.View do
 
   defp active_entry(%{snapshots: snapshots, latest_source: latest_source} = assigns) do
     Map.get(snapshots, active_source(assigns) || latest_source)
+  end
+
+  defp assign_logs(term, logs) do
+    sources = Logs.build_sources(logs, Map.get(term.assigns, :log_sources, %{}))
+    assign(term, logs: logs, log_sources: sources)
   end
 
   defp payload_value(payload, key) when is_map(payload) do

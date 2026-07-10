@@ -100,7 +100,7 @@ defmodule Breeze.RemoteInspector do
   def snapshot do
     case server_pid() do
       pid when is_pid(pid) -> Server.snapshot(pid)
-      _ -> %{snapshots: %{}, latest_source: nil}
+      _ -> %{snapshots: %{}, latest_source: nil, logs: %{}}
     end
   end
 
@@ -115,6 +115,24 @@ defmodule Breeze.RemoteInspector do
 
       _ ->
         :ok
+    end
+  end
+
+  def publish_logs(entries, opts \\ []) when is_list(entries) do
+    _ = ensure_app_distribution(opts)
+
+    case ensure_remote_server_pid() do
+      pid when is_pid(pid) -> Server.publish_logs(pid, self(), entries)
+      _ -> :ok
+    end
+  end
+
+  def publish_log_entry(entry, opts \\ []) when is_map(entry) do
+    _ = ensure_app_distribution(opts)
+
+    case ensure_remote_server_pid() do
+      pid when is_pid(pid) -> Server.publish_log_entry(pid, self(), entry)
+      _ -> :ok
     end
   end
 
@@ -208,6 +226,11 @@ defmodule Breeze.RemoteInspector.Server do
 
   use GenServer
 
+  @max_log_entries 1_000
+  @max_log_bytes 2_000_000
+  @max_log_entry_bytes 100_000
+  @log_flush_interval 50
+
   def start_link do
     GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
   end
@@ -220,6 +243,14 @@ defmodule Breeze.RemoteInspector.Server do
     GenServer.cast(pid, {:snapshot, source_pid, snapshot})
   end
 
+  def publish_logs(pid, source_pid, entries) do
+    GenServer.cast(pid, {:logs, source_pid, entries})
+  end
+
+  def publish_log_entry(pid, source_pid, entry) do
+    GenServer.cast(pid, {:log_entry, source_pid, entry})
+  end
+
   def snapshot(pid) do
     GenServer.call(pid, :snapshot)
   end
@@ -229,7 +260,17 @@ defmodule Breeze.RemoteInspector.Server do
     :ok = Breeze.RemoteInspector.ensure_registry_started()
     :ok = :pg.join(Breeze.RemoteInspector.group(), self())
     send(self(), :sync_apps)
-    {:ok, %{snapshots: %{}, latest_source: nil, subscribers: MapSet.new(), source_monitors: %{}}}
+
+    {:ok,
+     %{
+       snapshots: %{},
+       latest_source: nil,
+       logs: %{},
+       dirty_logs: MapSet.new(),
+       log_flush_ref: nil,
+       subscribers: MapSet.new(),
+       source_monitors: %{}
+     }}
   end
 
   @impl true
@@ -271,23 +312,84 @@ defmodule Breeze.RemoteInspector.Server do
     {:noreply, state}
   end
 
+  def handle_cast({:logs, source_pid, entries}, state) when is_pid(source_pid) do
+    source = %{pid: source_pid, node: node(source_pid)}
+    key = source_key(source)
+    now = System.system_time(:millisecond)
+
+    log_entry = %{
+      source: source,
+      entries: normalize_log_entries(entries),
+      updated_at: now
+    }
+
+    state =
+      state
+      |> ensure_source_monitor(source_pid, key)
+      |> put_in([:logs, key], log_entry)
+      |> mark_log_dirty(key)
+
+    {:noreply, state}
+  end
+
+  def handle_cast({:log_entry, source_pid, entry}, state)
+      when is_pid(source_pid) and is_map(entry) do
+    source = %{pid: source_pid, node: node(source_pid)}
+    key = source_key(source)
+    now = System.system_time(:millisecond)
+    entry = normalize_log_entry(entry)
+
+    state =
+      state
+      |> ensure_source_monitor(source_pid, key)
+      |> update_in([:logs], fn logs ->
+        current =
+          Map.get(logs, key, %{source: source, entries: [], updated_at: now})
+
+        entries = trim_log_entries(current.entries ++ [entry])
+        Map.put(logs, key, %{current | source: source, entries: entries, updated_at: now})
+      end)
+      |> mark_log_dirty(key)
+
+    {:noreply, state}
+  end
+
   @impl true
+  def handle_info(:flush_logs, state) do
+    state =
+      Enum.reduce(state.dirty_logs, state, fn key, acc ->
+        case Map.fetch(acc.logs, key) do
+          {:ok, log_entry} -> push_log_event(acc, {:snapshot, key, log_entry})
+          :error -> acc
+        end
+      end)
+
+    {:noreply, %{state | dirty_logs: MapSet.new(), log_flush_ref: nil}}
+  end
+
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
     key = source_key(%{pid: pid, node: node(pid)})
 
     state =
-      if Map.has_key?(state.snapshots, key) do
-        state
-        |> put_in([:snapshots, key, :alive?], false)
-        |> update_in([:source_monitors], &drop_source_monitor(&1, key))
-        |> push_state()
-      else
-        key = source_key(%{pid: pid, node: node(pid)})
+      cond do
+        Map.has_key?(state.snapshots, key) ->
+          state
+          |> put_in([:snapshots, key, :alive?], false)
+          |> update_in([:source_monitors], &drop_source_monitor(&1, key))
+          |> push_state()
 
-        state
-        |> Map.update!(:subscribers, &MapSet.delete(&1, pid))
-        |> update_snapshots(key)
-        |> push_state()
+        Map.has_key?(state.logs, key) ->
+          state
+          |> update_in([:logs], &Map.delete(&1, key))
+          |> update_in([:dirty_logs], &MapSet.delete(&1, key))
+          |> update_in([:source_monitors], &drop_source_monitor(&1, key))
+          |> push_state()
+
+        true ->
+          state
+          |> Map.update!(:subscribers, &MapSet.delete(&1, pid))
+          |> update_snapshots(key)
+          |> push_state()
       end
 
     {:noreply, state}
@@ -342,6 +444,25 @@ defmodule Breeze.RemoteInspector.Server do
     state
   end
 
+  defp push_log_event(state, event) do
+    Enum.each(state.subscribers, fn subscriber ->
+      if is_pid(subscriber) and Process.alive?(subscriber) do
+        send(subscriber, {:remote_inspector_logs, event})
+      end
+    end)
+
+    state
+  end
+
+  defp mark_log_dirty(%{log_flush_ref: nil} = state, key) do
+    ref = Process.send_after(self(), :flush_logs, @log_flush_interval)
+    %{state | dirty_logs: MapSet.put(state.dirty_logs, key), log_flush_ref: ref}
+  end
+
+  defp mark_log_dirty(state, key) do
+    %{state | dirty_logs: MapSet.put(state.dirty_logs, key)}
+  end
+
   defp sync_apps(state) do
     Enum.reduce(Breeze.RemoteInspector.app_members(), state, fn pid, acc ->
       if is_pid(pid) and pid != self() do
@@ -382,9 +503,53 @@ defmodule Breeze.RemoteInspector.Server do
   defp public_state(state) do
     %{
       snapshots: state.snapshots,
-      latest_source: state.latest_source
+      latest_source: state.latest_source,
+      logs: state.logs
     }
   end
 
   defp source_key(%{node: node, pid: pid}), do: {node, inspect(pid)}
+
+  defp normalize_log_entries(entries) do
+    entries
+    |> Enum.map(&normalize_log_entry/1)
+    |> trim_log_entries()
+  end
+
+  defp normalize_log_entry(%{} = entry) do
+    %{
+      level: Map.get(entry, :level, :info),
+      line: entry |> Map.get(:line, inspect(entry)) |> to_string() |> truncate_log_entry()
+    }
+  end
+
+  defp normalize_log_entry(entry), do: %{level: :info, line: inspect(entry)}
+
+  defp truncate_log_entry(line) when byte_size(line) <= @max_log_entry_bytes, do: line
+
+  defp truncate_log_entry(line) do
+    suffix = "\n... [log entry truncated]"
+    keep = max(@max_log_entry_bytes - byte_size(suffix), 0)
+
+    line
+    |> binary_part(0, keep)
+    |> String.replace_invalid()
+    |> Kernel.<>(suffix)
+  end
+
+  defp trim_log_entries(entries) do
+    entries
+    |> Enum.take(-@max_log_entries)
+    |> Enum.reverse()
+    |> Enum.reduce_while({[], 0}, fn entry, {kept, bytes} ->
+      entry_bytes = byte_size(entry.line)
+
+      if kept == [] or bytes + entry_bytes <= @max_log_bytes do
+        {:cont, {[entry | kept], bytes + entry_bytes}}
+      else
+        {:halt, {kept, bytes}}
+      end
+    end)
+    |> elem(0)
+  end
 end

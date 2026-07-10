@@ -19,6 +19,11 @@ defmodule Breeze.Server do
     * `:inspector` - enables inspector support. Defaults to `false`.
       Pass `true` or keyword options such as `:toggle_key` and
       `:move_key`.
+    * `:logger` - configures Breeze log capture. Pass `:attach` to add a
+      handler while preserving existing handlers, `:replace` to temporarily
+      silence the default handler, a keyword list with `:mode` and
+      `:max_entries`, or `false` to disable capture. Inspector-enabled servers
+      default to `:attach`; other servers default to `false`.
     * `:alt_screen` - enters the terminal alternate screen. Defaults
       to `true`.
     * `:hide_cursor` - hides the terminal cursor while the app runs.
@@ -68,6 +73,7 @@ defmodule Breeze.Server do
     :mouse_mode,
     :reload_opts,
     :reloader_pid,
+    :logger_collector,
     :focused,
     :theme,
     :apply_theme_defaults?,
@@ -102,6 +108,7 @@ defmodule Breeze.Server do
           | {:halt_fun, (-> term())}
           | {:global_keybindings, list()}
           | {:inspector, boolean() | keyword()}
+          | {:logger, false | :attach | :replace | keyword()}
           | {:render_errors, keyword()}
 
   @doc """
@@ -234,6 +241,19 @@ defmodule Breeze.Server do
     end
   end
 
+  defp logger_collector(config) when config in [false, nil], do: nil
+
+  defp logger_collector(_config) do
+    case Process.whereis(Breeze.Logger.Collector) do
+      pid when is_pid(pid) ->
+        pid
+
+      nil ->
+        {:ok, pid} = Breeze.Logger.Collector.start_link(ephemeral: true)
+        pid
+    end
+  end
+
   @impl true
   def init(opts) do
     view = Keyword.fetch!(opts, :view)
@@ -255,8 +275,25 @@ defmodule Breeze.Server do
     apply_theme_defaults? = Breeze.Theme.defaults_enabled?(Keyword.get(opts, :theme))
     inspector_enabled? = inspector_enabled?(Keyword.get(opts, :inspector, false))
 
+    logger_config =
+      if Keyword.has_key?(opts, :logger) do
+        Keyword.fetch!(opts, :logger)
+      else
+        if inspector_enabled?, do: :attach, else: false
+      end
+
     if inspector_enabled? do
       _ = Breeze.RemoteInspector.ensure_app_distribution(view: view)
+    end
+
+    logger_collector = logger_collector(logger_config)
+
+    if logger_collector do
+      :ok =
+        Breeze.Logger.Collector.configure(self(), logger_config,
+          remote_inspector: inspector_enabled?,
+          view: view
+        )
     end
 
     session = self()
@@ -309,6 +346,7 @@ defmodule Breeze.Server do
           normalize_reload_opts(
             Keyword.get(opts, :reload, Application.get_env(:breeze, :reload, false))
           ),
+        logger_collector: logger_collector,
         focused: focused,
         theme: theme,
         apply_theme_defaults?: apply_theme_defaults?,
@@ -1781,6 +1819,10 @@ defmodule Breeze.Server do
   @impl true
   def terminate(_reason, state) do
     shutdown_view_processes(state)
+
+    if state.logger_collector do
+      _ = Breeze.Logger.Collector.release(self())
+    end
 
     if state.owns_child_view_supervisor?,
       do: Breeze.ChildViewSupervisor.stop(state.child_view_supervisor)

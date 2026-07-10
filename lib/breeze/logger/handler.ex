@@ -1,4 +1,4 @@
-defmodule Breeze.LoggerHandler do
+defmodule Breeze.Logger.Handler do
   @moduledoc false
 
   @behaviour :logger_handler
@@ -20,6 +20,14 @@ defmodule Breeze.LoggerHandler do
 
       other ->
         other
+    end
+  end
+
+  def remove do
+    case :logger.remove_handler(@handler_id) do
+      :ok -> :ok
+      {:error, {:not_found, @handler_id}} -> :ok
+      other -> other
     end
   end
 
