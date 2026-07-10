@@ -124,7 +124,7 @@ defmodule Breeze.InputRouter do
 
   @impl true
   def handle_call(:stats, _from, state) do
-    {:reply, Breeze.Server.stats(state.server_pid), state}
+    {:reply, Breeze.Server.Diagnostics.stats(state.server_pid), state}
   end
 
   @impl true

@@ -74,11 +74,22 @@ defmodule Breeze.Implicit do
   `:layout`.
   """
 
+  @typedoc "State owned by an implicit implementation."
   @type state :: term()
+
+  @typedoc "The implicit root or one of its child elements."
   @type element_type :: :root | :child
+
+  @typedoc "Attributes collected from an implicit element."
   @type attributes :: map()
+
+  @typedoc "Renderer flags attached to an implicit element."
   @type flags :: keyword()
+
+  @typedoc "A decoded terminal key name."
   @type key_name :: String.t()
+
+  @typedoc "An option returned while initializing implicit state."
   @type init_option ::
           {:rerender_every, pos_integer()}
           | {:active_when_pending, boolean()}
@@ -89,20 +100,27 @@ defmodule Breeze.Implicit do
           | {:captures_focus_keys, boolean()}
           | {:requires_layout_rerender, boolean()}
           | {:state_change_requires_rerender, boolean()}
+  @typedoc "A valid return value from `c:init/3`."
   @type init_result :: state() | {:ok, state()} | {:ok, state(), [init_option()]}
+
+  @typedoc "An option returned with an implicit event action."
   @type event_option :: {:focus, String.t() | nil}
+
+  @typedoc "A valid return value from `c:handle_event/3`."
   @type event_reply ::
           {:noreply, state()}
           | {{:change, map()}, state()}
           | {{:change, map()}, state(), [event_option()]}
           | {{:submit, map()}, state()}
           | {{:delegate, String.t()}, state()}
+  @typedoc "A style, scroll, or state modifier returned during rendering."
   @type modifier ::
           {:style, binary() | map() | list()}
           | {:scroll_y, integer()}
           | {:scroll_x, integer()}
           | {:scroll, {integer(), integer()}}
           | {atom(), term()}
+  @typedoc "Runtime context supplied to `c:animate/5`."
   @type animation_context :: %{
           required(:phase) => :base | :async,
           required(:frame) => non_neg_integer(),
@@ -115,7 +133,10 @@ defmodule Breeze.Implicit do
           required(:id) => String.t() | nil,
           required(:layout) => Breeze.Viewport.t() | nil
         }
+  @typedoc "An option returned from an animation pass."
   @type animation_option :: {:overlays, [map()]}
+
+  @typedoc "A valid return value from `c:animate/5`."
   @type animation_reply ::
           %BackBreeze.Box{}
           | {:ok, %BackBreeze.Box{}}

@@ -8,6 +8,74 @@ defmodule Breeze.Theme do
   * `:system` for richer themes derived from the terminal palette when available
   * custom maps/keywords/structs with explicit defaults, palette entries, and extras
 
+  ## Theme variables
+
+  Color classes such as `text-primary`, `bg-panel`, `border-warning`,
+  `scrollbar-muted`, and `placeholder-text-muted` resolve their suffix through
+  the active theme. Inline style values such as `%{foreground_color: :primary}`
+  use the same lookup.
+
+  Every built-in theme provides these default variables:
+
+  | Variable | Aliases | Intended use |
+  | --- | --- | --- |
+  | `text` | `fg`, `foreground_color` | Default foreground text |
+  | `background` | `bg`, `background_color` | Default application background |
+  | `border` | `stroke`, `border_color` | Default border and outline color |
+
+  The bare `text` and `bg` classes select the default text and background
+  colors. The aliases can also be used as suffixes, such as `text-fg` or
+  `bg-bg`.
+
+  Every built-in theme also provides this semantic palette:
+
+  | Variable | Intended use |
+  | --- | --- |
+  | `muted` | Secondary text, subdued borders, and low-emphasis content |
+  | `primary` | Primary actions, active controls, and prominent highlights |
+  | `secondary` | Supporting actions and alternate highlights |
+  | `warning` | Cautionary states that need attention |
+  | `error` | Errors, failures, and destructive actions |
+  | `success` | Successful and positive states |
+  | `accent` | Selection, emphasis, and decorative highlights |
+  | `surface` | Raised or subtly separated surfaces |
+  | `panel` | Panels, dialogs, and stronger container backgrounds |
+
+  Built-in themes define `cursor` as an extra variable for text input and
+  textarea cursors. Inputs fall back to `accent` when a custom theme does not
+  provide it.
+
+  Custom themes can override the standard variables and add any number of
+  application-specific variables through `extras`:
+
+      Breeze.Theme.new(
+        name: "brand",
+        defaults: %{
+          text: "#E8EEF7",
+          background: "#10151D",
+          border: "#52606D"
+        },
+        palette: %{
+          muted: "#9AA5B1",
+          primary: "#4DA3FF",
+          secondary: "#9B8AFB",
+          warning: "#F7C948",
+          error: "#EF4E4E",
+          success: "#3EBD93",
+          accent: "#F970C7",
+          surface: "#1B2430",
+          panel: "#253244"
+        },
+        extras: %{cursor: "#FFFFFF", brand: "#4DA3FF"}
+      )
+
+  The custom `brand` variable is then available as `text-brand`, `bg-brand`,
+  `border-brand`, and anywhere else Breeze resolves a color.
+
+  The `variables` field on `%Breeze.Theme{}` stores runtime theme metadata; it
+  is not part of semantic color lookup. Named colors are resolved from
+  `defaults`, `palette`, and `extras`, in that order.
+
   ## Built-in themes
 
   Pass these names to `builtin/2`:
@@ -43,10 +111,16 @@ defmodule Breeze.Theme do
   @palette_aliases %{fg: :text}
   @legacy_palette_keys ~w(muted primary secondary warning error success accent surface panel)a
 
+  @typedoc "An RGB color tuple."
   @type rgb :: {0..255, 0..255, 0..255}
+
+  @typedoc "A terminal color index, RGB tuple, or color string."
   @type color :: non_neg_integer() | rgb() | String.t()
+
+  @typedoc "Colors reported by a terminal palette probe."
   @type terminal_palette :: %{optional(integer() | atom()) => color()}
 
+  @typedoc "A normalized Breeze theme."
   @type t :: %__MODULE__{
           name: String.t() | nil,
           mode: :custom | :system | :system16,
@@ -58,6 +132,7 @@ defmodule Breeze.Theme do
           terminal_palette: terminal_palette() | nil
         }
 
+  @doc "Returns the default system-16 theme."
   @spec default(keyword()) :: t()
   def default(opts \\ []), do: system16(opts)
 
@@ -83,6 +158,7 @@ defmodule Breeze.Theme do
   def builtin(name, variant \\ nil),
     do: Breeze.Theme.Builtin.fetch!(name, variant)
 
+  @doc "Returns the built-in theme names in their standard cycling order."
   @spec default_cycle() :: [atom()]
   def default_cycle do
     [
@@ -98,12 +174,14 @@ defmodule Breeze.Theme do
     ]
   end
 
+  @doc "Resolves a built-in name or `{name, theme}` entry into a named theme tuple."
   @spec resolve_theme(atom() | {term(), term()}) :: {term(), term()}
   def resolve_theme({name, theme}), do: {name, theme}
   def resolve_theme(:system16), do: {:system16, :system16}
   def resolve_theme(:system), do: {:system, :system}
   def resolve_theme(name) when is_atom(name), do: {name, builtin(name)}
 
+  @doc "Returns the theme after `current` in a cycle, wrapping at the end."
   @spec next_theme(term(), [atom() | {term(), term()}]) :: {term(), term()} | nil
   def next_theme(current, themes \\ default_cycle()) when is_list(themes) do
     case Enum.map(themes, &resolve_theme/1) do
@@ -117,9 +195,11 @@ defmodule Breeze.Theme do
     end
   end
 
+  @doc "Returns whether a theme input enables theme-provided default styles."
   @spec defaults_enabled?(term()) :: boolean()
   def defaults_enabled?(theme), do: theme not in [nil, false]
 
+  @doc "Returns whether a theme input requests the terminal-derived system theme."
   @spec requested_system?(term()) :: boolean()
   def requested_system?(:system), do: true
   def requested_system?(%__MODULE__{mode: :system}), do: true
@@ -144,6 +224,7 @@ defmodule Breeze.Theme do
 
   def requested_system?(_theme), do: false
 
+  @doc "Restores `:system` as the source for a system theme using a fallback palette."
   @spec normalize_requested_source(term()) :: term()
   def normalize_requested_source(%__MODULE__{
         mode: :system16,
@@ -170,6 +251,7 @@ defmodule Breeze.Theme do
 
   def normalize_requested_source(theme), do: theme
 
+  @doc "Returns the terminal-palette probe status recorded by a theme."
   @spec probe_status(t() | map() | keyword() | atom() | nil) ::
           :ready | :pending | :unavailable | nil
   def probe_status(theme) do
@@ -177,12 +259,14 @@ defmodule Breeze.Theme do
     Map.get(theme.variables, :palette_probe_status)
   end
 
+  @doc "Returns the default style map for a theme input."
   @spec default_style(t() | map() | keyword() | atom() | nil) :: map()
   def default_style(theme) do
     theme = new(theme)
     theme.defaults
   end
 
+  @doc "Builds a theme from the terminal's standard 16-color palette."
   @spec system16(keyword()) :: t()
   def system16(opts \\ []) do
     terminal_palette =
@@ -202,6 +286,12 @@ defmodule Breeze.Theme do
     }
   end
 
+  @doc """
+  Builds a theme from the terminal palette.
+
+  Falls back to `system16/1` while retaining the system-theme request when a
+  complete palette is not yet available.
+  """
   @spec system(keyword()) :: t()
   def system(opts \\ []) do
     terminal_palette =
@@ -233,6 +323,7 @@ defmodule Breeze.Theme do
     end
   end
 
+  @doc "Ensures an asynchronous terminal-palette probe is running."
   @spec ensure_runtime_palette_async(%Termite.Terminal{} | nil, pid()) :: :ok
   def ensure_runtime_palette_async(%Termite.Terminal{} = terminal, notify_pid)
       when is_pid(notify_pid) do
@@ -241,6 +332,7 @@ defmodule Breeze.Theme do
 
   def ensure_runtime_palette_async(_terminal, _notify_pid), do: :ok
 
+  @doc "Starts a terminal-palette probe and returns its initial state."
   @spec start_runtime_palette_probe(%Termite.Terminal{} | nil) ::
           {:start, term(), binary()} | :ready | :pending | :unavailable | :error
   def start_runtime_palette_probe(%Termite.Terminal{} = terminal) do
@@ -249,21 +341,25 @@ defmodule Breeze.Theme do
 
   def start_runtime_palette_probe(_terminal), do: :error
 
+  @doc "Returns the terminal-palette probe timeout in milliseconds."
   @spec runtime_palette_probe_timeout_ms() :: pos_integer()
   def runtime_palette_probe_timeout_ms, do: Breeze.Theme.Probe.runtime_palette_probe_timeout_ms()
 
+  @doc "Merges terminal response data into an in-progress palette probe."
   @spec merge_runtime_palette_data(binary(), map(), binary()) :: {map(), binary()}
   def merge_runtime_palette_data(buffer, palette, data)
       when is_binary(buffer) and is_map(palette) and is_binary(data) do
     Breeze.Theme.Probe.merge_runtime_palette_data(buffer, palette, data)
   end
 
+  @doc "Returns whether a palette probe has collected all required colors."
   @spec runtime_palette_probe_complete?(map()) :: boolean()
   def runtime_palette_probe_complete?(palette) when is_map(palette),
     do: Breeze.Theme.Probe.runtime_palette_probe_complete?(palette)
 
   def runtime_palette_probe_complete?(_palette), do: false
 
+  @doc "Stores a completed runtime palette and returns its availability status."
   @spec finish_runtime_palette_probe(%Termite.Terminal{} | nil, map()) :: :ready | :unavailable
   def finish_runtime_palette_probe(%Termite.Terminal{} = terminal, palette)
       when is_map(palette) do
@@ -272,6 +368,7 @@ defmodule Breeze.Theme do
 
   def finish_runtime_palette_probe(_terminal, _palette), do: :unavailable
 
+  @doc "Normalizes a theme name, map, keyword list, or struct into a theme."
   @spec new(t() | map() | keyword() | atom() | nil, keyword()) :: t()
   def new(theme, opts \\ [])
 
@@ -341,6 +438,7 @@ defmodule Breeze.Theme do
     end
   end
 
+  @doc "Returns a named default, palette, or extra color from a theme."
   @spec color(t() | map() | keyword() | atom() | nil, atom() | String.t()) :: color() | nil
   def color(theme, key) do
     theme = new(theme)
@@ -351,6 +449,7 @@ defmodule Breeze.Theme do
       Map.get(theme.extras, key)
   end
 
+  @doc "Resolves a semantic color name while preserving literal color values."
   @spec resolve_color(t() | map() | keyword() | atom() | nil, term()) :: term()
   def resolve_color(theme, value)
 
@@ -378,21 +477,25 @@ defmodule Breeze.Theme do
 
   def resolve_color(_theme, value), do: value
 
+  @doc "Blends two colors using a weight clamped between `0.0` and `1.0`."
   @spec blend(color(), color(), float()) :: color()
   def blend(left, right, weight) when is_number(weight) do
     mix(left, right, max(0.0, min(weight * 1.0, 1.0)))
   end
 
+  @doc "Lightens a color by blending it toward white."
   @spec lighten(color(), float()) :: color()
   def lighten(color, amount) when is_number(amount) do
     blend(color, {255, 255, 255}, max(0.0, min(amount * 1.0, 1.0)))
   end
 
+  @doc "Darkens a color by blending it toward black."
   @spec darken(color(), float()) :: color()
   def darken(color, amount) when is_number(amount) do
     blend(color, {0, 0, 0}, max(0.0, min(amount * 1.0, 1.0)))
   end
 
+  @doc "Returns whether a theme supports RGB color blending."
   @spec blendable?(t() | map() | keyword() | atom() | nil) :: boolean()
   def blendable?(theme) do
     case new(theme).mode do

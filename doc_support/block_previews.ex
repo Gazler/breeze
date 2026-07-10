@@ -10,7 +10,16 @@ defmodule Breeze.Docs.BlockPreviews do
   def output_path, do: @output_path
   def snapshot_dir, do: @snapshot_dir
 
-  @theme Theme.builtin(:gruvbox)
+  @themes [
+    {:nebula, "Nebula"},
+    {:catppuccin, "Catppuccin Mocha"},
+    {:dracula, "Dracula"},
+    {:gruvbox, "Gruvbox Dark"},
+    {:nord, "Nord"},
+    {:solarized_light, "Solarized Light"},
+    {:solarized_dark, "Solarized Dark"}
+  ]
+  @default_theme :gruvbox
 
   def write_markdown!(path \\ @output_path) do
     File.mkdir_p!(Path.dirname(path))
@@ -32,85 +41,108 @@ defmodule Breeze.Docs.BlockPreviews do
 
   defp sections do
     [
-      {"List",
+      {"Button",
        [
-         {"Initial", fn -> render_view(__MODULE__.ListPreview, size: {28, 10}) end},
-         {"Selected",
-          fn ->
-            render_view(__MODULE__.SelectedListPreview, size: {28, 10}, focused: "preview-list")
-          end}
-       ]},
-      {"Table",
-       [
-         {"Initial", fn -> render_view(__MODULE__.TablePreview, size: {44, 8}) end},
-         {"Selected",
-          fn ->
-            render_view(__MODULE__.SelectedTablePreview, size: {44, 8}, focused: "preview-table")
-          end}
+         {"Default", preview(__MODULE__.ButtonPreview, size: {24, 3})},
+         {"Focused", preview(__MODULE__.ButtonPreview, size: {24, 3}, focused: "preview-button")}
        ]},
       {"Dropdown",
        [
-         {"Closed", fn -> render_view(__MODULE__.DropdownPreview, size: {28, 4}) end},
+         {"Closed", preview(__MODULE__.DropdownPreview, size: {28, 4})},
          {"Open",
-          fn ->
-            render_with_session(__MODULE__.DropdownPreview, [size: {28, 6}], fn session ->
-              _ = Test.render!(session)
-              Test.input(session, "Enter")
-            end)
-          end}
+          interactive_preview(__MODULE__.DropdownPreview, [size: {28, 6}], fn session ->
+            _ = Test.render!(session)
+            Test.input(session, "Enter")
+          end)}
        ]},
-      {"Panel",
+      {"Flash Group",
        [
-         {"Unfocused", fn -> render_view(__MODULE__.PanelPreview, size: {32, 8}) end},
-         {"Focused",
-          fn ->
-            render_view(__MODULE__.AlertPanelPreview,
-              size: {32, 8},
-              focused: "preview-panel-focus"
-            )
-          end}
+         {"Default", preview(__MODULE__.FlashGroupPreview, size: {42, 10})},
+         {"Square", preview(__MODULE__.SquareFlashGroupPreview, size: {42, 10})},
+         {"Rounded", preview(__MODULE__.RoundedFlashGroupPreview, size: {42, 10})}
        ]},
-      {"Tabs",
+      {"Input",
        [
-         {"Default", fn -> render_view(__MODULE__.TabsPreview, size: {42, 8}) end},
-         {"Underline", fn -> render_view(__MODULE__.TabsUnderlinePreview, size: {42, 8}) end}
+         {"Default", preview(__MODULE__.InputPreview, size: {36, 3})},
+         {"Focused", preview(__MODULE__.InputPreview, size: {36, 3}, focused: "preview-input")}
+       ]},
+      {"Keybinding Bar",
+       [
+         {"Default", preview(__MODULE__.KeybindingBarPreview, size: {50, 3})}
+       ]},
+      {"List",
+       [
+         {"Initial", preview(__MODULE__.ListPreview, size: {28, 10})},
+         {"Selected",
+          preview(__MODULE__.SelectedListPreview, size: {28, 10}, focused: "preview-list")}
        ]},
       {"Markdown",
        [
-         {"Default", fn -> render_view(__MODULE__.MarkdownPreview, size: {40, 8}) end},
-         {"Scrolled",
-          fn ->
-            render_view(
-              __MODULE__.MarkdownPreview,
-              size: {40, 8},
-              focused: "preview-markdown",
-              implicit_state: %{
-                "preview-markdown" => {Breeze.Implicit.Scroll, %{offset_y: 2}}
-              }
-            )
-          end}
-       ]},
-      {"Scroll",
-       [
-         {"Top", fn -> render_view(__MODULE__.ScrollPreview, size: {26, 8}) end},
-         {"Lower",
-          fn ->
-            render_view(
-              __MODULE__.ScrollPreview,
-              size: {26, 8},
-              focused: "preview-scroll",
-              implicit_state: %{
-                "preview-scroll" => {Breeze.Implicit.Scroll, %{offset_y: 3}}
-              }
-            )
-          end}
+         {"Default", preview(__MODULE__.MarkdownPreview, size: {40, 8})}
        ]},
       {"Modal",
        [
-         {"Confirm", fn -> render_view(__MODULE__.ModalPreview, size: {36, 12}) end},
-         {"Danger", fn -> render_view(__MODULE__.DangerModalPreview, size: {36, 12}) end}
+         {"Confirm", preview(__MODULE__.ModalPreview, size: {36, 12})},
+         {"Danger", preview(__MODULE__.DangerModalPreview, size: {36, 12})}
+       ]},
+      {"Panel",
+       [
+         {"Unfocused", preview(__MODULE__.PanelPreview, size: {32, 8})},
+         {"Focused",
+          preview(__MODULE__.AlertPanelPreview,
+            size: {32, 8},
+            focused: "preview-panel-focus"
+          )}
+       ]},
+      {"Scroll",
+       [
+         {"Top", preview(__MODULE__.ScrollPreview, size: {26, 8})},
+         {"Lower",
+          preview(__MODULE__.ScrollPreview,
+            size: {26, 8},
+            focused: "preview-scroll",
+            implicit_state: %{
+              "preview-scroll" => {Breeze.Implicit.Scroll, %{offset_y: 3}}
+            }
+          )}
+       ]},
+      {"Table",
+       [
+         {"Initial", preview(__MODULE__.TablePreview, size: {44, 8})},
+         {"Selected",
+          preview(__MODULE__.SelectedTablePreview, size: {44, 8}, focused: "preview-table")}
+       ]},
+      {"Tabs",
+       [
+         {"Default", preview(__MODULE__.TabsPreview, size: {42, 8})},
+         {"Underline", preview(__MODULE__.TabsUnderlinePreview, size: {42, 8})}
+       ]},
+      {"Textarea",
+       [
+         {"Default", preview(__MODULE__.TextareaPreview, size: {42, 7})},
+         {"Focused",
+          preview(__MODULE__.TextareaPreview, size: {42, 7}, focused: "preview-textarea")}
+       ]},
+      {"Tree",
+       [
+         {"Expanded", preview(__MODULE__.TreePreview, size: {32, 10}, focused: "preview-tree")}
        ]}
     ]
+  end
+
+  defp preview(view, opts) do
+    fn theme ->
+      opts =
+        opts
+        |> Keyword.put(:theme, theme)
+        |> Keyword.put_new(:focused, nil)
+
+      render_view(view, opts)
+    end
+  end
+
+  defp interactive_preview(view, opts, fun) do
+    fn theme -> render_with_session(view, Keyword.put(opts, :theme, theme), fun) end
   end
 
   defp materialize_sections(sections) do
@@ -118,9 +150,16 @@ defmodule Breeze.Docs.BlockPreviews do
       materialized_variants =
         Enum.map(variants, fn {label, render_fun} ->
           file_path = snapshot_path(title, label)
-          content = render_fun.()
-          File.write!(file_path, content)
-          {label, content}
+
+          previews =
+            Enum.map(@themes, fn {id, theme_label} ->
+              theme = Theme.builtin(id)
+              %{id: id, label: theme_label, theme: theme, content: render_fun.(theme)}
+            end)
+
+          default_preview = Enum.find(previews, &(&1.id == @default_theme))
+          File.write!(file_path, default_preview.content)
+          {label, previews}
         end)
 
       {title, materialized_variants}
@@ -131,10 +170,24 @@ defmodule Breeze.Docs.BlockPreviews do
     body =
       Enum.map_join(sections, "\n\n", fn {title, variants} -> render_section(title, variants) end)
 
+    theme_options =
+      Enum.map_join(@themes, "\n", fn {id, label} ->
+        selected = if id == @default_theme, do: " selected", else: ""
+        ~s(<option value="#{id}"#{selected}>#{label}</option>)
+      end)
+
     """
     # Built-in Components
 
     Breeze ships with a number of built in components called Breeze Blocks.
+
+    <div class="breeze-theme-picker">
+      <label for="breeze-component-theme">Preview theme</label>
+      <select id="breeze-component-theme" data-breeze-theme-select>
+        #{theme_options}
+      </select>
+    </div>
+
     #{body}
     """
   end
@@ -155,12 +208,14 @@ defmodule Breeze.Docs.BlockPreviews do
     component_code = component_code(title)
 
     tabs =
-      Enum.map_join(variants, "\n\n", fn {label, content} ->
+      Enum.map_join(variants, "\n\n", fn {label, previews} ->
+        sources = preview_sources_json(previews)
+
         """
         ### #{label}
 
         <div class="breeze-ansi" data-ansi-preview="true">
-          <script type="text/plain" class="breeze-ansi-source">#{script_safe(content)}</script>
+          <script type="application/json" class="breeze-ansi-sources">#{sources}</script>
         </div>
         """
       end)
@@ -182,6 +237,10 @@ defmodule Breeze.Docs.BlockPreviews do
     """
   end
 
+  defp component_ref("Button"), do: "Breeze.Blocks.button/1"
+  defp component_ref("Flash Group"), do: "Breeze.Blocks.flash_group/1"
+  defp component_ref("Input"), do: "Breeze.Blocks.input/1"
+  defp component_ref("Keybinding Bar"), do: "Breeze.Blocks.keybinding_bar/1"
   defp component_ref("List"), do: "Breeze.Blocks.list/1"
   defp component_ref("Table"), do: "Breeze.Blocks.table/1"
   defp component_ref("Dropdown"), do: "Breeze.Blocks.dropdown/1"
@@ -190,6 +249,15 @@ defmodule Breeze.Docs.BlockPreviews do
   defp component_ref("Scroll"), do: "Breeze.Blocks.scroll/1"
   defp component_ref("Panel"), do: "Breeze.Blocks.panel/1"
   defp component_ref("Modal"), do: "Breeze.Blocks.modal/1"
+  defp component_ref("Textarea"), do: "Breeze.Blocks.textarea/1"
+  defp component_ref("Tree"), do: "Breeze.Blocks.tree/1"
+
+  defp component_code("Button"), do: render_template_source(__MODULE__.ButtonPreview)
+  defp component_code("Flash Group"), do: render_template_source(__MODULE__.FlashGroupPreview)
+  defp component_code("Input"), do: render_template_source(__MODULE__.InputPreview)
+
+  defp component_code("Keybinding Bar"),
+    do: render_template_source(__MODULE__.KeybindingBarPreview)
 
   defp component_code("List"), do: render_template_source(__MODULE__.ListPreview)
   defp component_code("Table"), do: render_template_source(__MODULE__.TablePreview)
@@ -199,6 +267,17 @@ defmodule Breeze.Docs.BlockPreviews do
   defp component_code("Scroll"), do: render_template_source(__MODULE__.ScrollPreview)
   defp component_code("Panel"), do: render_template_source(__MODULE__.PanelPreview)
   defp component_code("Modal"), do: render_template_source(__MODULE__.ModalPreview)
+  defp component_code("Textarea"), do: render_template_source(__MODULE__.TextareaPreview)
+  defp component_code("Tree"), do: render_template_source(__MODULE__.TreePreview)
+
+  defp theme_color(theme, name) do
+    case Theme.resolve_color(theme, name) do
+      {red, green, blue} -> "rgb(#{red}, #{green}, #{blue})"
+      "#" <> _rest = color -> color
+      color when is_binary(color) -> color
+      _color -> "inherit"
+    end
+  end
 
   def list_items do
     [
@@ -214,6 +293,28 @@ defmodule Breeze.Docs.BlockPreviews do
       {"small", "Small"},
       {"medium", "Medium"},
       {"large", "Large"}
+    ]
+  end
+
+  def keybindings do
+    [
+      %{key: "q", label: "Quit"},
+      %{key: "F1", label: "Help"},
+      %{key: "Enter", label: "Open"}
+    ]
+  end
+
+  def tree_nodes do
+    [
+      %{
+        id: "lib",
+        label: "lib",
+        children: [
+          %{id: "breeze", label: "breeze"},
+          %{id: "blocks", label: "blocks.ex"}
+        ]
+      },
+      %{id: "mix", label: "mix.exs"}
     ]
   end
 
@@ -257,8 +358,7 @@ defmodule Breeze.Docs.BlockPreviews do
   def modal_body(:danger), do: "Remove item?"
 
   defp render_view(view, opts) do
-    start_opts = Keyword.put_new(opts, :theme, @theme)
-    session = Test.start!(view, start_opts)
+    session = Test.start!(view, opts)
 
     try do
       Test.render!(session, opts)
@@ -268,8 +368,7 @@ defmodule Breeze.Docs.BlockPreviews do
   end
 
   defp render_with_session(view, opts, fun) do
-    start_opts = Keyword.put_new(opts, :theme, @theme)
-    session = Test.start!(view, start_opts)
+    session = Test.start!(view, opts)
 
     try do
       _ = fun.(session)
@@ -279,7 +378,34 @@ defmodule Breeze.Docs.BlockPreviews do
     end
   end
 
-  defp script_safe(content), do: String.replace(content, "</script>", "<\\/script>")
+  defp preview_sources_json(previews) do
+    previews
+    |> Enum.map_join(",", fn preview ->
+      fields = [
+        {"theme", to_string(preview.id)},
+        {"background", theme_color(preview.theme, :background)},
+        {"foreground", theme_color(preview.theme, :text)},
+        {"content", Base.encode64(preview.content)}
+      ]
+
+      encoded_fields =
+        Enum.map_join(fields, ",", fn {key, value} ->
+          json_string(key) <> ":" <> json_string(value)
+        end)
+
+      "{" <> encoded_fields <> "}"
+    end)
+    |> then(&("[" <> &1 <> "]"))
+  end
+
+  defp json_string(value) do
+    escaped =
+      value
+      |> String.replace("\\", "\\\\")
+      |> String.replace("\"", "\\\"")
+
+    "\"" <> escaped <> "\""
+  end
 
   defp render_template_source(module) do
     source =
@@ -305,6 +431,148 @@ defmodule Breeze.Docs.BlockPreviews do
     module.module_info(:compile)
     |> Keyword.fetch!(:source)
     |> to_string()
+  end
+
+  defmodule ButtonPreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      ~H"""
+      <.button id="preview-button">Deploy update</.button>
+      """
+    end
+  end
+
+  defmodule FlashGroupPreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      assigns =
+        Map.put(assigns, :flash, [
+          %{id: "saved", kind: :success, title: "Saved", message: "Deployment completed."},
+          %{id: "warning", kind: :warning, message: "One worker is restarting."}
+        ])
+
+      ~H"""
+      <.flash_group id="preview-flash" flash={@flash} width={34} offset={0}/>
+      """
+    end
+  end
+
+  defmodule RoundedFlashGroupPreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      assigns =
+        Map.put(assigns, :flash, [
+          %{id: "failed", kind: :error, title: "Failed", message: "Could not publish release."}
+        ])
+
+      ~H"""
+      <.flash_group id="preview-flash-rounded" flash={@flash} variant="rounded" width={34} offset={0}/>
+      """
+    end
+  end
+
+  defmodule SquareFlashGroupPreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      assigns =
+        Map.put(assigns, :flash, [
+          %{id: "queued", kind: :info, title: "Queued", message: "Release is ready to publish."}
+        ])
+
+      ~H"""
+      <.flash_group id="preview-flash-square" flash={@flash} variant="square" width={34} offset={0}/>
+      """
+    end
+  end
+
+  defmodule InputPreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      assigns = Map.put(assigns, :value, "breeze@example.com")
+
+      ~H"""
+      <.input id="preview-input" input-value={@value} style="width-34">{@value}</.input>
+      """
+    end
+  end
+
+  defmodule KeybindingBarPreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      assigns = Map.put(assigns, :keybindings, Breeze.Docs.BlockPreviews.keybindings())
+
+      ~H"""
+      <.keybinding_bar keybindings={@keybindings}/>
+      """
+    end
+  end
+
+  defmodule TextareaPreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      assigns = Map.put(assigns, :value, "Release notes\n\nAdd theme-aware component previews.")
+
+      ~H"""
+      <.textarea id="preview-textarea" textarea-value={@value} style="width-40 height-6"/>
+      """
+    end
+  end
+
+  defmodule TreePreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      assigns = Map.put(assigns, :nodes, Breeze.Docs.BlockPreviews.tree_nodes())
+
+      ~H"""
+      <.tree
+        id="preview-tree"
+        nodes={@nodes}
+        selected="blocks"
+        expanded={["lib"]}
+        style="width-30 height-9"
+      />
+      """
+    end
   end
 
   defmodule ListPreview do

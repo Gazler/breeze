@@ -19,7 +19,8 @@ defmodule Breeze.Server do
     * `:inspector` - enables inspector support. Defaults to `false`.
       Pass `true` or keyword options such as `:toggle_key`, `:move_key`,
       and `remote: false` to keep inspection local without starting
-      distributed Erlang.
+      distributed Erlang. See `Breeze.Inspector` for the complete feature and
+      option reference.
     * `:logger` - configures Breeze log capture. Pass `:attach` to add a
       handler while preserving existing handlers, `:replace` to temporarily
       silence the default handler, a keyword list with `:mode` and
@@ -96,6 +97,7 @@ defmodule Breeze.Server do
     rendered: %State.Rendered{}
   ]
 
+  @typedoc "A public Breeze server startup option."
   @type option ::
           {:view, module()}
           | {:start_opts, keyword()}
@@ -159,11 +161,6 @@ defmodule Breeze.Server do
     GenServer.start_link(__MODULE__, opts)
   end
 
-  @spec stats(pid()) :: map()
-  def stats(pid) do
-    GenServer.call(pid, :stats)
-  end
-
   @doc false
   def live_snapshot(pid, child_id, opts \\ []) when is_pid(pid) and is_binary(child_id) do
     GenServer.call(pid, {:live_snapshot, child_id, opts})
@@ -186,25 +183,10 @@ defmodule Breeze.Server do
     GenServer.call(pid, :focused_implicit_meta)
   end
 
-  @spec inspector_snapshot(pid()) :: map()
-  def inspector_snapshot(pid) do
-    GenServer.call(pid, :inspector_snapshot)
-  end
-
   @doc false
   @spec inspector_render_tree(pid(), keyword()) :: map()
   def inspector_render_tree(pid, opts \\ []) do
     GenServer.call(pid, {:inspector_render_tree, opts})
-  end
-
-  @spec subscribe_debug(pid(), pid()) :: :ok
-  def subscribe_debug(pid, subscriber) do
-    GenServer.cast(pid, {:subscribe_debug, subscriber})
-  end
-
-  @spec subscribe_inspector(pid(), pid()) :: :ok
-  def subscribe_inspector(pid, subscriber) do
-    GenServer.cast(pid, {:subscribe_inspector, subscriber})
   end
 
   @doc false

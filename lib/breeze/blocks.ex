@@ -10,6 +10,11 @@ defmodule Breeze.Blocks do
         ...
       end
 
+  ## Built-in component previews
+
+  See the [Built-in Components](blocks.html) page for rendered previews and
+  example source for each component.
+
   ## Class merging
 
   All components expose a `class` attribute (and where applicable an
@@ -2202,6 +2207,7 @@ defmodule Breeze.Blocks do
     Enum.join(merged ++ new_tokens, " ")
   end
 
+  @doc "Alias for `merge_class/2`, retained for style-string compatibility."
   @spec merge_style(String.t(), String.t() | nil) :: String.t()
   def merge_style(default, override), do: merge_class(default, override)
 

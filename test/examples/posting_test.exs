@@ -2,6 +2,8 @@ defmodule PostingTest do
   use ExUnit.Case, async: true
   import Breeze.TestSupport.WaitUntil
 
+  alias Breeze.Server.Diagnostics
+
   test "F1 opens help modal and focuses it, Escape closes and restores url focus" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)
@@ -338,7 +340,7 @@ defmodule PostingTest do
       )
 
     assert %{enabled?: false, visible?: false, selected_id: nil} =
-             Breeze.Server.inspector_snapshot(pid)
+             Diagnostics.inspector_snapshot(pid)
 
     send(pid, {reader, {:data, "\eOS"}})
 
@@ -348,7 +350,7 @@ defmodule PostingTest do
     end)
 
     assert %{enabled?: false, visible?: false, selected_id: nil} =
-             Breeze.Server.inspector_snapshot(pid)
+             Diagnostics.inspector_snapshot(pid)
 
     Process.exit(pid, :normal)
   end
@@ -371,6 +373,7 @@ defmodule PostingInspectorTest do
 
   import Breeze.TestSupport.WaitUntil
 
+  alias Breeze.Server.Diagnostics
   alias PostingTest.{FakeAdapter, RecordingAdapter}
 
   test "posting inspector can be toggled and select an element with the mouse" do
@@ -388,11 +391,11 @@ defmodule PostingInspectorTest do
     send(pid, {reader, {:data, "\eOS"}})
 
     wait_until(fn ->
-      snapshot = Breeze.Server.inspector_snapshot(pid)
+      snapshot = Diagnostics.inspector_snapshot(pid)
       snapshot.visible?
     end)
 
-    snapshot = Breeze.Server.inspector_snapshot(pid)
+    snapshot = Diagnostics.inspector_snapshot(pid)
     assert snapshot.enabled?
     assert snapshot.visible?
     assert snapshot.selected_id == "url"
@@ -404,10 +407,10 @@ defmodule PostingInspectorTest do
     send(pid, {reader, {:data, "\e[<0;#{x};#{y}M"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).selected_id == "method"
+      Diagnostics.inspector_snapshot(pid).selected_id == "method"
     end)
 
-    snapshot = Breeze.Server.inspector_snapshot(pid)
+    snapshot = Diagnostics.inspector_snapshot(pid)
     assert snapshot.selected_id == "method"
     assert snapshot.focused == "url"
     assert snapshot.selected.implicit_module == Breeze.Implicit.Dropdown
@@ -431,7 +434,7 @@ defmodule PostingInspectorTest do
     send(pid, {reader, {:data, "\eOS"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).visible?
+      Diagnostics.inspector_snapshot(pid).visible?
     end)
 
     state = :sys.get_state(pid)
@@ -453,10 +456,10 @@ defmodule PostingInspectorTest do
     send(pid, {reader, {:data, "\e[<0;#{x};#{y}M"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).selected_id == selected_id
+      Diagnostics.inspector_snapshot(pid).selected_id == selected_id
     end)
 
-    snapshot = Breeze.Server.inspector_snapshot(pid)
+    snapshot = Diagnostics.inspector_snapshot(pid)
     assert snapshot.selected_id == selected_id
     assert snapshot.selected.actual_id == nil
     assert is_binary(snapshot.selected.fragment_preview)
@@ -492,7 +495,7 @@ defmodule PostingInspectorTest do
     end)
 
     assert Process.alive?(pid)
-    refute Breeze.Server.inspector_snapshot(pid).visible?
+    refute Diagnostics.inspector_snapshot(pid).visible?
 
     Process.exit(pid, :normal)
   end
@@ -512,28 +515,30 @@ defmodule PostingInspectorTest do
     send(pid, {reader, {:data, "\eOS"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).visible?
+      Diagnostics.inspector_snapshot(pid).visible?
     end)
 
-    assert %{panel_position: :bottom, move_key: "PageUp"} = Breeze.Server.inspector_snapshot(pid)
+    assert %{panel_position: :bottom, move_key: "PageUp"} =
+             Diagnostics.inspector_snapshot(pid)
+
     drain_terminal_writes()
 
     send(pid, {reader, {:data, "\e[5~"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).panel_position == :top
+      Diagnostics.inspector_snapshot(pid).panel_position == :top
     end)
 
-    assert %{panel_position: :top} = Breeze.Server.inspector_snapshot(pid)
+    assert %{panel_position: :top} = Diagnostics.inspector_snapshot(pid)
     assert_terminal_repaired_row(24 - Breeze.Inspector.panel_height())
 
     send(pid, {reader, {:data, "\e[5~"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).panel_position == :bottom
+      Diagnostics.inspector_snapshot(pid).panel_position == :bottom
     end)
 
-    assert %{panel_position: :bottom} = Breeze.Server.inspector_snapshot(pid)
+    assert %{panel_position: :bottom} = Diagnostics.inspector_snapshot(pid)
     assert_terminal_repaired_row(0)
 
     Process.exit(pid, :normal)
@@ -554,10 +559,10 @@ defmodule PostingInspectorTest do
     send(pid, {reader, {:data, "\eOS"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).visible?
+      Diagnostics.inspector_snapshot(pid).visible?
     end)
 
-    initial = Breeze.Server.inspector_snapshot(pid)
+    initial = Diagnostics.inspector_snapshot(pid)
     assert initial.selected_id == "url"
 
     bounds = :sys.get_state(pid).rendered.mouse_targets["method"]
@@ -567,11 +572,11 @@ defmodule PostingInspectorTest do
     send(pid, {reader, {:data, "\e[<35;#{x};#{y}M"}})
 
     wait_until(fn ->
-      snapshot = Breeze.Server.inspector_snapshot(pid)
+      snapshot = Diagnostics.inspector_snapshot(pid)
       snapshot.hovered_id == "method"
     end)
 
-    snapshot = Breeze.Server.inspector_snapshot(pid)
+    snapshot = Diagnostics.inspector_snapshot(pid)
     assert snapshot.hovered_id == "method"
     assert snapshot.selected_id == "url"
 
@@ -593,7 +598,7 @@ defmodule PostingInspectorTest do
     send(pid, {reader, {:data, "\eOS"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).visible?
+      Diagnostics.inspector_snapshot(pid).visible?
     end)
 
     bounds = :sys.get_state(pid).rendered.mouse_targets["method"]
@@ -603,7 +608,7 @@ defmodule PostingInspectorTest do
     send(pid, {reader, {:data, "\e[<35;#{x};#{y}M"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).hovered_id == "method"
+      Diagnostics.inspector_snapshot(pid).hovered_id == "method"
     end)
 
     panel_y = terminal.size.height
@@ -613,7 +618,7 @@ defmodule PostingInspectorTest do
 
     Process.sleep(25)
 
-    snapshot = Breeze.Server.inspector_snapshot(pid)
+    snapshot = Diagnostics.inspector_snapshot(pid)
     assert snapshot.hovered_id == "method"
     assert snapshot.selected_id == "url"
 
@@ -635,7 +640,7 @@ defmodule PostingInspectorTest do
     send(pid, {reader, {:data, "\eOS"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).visible?
+      Diagnostics.inspector_snapshot(pid).visible?
     end)
 
     state = :sys.get_state(pid)
@@ -661,22 +666,22 @@ defmodule PostingInspectorTest do
     send(pid, {reader, {:data, "\e[<0;#{x};#{y}M"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).selected_id == "method"
+      Diagnostics.inspector_snapshot(pid).selected_id == "method"
     end)
 
     send(pid, {reader, {:data, "\e[<0;#{x};#{y}M"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).selected_id == parent_id
+      Diagnostics.inspector_snapshot(pid).selected_id == parent_id
     end)
 
     send(pid, {reader, {:data, "\e[<0;#{x};#{y}M"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).selected_id == "method"
+      Diagnostics.inspector_snapshot(pid).selected_id == "method"
     end)
 
-    snapshot = Breeze.Server.inspector_snapshot(pid)
+    snapshot = Diagnostics.inspector_snapshot(pid)
     assert snapshot.selected_id == "method"
     assert snapshot.selected.actual_id == "method"
 
@@ -698,7 +703,7 @@ defmodule PostingInspectorTest do
     send(pid, {reader, {:data, "\eOS"}})
 
     wait_until(fn ->
-      Breeze.Server.inspector_snapshot(pid).visible?
+      Diagnostics.inspector_snapshot(pid).visible?
     end)
 
     bounds = :sys.get_state(pid).rendered.mouse_targets["url"]
@@ -709,11 +714,11 @@ defmodule PostingInspectorTest do
     send(pid, {reader, {:data, "\e[<0;#{x};#{y}m"}})
 
     wait_until(fn ->
-      Process.alive?(pid) and Breeze.Server.inspector_snapshot(pid).visible?
+      Process.alive?(pid) and Diagnostics.inspector_snapshot(pid).visible?
     end)
 
     assert Process.alive?(pid)
-    assert Breeze.Server.inspector_snapshot(pid).visible?
+    assert Diagnostics.inspector_snapshot(pid).visible?
 
     Process.exit(pid, :normal)
   end

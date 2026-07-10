@@ -12,7 +12,7 @@ defmodule Breeze.Debug do
     stats = Keyword.get(opts, :stats, %{})
 
     if term.server do
-      Breeze.Server.subscribe_debug(term.server, self())
+      Breeze.Server.Diagnostics.subscribe_stats(term.server, self())
     end
 
     {:ok,

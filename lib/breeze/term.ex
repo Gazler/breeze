@@ -8,6 +8,7 @@ defmodule Breeze.Term do
   `put_local_keybindings/2`.
   """
 
+  @typedoc "Opaque state passed between Breeze view callbacks."
   @opaque t :: %__MODULE__{}
 
   defstruct [

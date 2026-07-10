@@ -16,6 +16,7 @@ defmodule Breeze.Logger do
   @default_max_lines 200
   @level_order [:debug, :info, :notice, :warning, :error, :critical, :alert, :emergency]
 
+  @impl Breeze.View
   def mount(opts, term) do
     case Breeze.Logger.Collector.subscribe(self()) do
       :ok ->
@@ -43,6 +44,7 @@ defmodule Breeze.Logger do
      )}
   end
 
+  @impl Breeze.View
   def render(assigns) do
     ~H"""
     <box class={["bg overflow-hidden", width_style(@width)]}>
@@ -61,6 +63,7 @@ defmodule Breeze.Logger do
     """
   end
 
+  @impl Breeze.View
   def handle_event(_, %{"key" => key}, %{assigns: %{clear_key: key}} = term)
       when is_binary(key) do
     :ok = Breeze.Logger.Collector.clear()
@@ -69,6 +72,7 @@ defmodule Breeze.Logger do
 
   def handle_event(_, _, term), do: {:noreply, term}
 
+  @impl Breeze.View
   def handle_info({:logger_snapshot, entries}, term) do
     {:noreply, assign(term, lines: filter_entries(entries, term.assigns))}
   end

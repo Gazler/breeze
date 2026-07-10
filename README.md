@@ -1,41 +1,44 @@
 # Breeze
 
-An experimental TUI library with a LiveView-inspired API without using 3rd party
-NIFs.
+Breeze is an experimental TUI library with a LiveView-inspired API, built
+without third-party NIFs.
 
 Breeze is built on top of [Termite](https://github.com/Gazler/termite) and
-[BackBreeze](https://github.com/Gazler/back_breeze)
+[BackBreeze](https://github.com/Gazler/back_breeze).
 
-## Should I use this?
+## Project status
 
-**This library is highly experimental and incomplete. It provides an example of
-how a TUI based on LiveView could work.**
+**Breeze is experimental and still evolving.** It provides a practical
+foundation for building terminal interfaces with familiar LiveView-style
+patterns.
 
-I mainly built it for writing snake, which is in the examples directory.
+The project began as the engine for the Snake game included in the
+[examples directory](https://github.com/Gazler/breeze/tree/master/examples).
 
-## Features:
+## Features
 
-- LiveView style API
-- mount/2
-- handle_event/3
-- function components
-- attributes
-- slots
-- Scrollable viewports via implicit modifiers (`scroll_y`, `scroll_x`, `scroll`)
-- Built-in blocks for common UI patterns (`list`, `dropdown`, `tabs`,
+- LiveView-style API
+- `mount/2`
+- `handle_event/3`
+- Function components
+- Attributes
+- Slots
+- Scrollable viewports through implicit modifiers (`scroll_y`, `scroll_x`,
+  `scroll`)
+- Built-in blocks for common interface patterns (`list`, `dropdown`, `tabs`,
   `markdown`, `scroll`, `panel`, `modal`)
 
-## Does this actually use LiveView?
+## Template runtime
 
-No. Breeze now ships with its own `~H` sigil and template runtime.
+Breeze ships with its own `~H` sigil and template runtime, with no dependency on
+`phoenix_live_view`.
 
-The syntax is intentionally similar to HEEx (`@assigns`, function components,
-slots, `:for`, `:if`), but it does not depend on `phoenix_live_view`.
+Its syntax is intentionally familiar to HEEx users, including `@assigns`,
+function components, slots, `:for`, and `:if`.
 
 ## Installation
 
-Breeze can be installed by adding `breeze` to your list of dependencies in
-`mix.exs`:
+Add `breeze` to the dependencies in `mix.exs`:
 
 ```elixir
 def deps do
@@ -45,11 +48,12 @@ def deps do
 end
 ```
 
-API docs, including previews for the built-in blocks, are published with ExDoc.
+The ExDoc documentation includes API references and previews of the built-in
+blocks.
 
 ## Formatter
 
-Breeze ships with a `mix format` plugin for `~H` templates:
+Breeze includes a `mix format` plugin for `~H` templates:
 
 ```elixir
 # .formatter.exs
@@ -82,9 +86,7 @@ defmodule Demo do
   def render(assigns) do
     ~H"""
     <box style="grid grid-cols-1 grid-rows-2 width-screen height-screen">
-      <box>
-        <box style="text-5 bold">Counter: {@counter}</box>
-      </box>
+      <box style="text-5 bold">Counter: {@counter}</box>
       <box style="height-1 bg-panel overflow-hidden">
         <.keybinding_bar keybindings={@breeze.keybindings}/>
       </box>
@@ -110,11 +112,12 @@ Breeze.Example.run(
 )
 ```
 
-More examples are available in the examples directory.
+Explore more applications in the
+[examples directory](https://github.com/Gazler/breeze/tree/master/examples).
 
 ## SSH
 
-Breeze apps can also be served over SSH. Each connecting client gets its own
+Breeze applications can run over SSH. Each client receives an independent
 terminal session backed by `Termite.SSH`:
 
 ```elixir
@@ -139,19 +142,19 @@ end
 )
 ```
 
-Then connect with a normal SSH client:
+Connect with any standard SSH client:
 
 ```bash
 ssh -p 2222 alice@localhost
 ```
 
-There is also a runnable example:
+Run the included SSH counter example with:
 
 ```bash
 mix run examples/ssh_counter.exs
 ```
 
-For a fuller demo based on the posting example:
+For a more complete demonstration based on the posting example, run:
 
 ```bash
 mix run examples/ssh_posting.exs
@@ -162,7 +165,7 @@ The authenticated username is injected into `mount/2` via `start_opts` as
 
 ## Testing
 
-Breeze ships with `Breeze.Test` for deterministic view tests:
+Use `Breeze.Test` to write deterministic view tests:
 
 ```elixir
 defmodule MyApp.CounterTest do
@@ -180,5 +183,5 @@ defmodule MyApp.CounterTest do
 end
 ```
 
-The rendered content keeps raw terminal escape sequences intact, so projects can
-build their own snapshot assertions on top when needed.
+Rendered content preserves raw terminal escape sequences, making it
+straightforward to add project-specific snapshot assertions.

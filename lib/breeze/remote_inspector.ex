@@ -495,7 +495,7 @@ defmodule Breeze.RemoteInspector.Server do
   end
 
   defp safe_snapshot(pid) do
-    Breeze.Server.inspector_snapshot(pid)
+    Breeze.Server.Diagnostics.inspector_snapshot(pid)
   catch
     :exit, _reason -> nil
   end

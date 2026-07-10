@@ -22,6 +22,7 @@ defmodule Breeze.Storybook do
 
   alias Breeze.Storybook.Registry
 
+  @impl Breeze.View
   def mount(opts, term) do
     story_directory = Keyword.get(opts, :directory, "storybook")
     story_file = Keyword.get(opts, :file)
@@ -45,6 +46,7 @@ defmodule Breeze.Storybook do
      |> sync_storybook_layout()}
   end
 
+  @impl Breeze.View
   def render(assigns) do
     current_story = current_story(assigns)
     current_variant = current_variant(current_story, assigns[:current_variant_id])
@@ -175,6 +177,7 @@ defmodule Breeze.Storybook do
     """
   end
 
+  @impl Breeze.View
   def handle_event("select_story", %{value: story_id}, term) do
     story =
       Registry.story(
@@ -241,6 +244,7 @@ defmodule Breeze.Storybook do
 
   def handle_event(_change, _event, term), do: {:noreply, sync_storybook_layout(term)}
 
+  @impl Breeze.View
   def handle_info(_message, term), do: {:noreply, sync_storybook_layout(term)}
 
   defp current_story(assigns) do

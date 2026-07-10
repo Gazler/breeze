@@ -1,4 +1,17 @@
 defmodule Mix.Tasks.Breeze.Inspector do
+  @moduledoc """
+  Starts the Breeze remote inspector.
+
+  Run the inspector locally:
+
+      mix breeze.inspector
+
+  Pass a distributed Erlang node name with `--connect` to inspect a remote
+  Breeze application:
+
+      mix breeze.inspector --connect app@host
+  """
+
   use Mix.Task
 
   @shortdoc "Starts the Breeze remote inspector"
@@ -20,6 +33,7 @@ defmodule Mix.Tasks.Breeze.Inspector do
     Breeze.Example.run(run_opts())
   end
 
+  @doc false
   def run_opts do
     [
       view: Breeze.RemoteInspector.View,
@@ -31,6 +45,7 @@ defmodule Mix.Tasks.Breeze.Inspector do
     ]
   end
 
+  @doc false
   def normalize_connect_target(target) when is_binary(target) do
     target =
       if String.contains?(target, "@") do
@@ -42,6 +57,7 @@ defmodule Mix.Tasks.Breeze.Inspector do
     String.to_atom(target)
   end
 
+  @doc false
   def distribution_error_message(reason) do
     if distribution_epmd_unavailable?(reason) do
       """

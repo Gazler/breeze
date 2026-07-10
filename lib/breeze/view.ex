@@ -16,7 +16,7 @@ defmodule Breeze.View do
 
   The module can be used by including `use Breeze.View`:
 
-  ```
+  ```elixir
   defmodule Demo do
     use Breeze.View
   end
@@ -30,7 +30,7 @@ defmodule Breeze.View do
 
   The initial state can be set in the mount callback:
 
-  ```
+  ```elixir
   def mount(_opts, term), do: {:ok, assign(term, counter: 0)}
   ```
 
@@ -39,7 +39,7 @@ defmodule Breeze.View do
   Rendering is performed using Breeze's `~H` template sigil.
 
 
-  ```
+  ```elixir
   def render(assigns) do
     ~H"<box>Counter: <%= @counter %></box>"
   end
@@ -64,7 +64,7 @@ defmodule Breeze.View do
   Events that come from the terminal or an implicit are handled in the
   optional `handle_event/3` callback:
 
-  ```
+  ```elixir
   def handle_event(_, %{"key" => "ArrowUp"}, term) do
     {:noreply, assign(term, counter: term.assigns.counter + 1)}
   end
@@ -92,7 +92,7 @@ defmodule Breeze.View do
   Any other messages sent to the process are handled using the optional
   `handle_info/2` callback:
 
-  ```
+  ```elixir
   def handle_info(:some_message, term), do: {:noreply, term}
   ```
 
@@ -109,13 +109,13 @@ defmodule Breeze.View do
 
   A box can be styled similar to CSS using the class attribute:
 
-  ```
+  ```heex
   <box class="bold text-3 border width-15">Hello World</box>
   ```
 
   Inline maps can be used when you want direct `BackBreeze` values:
 
-  ```
+  ```heex
   <box style={%{border: :rounded, border_color: 3, width: 15}}>Hello World</box>
   ```
 
@@ -128,40 +128,81 @@ defmodule Breeze.View do
    * `inverse` - reverse the foreground-background
    * `reverse` - reverse the foreground-background
    * `inline` - display the elements inline (join horizontally)
+   * `grid` - lay out child elements in a grid
+   * `grid-cols-n` - set the number of grid columns
+   * `grid-rows-n` - set the number of grid rows
+   * `gap-x-n` - set the horizontal gap between grid cells
+   * `gap-y-n` - set the vertical gap between grid cells
    * `width-x` - set the width of the element
    * `height-x` - set the height of the element
    * `overflow-hidden` - clip child content to the viewport
    * `offset-top-x` - vertically scroll content by x rows
    * `offset-left-x` - horizontally scroll content by x columns
    * `absolute` - position the elements absolute relative to the parent
-   * `border-x` - set the border color where x is a number
-   * `bg-x` - set the background color where x is a number
-   * `text-x` - set the foreground color where x is a number
+
+  ### Grid layout
+
+  Grid children flow from left to right and then onto the next row. Use
+  `grid-cols-n` and, when a fixed row count is useful, `grid-rows-n` to define
+  the tracks. `gap-x-n` and `gap-y-n` add horizontal and vertical spacing in
+  terminal cells.
+
+  ```heex
+  <box class="grid grid-cols-2 grid-rows-2 gap-x-1 gap-y-1 width-full">
+    <box>One</box>
+    <box>Two</box>
+    <box>Three</box>
+    <box>Four</box>
+  </box>
+  ```
+
+  ### Colors
+
+   * `text` - set the foreground to the theme's default text color
+   * `bg` - set the background to the theme's default background color
+   * `text-x` - set the foreground color
+   * `bg-x` - set the background color
+   * `border-x` - set the border color
+   * `scrollbar-x` - set the scrollbar color
+   * `placeholder-text-x` - set an input placeholder's foreground color
+
+  For the color classes above, `x` can be a numeric ANSI color index or a
+  theme variable such as `primary`, `muted`, or `panel`. See
+  [Breeze.Theme](`m:Breeze.Theme`) for the complete variable reference and
+  custom theme configuration.
+
+  ```heex
+  <box class="bg-panel border-primary text-muted">Status</box>
+  ```
 
   ## Implicits
 
-  Implicits provide a way of adding event handler/state that exists outside of the view
-  these should be abstracted out into their own components.
+  Implicits add stateful event handling outside the view. Implement the
+  [Breeze.Implicit](`m:Breeze.Implicit`) behaviour to package that logic as a
+  reusable renderer extension.
 
   For example, consider a list component:
 
-  ```
+  ```heex
   def render(assigns) do
-  ~H\"\"\"
-  <.list id={id} br-change="my_custom_event">
-  <:item value="hello">Hello</:item>
-  <:item value="world">World</:item>
-  <:item value="foo">Foo</:item>
-  </.list>
-  \"\"\"
+    ~H\"\"\"
+    <.list id="my-list" br-change="my_custom_event">
+      <:item value="hello">Hello</:item>
+      <:item value="world">World</:item>
+      <:item value="foo">Foo</:item>
+    </.list>
+    \"\"\"
+  end
 
   def handle_event("my_custom_event", %{value: value}, term), do: ...
   ```
 
-  Ideally, we don't want to have to keep track of the selected value, handle key events,
-  etc within our view. In our view, we might only care about the selected value. In this case, we can define the list component to use an implicit state module.
+  Ideally, we don't want to have to keep track of the selected value, handle key
+  events, scroll position, viewport overflow, etc. within our view. We might
+  only care about the selected value. In this case, we can define the list
+  component to use an implicit state module.
 
-  ```
+  ```heex
   attr :id, :string, required: true
   attr :rest, :global
 
@@ -171,16 +212,24 @@ defmodule Breeze.View do
 
   def list(assigns) do
     ~H\"\"\"
-    <box focusable class="border focus:border-3" implicit={MyAppList} id={@id} {@rest}>
+    <box
+      id={@id}
+      focusable
+      class="border focus:border-primary"
+      implicit={MyAppList}
+      {@rest}
+    >
       <box
         :for={item <- @item}
         value={item.value}
-        class="selected:bg-24 selected:text-0 focus:selected:text-7 focus:selected:bg-4"
-      ><%= render_slot(item, %{}) %></box>
+        class="selected:bg-primary selected:text-background focus:selected:bg-accent focus:selected:text-background"
+      >
+        {render_slot(item)}
+      </box>
     </box>
     \"\"\"
   end
-    ```
+  ```
 
   The implicit module is first called with an `init/2` callback (or optional `init/3`).
   It receives all child element attributes and the previous state. The `init/3` form
@@ -189,7 +238,7 @@ defmodule Breeze.View do
   `init` can either return the implicit state directly, or `{:ok, state, options}`.
   The options form is used for renderer-driven animation behavior such as periodic rerenders.
 
-  ```
+  ```elixir
   defmodule MyAppList do
     @behaviour Breeze.Implicit
 
@@ -199,7 +248,7 @@ defmodule Breeze.View do
   end
   ```
 
-  ```
+  ```elixir
   def init(_children, _root_attrs, last_state) do
     {:ok, last_state, rerender_every: 500}
   end
@@ -214,7 +263,7 @@ defmodule Breeze.View do
   with the new state. The `:change` will be used by `br-change` to pass through to the handle_event
   callback of the Breeze.View.
 
-  ```
+  ```elixir
   def handle_event(_, %{"key" => "ArrowDown"}, %{values: values} = state) do
     index = Enum.find_index(values, &(&1 == state.selected))
     value = if index, do: Enum.at(values, index + 1) || hd(values), else: hd(values)
@@ -249,7 +298,7 @@ defmodule Breeze.View do
   * `default_focus: true` - mark the root element as the preferred focus target
   * `focus_scope: :trap` - constrain tab/shift-tab navigation to this implicit subtree
 
-  ```
+  ```elixir
   def handle_modifiers(:child, attributes, state) do
     if state.selected == Keyword.get(attributes, :value) do
       [selected: true]
@@ -265,21 +314,38 @@ defmodule Breeze.View do
 
   """
 
+  @typedoc "Assigns passed to a view or function component."
   @type assigns :: map()
+
+  @typedoc "A view event name."
   @type event_name :: term()
+
+  @typedoc "A decoded terminal or implicit event payload."
   @type event :: map()
+
   @typedoc "Compiled template output returned by the `~H` sigil."
   @type rendered :: term()
+
+  @typedoc "An option returned alongside an event or message reply."
   @type reply_option :: {:invalidate, boolean()}
+
+  @typedoc "A valid return value from a view event or message callback."
   @type reply ::
           {:noreply, Breeze.Term.t()}
           | {:noreply, Breeze.Term.t(), [reply_option()]}
           | {:stop, Breeze.Term.t()}
           | {:stop, Breeze.Term.t(), [reply_option()]}
 
+  @doc "Initializes a view with its startup options and term state."
   @callback mount(keyword(), Breeze.Term.t()) :: {:ok, Breeze.Term.t()}
+
+  @doc "Renders a view or component from its assigns."
   @callback render(assigns()) :: rendered()
+
+  @doc "Handles a terminal or implicit event."
   @callback handle_event(event_name(), event(), Breeze.Term.t()) :: reply()
+
+  @doc "Handles a message sent to the view process."
   @callback handle_info(term(), Breeze.Term.t()) :: reply()
 
   @optional_callbacks mount: 2, render: 1, handle_event: 3, handle_info: 2
@@ -300,6 +366,7 @@ defmodule Breeze.View do
     end
   end
 
+  @doc "Compiles a Breeze template from an `~H` sigil."
   defmacro sigil_H({:<<>>, _meta, [source]}, _modifiers) when is_binary(source) do
     unless Macro.Env.has_var?(__CALLER__, {:assigns, nil}) do
       raise "~H requires a variable named \"assigns\" to exist and be set to a map"
@@ -417,24 +484,37 @@ defmodule Breeze.View do
     end
   end
 
+  @doc "Declares an attribute for the next function component."
   defmacro attr(name, type) do
     quote bind_quoted: [name: name, type: type] do
       Breeze.View.__attr__!(__MODULE__, name, type, [], __ENV__.line, __ENV__.file)
     end
   end
 
+  @doc """
+  Declares an attribute for the next function component.
+
+  Options include `:required`, `:default`, and `:doc`.
+  """
   defmacro attr(name, type, opts) do
     quote bind_quoted: [name: name, type: type, opts: opts] do
       Breeze.View.__attr__!(__MODULE__, name, type, opts, __ENV__.line, __ENV__.file)
     end
   end
 
+  @doc "Declares a slot for the next function component."
   defmacro slot(name) do
     quote bind_quoted: [name: name] do
       Breeze.View.__slot__!(__MODULE__, name, [], __ENV__.line, __ENV__.file, fn -> nil end)
     end
   end
 
+  @doc """
+  Declares a slot for the next function component.
+
+  Use a `do` block to declare attributes accepted by each slot entry. Options
+  include `:required` and `:doc`.
+  """
   defmacro slot(name, opts) do
     {block, opts} = Keyword.pop(opts, :do)
 
@@ -870,6 +950,8 @@ defmodule Breeze.View do
     update_flash(term_or_assigns, &Breeze.Flash.expire(&1, id, token))
   end
 
+  @doc "Sets the focused element ID, or clears focus when `value` is `nil`."
+  @spec focus(Breeze.Term.t(), String.t() | nil) :: Breeze.Term.t()
   def focus(term, value) do
     %{term | focused: value, allow_unfocused?: is_nil(value)}
   end
@@ -935,19 +1017,22 @@ defmodule Breeze.View do
     |> put_breeze_theme_metadata(name, opts)
   end
 
-  @doc """
-  Cycle through Breeze's standard theme set.
-
-  This can be used directly as a global keybinding handler:
-
-      global_keybindings: [{"F3", "Cycle theme", &Breeze.View.cycle_theme/2}]
-
-  For custom cycles, pass `:themes` with a list of built-in names or
-  `{name, theme}` tuples.
-  """
-  @spec cycle_theme(map(), keyword()) :: map()
+  @doc "Cycles a term through Breeze's standard theme set."
+  @spec cycle_theme(map()) :: map()
   def cycle_theme(%{theme: _} = term), do: cycle_theme(term, [])
 
+  @doc """
+  Cycles a term through a configurable theme set, or handles a global
+  keybinding event using the standard theme set.
+
+  Pass `:themes` with a list of built-in names or `{name, theme}` tuples to
+  customize the cycle. The event-handler form can be used directly in a global
+  keybinding:
+
+      global_keybindings: [{"F3", "Cycle theme", &Breeze.View.cycle_theme/2}]
+  """
+  @spec cycle_theme(map(), keyword()) :: map()
+  @spec cycle_theme(term(), map()) :: {:noreply, map()}
   def cycle_theme(%{theme: _} = term, opts) when is_list(opts) do
     current = current_theme_name(term, opts)
 
@@ -967,6 +1052,8 @@ defmodule Breeze.View do
 
   def cycle_theme(_event, %{theme: _} = term), do: {:noreply, cycle_theme(term)}
 
+  @doc "Handles a global keybinding event using a configurable theme set."
+  @spec cycle_theme(term(), map(), keyword()) :: {:noreply, map()}
   def cycle_theme(_event, %{theme: _} = term, opts) when is_list(opts),
     do: {:noreply, cycle_theme(term, opts)}
 

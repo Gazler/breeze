@@ -49,6 +49,7 @@ defmodule Breeze.Logger.Collector do
   @doc false
   def configure(config), do: configure(self(), config)
 
+  @doc false
   def configure(owner, config) when is_pid(owner) do
     with {:ok, normalized} <- normalize_config(config) do
       call({:configure, owner, normalized})

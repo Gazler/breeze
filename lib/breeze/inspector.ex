@@ -1,5 +1,71 @@
 defmodule Breeze.Inspector do
-  @moduledoc false
+  @moduledoc """
+  Built-in developer inspector for Breeze applications.
+
+  The inspector captures the rendered element tree and exposes layout, style,
+  focus, implicit state, theme, and fragment information while an application
+  is running.
+
+  ## Enabling the inspector
+
+  Pass `:inspector` when starting a Breeze application:
+
+      Breeze.Server.start_link(
+        view: MyApp.View,
+        inspector: true,
+        mouse: [mode: :motion]
+      )
+
+  The local inspector uses `F4` to toggle its overlay and `PageUp` to move the
+  panel between the bottom and top of the terminal. With mouse tracking
+  enabled, hovering highlights an element and clicking selects it. Repeated
+  clicks cycle through overlapping targets.
+
+  Inspector options can customize the keys or keep snapshots local:
+
+      inspector: [toggle_key: "F9", move_key: "F10", remote: false]
+
+  The supported options are:
+
+    * `:toggle_key` - key used to show or hide the inspector. Defaults to
+      `"F4"`.
+    * `:move_key` - key used to move the local panel. Defaults to `"PageUp"`.
+    * `:remote` - publishes snapshots for the remote inspector. Defaults to
+      `true`.
+
+  ## Available information
+
+  The inspector reports:
+
+    * rendered and source-oriented component trees;
+    * element IDs, component metadata, classes, resolved styles, and colors;
+    * viewport bounds, content dimensions, padding, and scroll offsets;
+    * the active focus scope, focus path, focusable elements, and focus memory;
+    * implicit modules, state, metadata, and capture configuration;
+    * rendered fragment previews, theme details, and application logs.
+
+  ## Remote inspector
+
+  Applications publish inspector snapshots remotely by default. Start the
+  inspector UI in another shell:
+
+      mix breeze.inspector
+
+  To connect to a specific distributed Erlang node, pass its name:
+
+      mix breeze.inspector --connect app@host
+
+  When remote inspection is enabled and `:logger` is not configured explicitly,
+  Breeze attaches its log collector so the remote inspector can display
+  application logs without replacing existing handlers.
+
+  ## Programmatic access
+
+  Use `Breeze.Server.Diagnostics.inspector_snapshot/1` to read the latest
+  snapshot or `Breeze.Server.Diagnostics.subscribe_inspector/2` to receive
+  updates. The functions in this module operate on internal server state and
+  are not part of the public inspector API.
+  """
 
   alias Breeze.Viewport
 
@@ -7,10 +73,13 @@ defmodule Breeze.Inspector do
   @max_preview_lines 2
   @max_render_preview_lines 3
 
+  @doc false
   def panel_height, do: @panel_height
 
+  @doc false
   def enabled?(state), do: config_source(state) not in [false, nil]
 
+  @doc false
   def config(state) do
     case config_source(state) do
       config when is_list(config) -> config
@@ -19,17 +88,25 @@ defmodule Breeze.Inspector do
     end
   end
 
+  @doc false
   def toggle_key(state), do: Keyword.get(config(state), :toggle_key, "F4")
+
+  @doc false
   def move_key(state), do: Keyword.get(config(state), :move_key, "PageUp")
+
+  @doc false
   def remote?(state), do: Keyword.get(config(state), :remote, true)
 
+  @doc false
   def panel_position(state),
     do: inspector_field(state, :panel_position, :inspector_panel_position, :bottom)
 
+  @doc false
   def picks_mouse?(state) do
     enabled?(state) and inspector_field(state, :visible?, :inspector_visible?, false)
   end
 
+  @doc false
   def toggle(state) do
     visible? = not inspector_field(state, :visible?, :inspector_visible?, false)
 
@@ -44,6 +121,7 @@ defmodule Breeze.Inspector do
     |> sync_selected_id()
   end
 
+  @doc false
   def toggle_position(state) do
     next_position =
       case panel_position(state) do
@@ -54,6 +132,7 @@ defmodule Breeze.Inspector do
     put_inspector_field(state, :panel_position, :inspector_panel_position, next_position)
   end
 
+  @doc false
   def hover_at(state, %{x: x, y: y}) do
     if inside_panel?(state, x, y) do
       state
@@ -67,6 +146,7 @@ defmodule Breeze.Inspector do
     end
   end
 
+  @doc false
   def select_at(state, %{x: x, y: y}) do
     if inside_panel?(state, x, y) do
       state
@@ -89,6 +169,7 @@ defmodule Breeze.Inspector do
     end
   end
 
+  @doc false
   def sync_selected_id(state) do
     selected_id =
       case inspector_field(state, :selected_id, :inspector_selected_id) do
@@ -102,6 +183,7 @@ defmodule Breeze.Inspector do
     put_inspector_field(state, :selected_id, :inspector_selected_id, selected_id)
   end
 
+  @doc false
   def snapshot(state) do
     state = sync_selected_id(state)
     screen = Map.get(state.terminal, :size, %{width: 0, height: 0})
@@ -147,6 +229,7 @@ defmodule Breeze.Inspector do
     }
   end
 
+  @doc false
   def render_tree(state, opts \\ []) do
     tree = rendered_field(state, :render_tree, :rendered_render_tree)
     kind = normalize_render_tree_kind(Keyword.get(opts, :kind, :rendered))
@@ -176,6 +259,7 @@ defmodule Breeze.Inspector do
     }
   end
 
+  @doc false
   def overlays(state) do
     snapshot = snapshot(state)
 

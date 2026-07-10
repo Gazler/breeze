@@ -6,6 +6,7 @@ defmodule Breeze.Viewport do
   `"element"` key.
   """
 
+  @typedoc "Dimensions and scroll metrics for a rendered viewport."
   @type t :: %__MODULE__{
           left: integer(),
           top: integer(),
@@ -26,6 +27,7 @@ defmodule Breeze.Viewport do
             content_width: nil,
             content_height: 0
 
+  @doc "Builds viewport metrics from a dimensions map."
   @spec from_dimensions(map() | nil) :: t()
   def from_dimensions(nil), do: %__MODULE__{}
 
@@ -65,24 +67,33 @@ defmodule Breeze.Viewport do
     }
   end
 
+  @doc "Returns the largest valid vertical scroll offset."
   @spec max_scroll_y(t() | map()) :: non_neg_integer()
   def max_scroll_y(viewport), do: viewport |> to_viewport() |> do_max_scroll_y()
 
+  @doc "Returns the largest valid horizontal scroll offset."
   @spec max_scroll_x(t() | map()) :: non_neg_integer()
   def max_scroll_x(viewport), do: viewport |> to_viewport() |> do_max_scroll_x()
 
+  @doc "Clamps a vertical scroll offset to the viewport's valid range."
   @spec clamp_scroll_y(integer(), t() | map()) :: non_neg_integer()
   def clamp_scroll_y(scroll_y, viewport) when is_integer(scroll_y) do
     viewport = to_viewport(viewport)
     clamp(scroll_y, 0, do_max_scroll_y(viewport))
   end
 
+  @doc "Clamps a horizontal scroll offset to the viewport's valid range."
   @spec clamp_scroll_x(integer(), t() | map()) :: non_neg_integer()
   def clamp_scroll_x(scroll_x, viewport) when is_integer(scroll_x) do
     viewport = to_viewport(viewport)
     clamp(scroll_x, 0, do_max_scroll_x(viewport))
   end
 
+  @doc """
+  Returns the vertical scroll offset needed to reveal a range of rows.
+
+  Set `:padding` to keep additional rows visible above and below the range.
+  """
   @spec ensure_range_visible(integer(), integer(), integer(), t() | map(), keyword()) ::
           non_neg_integer()
   def ensure_range_visible(scroll_y, first_row, last_row, viewport, opts \\ [])
@@ -108,6 +119,7 @@ defmodule Breeze.Viewport do
     clamp_scroll_y(next_scroll, viewport)
   end
 
+  @doc "Returns the vertical scroll offset needed to reveal a row."
   @spec ensure_row_visible(integer(), integer(), t() | map(), keyword()) :: non_neg_integer()
   def ensure_row_visible(scroll_y, row, viewport, opts \\ [])
       when is_integer(scroll_y) and is_integer(row) do
