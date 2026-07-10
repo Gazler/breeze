@@ -185,7 +185,9 @@ defmodule Breeze.Implicit.Tree do
   defp child_modifiers(_flags_tuple, _flags, _state), do: []
 
   defp rows_from_attrs(%{:"tree-rows" => rows}, _children) when is_list(rows) and rows != [] do
-    Enum.map(rows, &row_from_attrs/1)
+    rows
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(&row_from_attrs/1)
   end
 
   defp rows_from_attrs(_root_attrs, children) do

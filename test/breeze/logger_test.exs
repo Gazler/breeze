@@ -223,7 +223,7 @@ defmodule Breeze.LoggerTest do
     assert box.content =~ third
   end
 
-  test "logger height applies to the scroll viewport" do
+  test "logger height applies to the whole component" do
     {acc, box} =
       Renderer.render(
         Breeze.Logger,
@@ -239,8 +239,54 @@ defmodule Breeze.LoggerTest do
         implicit_state: %{}
       )
 
-    assert logger_viewport(acc).style.height == 6
-    assert box.height == 8
+    assert logger_viewport(acc).style.height == 4
+    assert box.height == 6
+  end
+
+  test "logger full height uses the terminal height" do
+    {acc, box} =
+      Renderer.render(
+        Breeze.Logger,
+        %{
+          title: "Logs",
+          helper_text: "Help",
+          min_level: :debug,
+          width: 40,
+          height: :full,
+          terminal_height: 12,
+          lines: []
+        },
+        focused: "logger",
+        implicit_state: %{}
+      )
+
+    assert logger_viewport(acc).style.height == 10
+    assert box.height == 12
+  end
+
+  test "logger wraps long lines to the available width" do
+    lines = [
+      %{level: :info, line: "alpha beta gamma delta", style: "text-6"}
+    ]
+
+    {_acc, box} =
+      Renderer.render(
+        Breeze.Logger,
+        %{
+          title: "Logs",
+          helper_text: "Help",
+          min_level: :debug,
+          width: 12,
+          height: 8,
+          lines: lines
+        },
+        focused: "logger",
+        implicit_state: %{}
+      )
+
+    assert box.content =~ "alpha beta"
+    assert box.content =~ "gamma"
+    assert box.content =~ "delta"
   end
 
   test "logger view applies scroll offsets from the scroll implicit" do
@@ -278,7 +324,7 @@ defmodule Breeze.LoggerTest do
              ChildServer.dispatch_event(pid, :ignore_me, %{"key" => "k"})
 
     {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
-    assert logger_viewport(acc).scroll == {15, 0}
+    assert logger_viewport(acc).scroll == {17, 0}
   end
 
   @tag capture_log: true

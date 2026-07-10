@@ -43,7 +43,7 @@ Add `breeze` to the dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:breeze, "~> 0.3.0"}
+    {:breeze, "~> 0.4.0"}
   ]
 end
 ```
@@ -67,7 +67,7 @@ Breeze includes a `mix format` plugin for `~H` templates:
 ## Examples
 
 ```elixir
-Mix.install([{:breeze, "~> 0.3.0"}])
+Mix.install([{:breeze, "~> 0.4.0"}])
 
 defmodule Demo do
   use Breeze.View

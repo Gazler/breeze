@@ -40,14 +40,22 @@ defmodule Breeze.Logger do
            Keyword.get(opts, :clear_key, "c")
          ),
        max_lines: Keyword.get(opts, :max_lines, @default_max_lines),
+       terminal_width: terminal_width(term),
+       terminal_height: terminal_height(term),
        lines: []
      )}
   end
 
   @impl Breeze.View
   def render(assigns) do
+    assigns =
+      assign(assigns,
+        scroll_height: scroll_height(assigns),
+        display_lines: display_lines(assigns)
+      )
+
     ~H"""
-    <box class={["bg overflow-hidden", width_style(@width)]}>
+    <box class={["bg overflow-hidden", width_style(@width), height_style(@height, assigns)]}>
       <box class="bg bold width-full">{@title}</box>
       <box class="bg width-full">{@helper_text}</box>
       <box
@@ -55,9 +63,9 @@ defmodule Breeze.Logger do
         focusable
         implicit={Breeze.Implicit.Scroll}
         scroll-autoscroll="bottom"
-        class={"bg border-rounded width-full overflow-scroll scrollbar-arrows focus:border-4 #{height_style(@height)}"}
+        class={"bg border-rounded width-full overflow-scroll scrollbar-arrows focus:border-4 height-#{@scroll_height}"}
       >
-        <box :for={entry <- @lines} style={entry.style}>{entry.line}</box>
+        <box :for={entry <- @display_lines} style={entry.style}>{entry.line}</box>
       </box>
     </box>
     """
@@ -79,6 +87,14 @@ defmodule Breeze.Logger do
 
   def handle_info({:logger_entry, entry}, term) do
     {:noreply, assign(term, lines: append_entry(term.assigns.lines, entry, term.assigns))}
+  end
+
+  def handle_info(:resize, term) do
+    {:noreply,
+     assign(term,
+       terminal_width: terminal_width(term),
+       terminal_height: terminal_height(term)
+     )}
   end
 
   def handle_info(_, term), do: {:noreply, term}
@@ -114,9 +130,98 @@ defmodule Breeze.Logger do
   defp width_style("screen"), do: "width-screen"
   defp width_style(width), do: "width-#{width}"
 
-  defp height_style(:full), do: "height-full"
-  defp height_style("full"), do: "height-full"
-  defp height_style(height), do: "height-#{height}"
+  defp height_style(:full, assigns), do: "height-#{total_height(:full, assigns)}"
+  defp height_style("full", assigns), do: "height-#{total_height("full", assigns)}"
+  defp height_style(height, _assigns), do: "height-#{height}"
+
+  defp scroll_height(%{height: height} = assigns), do: max(total_height(height, assigns) - 2, 1)
+
+  defp total_height(:full, assigns), do: Map.get(assigns, :terminal_height, 24)
+  defp total_height("full", assigns), do: Map.get(assigns, :terminal_height, 24)
+  defp total_height(height, _assigns) when is_integer(height), do: height
+
+  defp display_lines(assigns) do
+    width = log_line_width(assigns)
+
+    Enum.flat_map(assigns.lines, fn entry ->
+      entry.line
+      |> wrap_line(width)
+      |> Enum.map(&%{entry | line: &1})
+    end)
+  end
+
+  defp log_line_width(%{width: width} = assigns) do
+    width
+    |> total_width(assigns)
+    |> Kernel.-(2)
+    |> max(1)
+  end
+
+  defp total_width(:screen, assigns), do: Map.get(assigns, :terminal_width, 80)
+  defp total_width("screen", assigns), do: Map.get(assigns, :terminal_width, 80)
+  defp total_width(width, _assigns) when is_integer(width), do: width
+
+  defp wrap_line(line, width) when width <= 1, do: [String.slice(to_string(line), 0, 1)]
+
+  defp wrap_line(line, width) do
+    line = to_string(line)
+
+    cond do
+      line == "" ->
+        [""]
+
+      String.length(line) <= width ->
+        [line]
+
+      true ->
+        {chunk, rest} = split_line(line, width)
+        [chunk | wrap_line(rest, width)]
+    end
+  end
+
+  defp split_line(line, width) do
+    segment = String.slice(line, 0, width)
+
+    split_at =
+      if whitespace?(String.at(line, width)) do
+        width
+      else
+        segment
+        |> String.graphemes()
+        |> Enum.with_index()
+        |> Enum.reduce(nil, fn
+          {" ", index}, _last -> index
+          {"\t", index}, _last -> index
+          {_grapheme, _index}, last -> last
+        end)
+      end
+
+    split_at =
+      case split_at do
+        nil -> width
+        0 -> width
+        index -> index
+      end
+
+    chunk = String.slice(line, 0, split_at)
+
+    rest =
+      line
+      |> String.slice(split_at, String.length(line) - split_at)
+      |> String.trim_leading()
+
+    {chunk, rest}
+  end
+
+  defp whitespace?(value), do: value in [" ", "\t"]
+
+  defp terminal_width(%{terminal: %{size: %{width: width}}}) when is_integer(width), do: width
+  defp terminal_width(_term), do: 80
+
+  defp terminal_height(%{terminal: %{size: %{height: height}}}) when is_integer(height),
+    do: height
+
+  defp terminal_height(_term), do: 24
 
   defp level_style(:debug), do: "text-8"
   defp level_style(:info), do: "text-6"

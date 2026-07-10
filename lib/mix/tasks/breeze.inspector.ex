@@ -19,7 +19,8 @@ defmodule Mix.Tasks.Breeze.Inspector do
 
   @impl true
   def run(args) do
-    Mix.Task.run("app.start")
+    Mix.Task.run("compile")
+    {:ok, _started} = Application.ensure_all_started(:breeze)
 
     ensure_distribution!()
 

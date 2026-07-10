@@ -1,7 +1,7 @@
 defmodule Breeze.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.4.0"
 
   def project do
     [
@@ -42,7 +42,9 @@ defmodule Breeze.MixProject do
       {:back_breeze, "~> 0.4.1"},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
       {:telemetry, "~> 1.0"},
-      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false},
+      {:makeup_eex, "~> 2.0", only: :dev, runtime: false},
+      {:makeup_html, "~> 0.2.0", only: :dev, runtime: false}
     ]
   end
 
@@ -56,7 +58,13 @@ defmodule Breeze.MixProject do
     [
       main: "readme",
       assets: %{"doc_src/assets" => "assets"},
-      extras: ["README.md", "doc_src/generated/blocks.md"],
+      extras: [
+        "README.md",
+        "doc_src/guides/simple_app.md",
+        "doc_src/guides/debugging.md",
+        "doc_src/guides/persistent_multi_instance.md",
+        "doc_src/generated/blocks.md"
+      ],
       source_ref: "v#{@version}",
       before_closing_head_tag: &before_closing_head_tag/1,
       before_closing_body_tag: &before_closing_body_tag/1,
@@ -87,7 +95,12 @@ defmodule Breeze.MixProject do
         Tooling: [Breeze.HTMLFormatter]
       ],
       groups_for_extras: [
-        Guides: ["README.md"],
+        Guides: [
+          "README.md",
+          "doc_src/guides/simple_app.md",
+          "doc_src/guides/debugging.md",
+          "doc_src/guides/persistent_multi_instance.md"
+        ],
         Components: ["doc_src/generated/blocks.md"]
       ]
     ]
@@ -107,6 +120,7 @@ defmodule Breeze.MixProject do
 
   defp generate_docs(args) do
     Mix.Task.run("compile")
+    register_heex_highlighter()
 
     assets_path = Path.expand("doc_support/docs_assets.ex", __DIR__)
     generator_path = Path.expand("doc_support/block_previews.ex", __DIR__)
@@ -119,5 +133,11 @@ defmodule Breeze.MixProject do
     Mix.shell().info("Generated #{Path.relative_to_cwd(apply(generator, :output_path, []))}")
 
     Mix.Tasks.Docs.run(args, Mix.Project.config(), &ExDoc.generate/4)
+  end
+
+  defp register_heex_highlighter do
+    Application.ensure_all_started(:makeup_html)
+    Application.ensure_all_started(:makeup_eex)
+    Makeup.Lexers.ElixirLexer.register_sigil_lexer("H", Makeup.Lexers.HEExLexer)
   end
 end
