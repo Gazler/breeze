@@ -1,8 +1,11 @@
-defmodule Breeze.DocsAssets do
+defmodule Breeze.Docs.Assets do
   @moduledoc false
 
   def head_html do
     """
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cascadia+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
     <style>
       .breeze-ansi-preview {
         overflow-x: auto;
@@ -11,7 +14,7 @@ defmodule Breeze.DocsAssets do
         margin-bottom: var(--tabsetPadding);
         background: #282828;
         color: #ebdbb2;
-        font-family: monospace;
+        font-family: "Cascadia Mono", monospace;
         font-size: 0.875rem;
         line-height: 1;
         white-space: pre;

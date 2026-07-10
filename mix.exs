@@ -68,13 +68,13 @@ defmodule Breeze.MixProject do
   end
 
   defp before_closing_head_tag(:html) do
-    Breeze.DocsAssets.head_html()
+    Breeze.Docs.Assets.head_html()
   end
 
   defp before_closing_head_tag(_), do: ""
 
   defp before_closing_body_tag(:html) do
-    Breeze.DocsAssets.body_html()
+    Breeze.Docs.Assets.body_html()
   end
 
   defp before_closing_body_tag(_), do: ""
@@ -82,7 +82,9 @@ defmodule Breeze.MixProject do
   defp generate_docs(args) do
     Mix.Task.run("compile")
 
-    generator_path = Path.expand("doc_support/block_previews.ex", File.cwd!())
+    assets_path = Path.expand("doc_support/docs_assets.ex", __DIR__)
+    generator_path = Path.expand("doc_support/block_previews.ex", __DIR__)
+    Code.require_file(assets_path)
     Code.require_file(generator_path)
 
     generator = Module.concat([Breeze, Docs, BlockPreviews])
