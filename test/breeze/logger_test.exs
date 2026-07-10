@@ -79,6 +79,36 @@ defmodule Breeze.LoggerTest do
     assert after_config == before_config
   end
 
+  test "Breeze.IO.inspect pretty-prints through the logger and returns its input" do
+    value = %{alpha: Enum.to_list(1..5), beta: %{enabled: true}}
+
+    assert Breeze.IO.inspect(value, label: "state", width: 20) == value
+
+    wait_until(fn ->
+      Enum.any?(Breeze.Logger.Collector.entries(), fn entry ->
+        plain = BackBreeze.Utils.strip_escape_chars(entry.line)
+        entry.level == :info and plain =~ "state: %{\n" and plain =~ "alpha: ["
+      end)
+    end)
+
+    entry =
+      Enum.find(Breeze.Logger.Collector.entries(), fn entry ->
+        BackBreeze.Utils.strip_escape_chars(entry.line) =~ "state: %{\n"
+      end)
+
+    assert entry.line =~ "\e["
+  end
+
+  test "Breeze.IO.puts routes output through the logger" do
+    assert :ok = Breeze.IO.puts(["logger", " ", "output"])
+
+    wait_until(fn ->
+      Enum.any?(Breeze.Logger.Collector.entries(), fn entry ->
+        entry.level == :info and entry.line =~ "logger output"
+      end)
+    end)
+  end
+
   test "replace capture restores the exact default handler configuration" do
     assert {:ok, original_config} = :logger.get_handler_config(:default)
 

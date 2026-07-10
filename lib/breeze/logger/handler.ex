@@ -4,7 +4,7 @@ defmodule Breeze.Logger.Handler do
   @behaviour :logger_handler
 
   @handler_id :breeze_logger
-  @formatter_config %{single_line: true}
+  @formatter_config %{single_line: false, template: [:msg]}
 
   def handler_id, do: @handler_id
 

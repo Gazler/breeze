@@ -3,8 +3,9 @@ require Logger
 defmodule LoggerExample do
   use Breeze.View
   import Breeze.Blocks
+  alias Breeze.IO
 
-  @levels [:debug, :info, :notice, :warning, :error]
+  @calls [:puts, :inspect, :debug, :info, :notice, :warning, :error]
 
   def mount(_opts, term) do
     send(self(), :emit_log)
@@ -22,7 +23,9 @@ defmodule LoggerExample do
         <box class="width-full bold text-primary">Logger inspector example</box>
         <box class="width-full">
         </box>
-        <box class="width-full">This application emits a log every second.</box>
+        <box class="width-full">This application emits output every second.</box>
+        <box class="width-full">It rotates through Logger, IO.puts, and IO.inspect calls.</box>
+        <box class="width-full">IO.inspect uses IEx-style pretty printing and syntax colors.</box>
         <box class="width-full">Press l to emit another entry immediately.</box>
         <box class="width-full">
         </box>
@@ -36,7 +39,7 @@ defmodule LoggerExample do
           <box>{@log_count}</box>
         </box>
         <box class="inline width-full">
-          <box class="width-14 text-muted">last level</box>
+          <box class="width-14 text-muted">last call</box>
           <box>{@last_level}</box>
         </box>
       </box>
@@ -76,10 +79,24 @@ defmodule LoggerExample do
 
   defp emit_log(term) do
     count = term.assigns.log_count + 1
-    level = Enum.at(@levels, rem(count - 1, length(@levels)))
+    call = Enum.at(@calls, rem(count - 1, length(@calls)))
 
-    Logger.log(level, "logger inspector example level=#{level} entry=#{count}")
-    assign(term, log_count: count, last_level: to_string(level))
+    case call do
+      :puts ->
+        IO.puts("Breeze.IO.puts example entry=#{count}")
+
+      :inspect ->
+        IO.inspect(
+          %{entry: count, source: __MODULE__, values: Enum.to_list(1..5)},
+          label: "Breeze.IO.inspect example",
+          width: 32
+        )
+
+      level ->
+        Logger.log(level, "Logger example level=#{level} entry=#{count}")
+    end
+
+    assign(term, log_count: count, last_level: to_string(call))
   end
 end
 
