@@ -181,11 +181,11 @@ defmodule Breeze.Theme.Probe do
   end
 
   defp palette_query_sequence do
-    foreground_background = ["\e]10;?\a", "\e]11;?\a"]
+    foreground_background = ["\e]10;?\e\\", "\e]11;?\e\\"]
 
     indexed =
       Enum.map(@required_palette_indexes, fn index ->
-        ["\e]4;", Integer.to_string(index), ";?\a"]
+        ["\e]4;", Integer.to_string(index), ";?\e\\"]
       end)
 
     IO.iodata_to_binary(foreground_background ++ indexed)

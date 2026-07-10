@@ -6,6 +6,8 @@ defmodule Breeze.InputRouter do
   alias Breeze.InputRouter.{IExShellProxy, SilentGroupLeader, TerminalStart}
   alias Breeze.InputCapture
 
+  @theme_probe_drain_timeout_ms 1_000
+
   defstruct [
     :terminal,
     :reader,
@@ -109,12 +111,26 @@ defmodule Breeze.InputRouter do
   end
 
   def handle_info(
-        {:theme_probe_timeout, key},
-        %{theme_probe: %{key: key, palette: palette}} = state
+        {:theme_probe_timeout, key, ref},
+        %{theme_probe: %{key: key, ref: ref, status: :active} = probe} = state
       ) do
-    Breeze.Theme.finish_runtime_palette_probe(state.terminal, palette)
+    {:noreply, start_theme_probe_drain(state, probe)}
+  end
+
+  def handle_info({:theme_probe_timeout, _key, _ref}, state), do: {:noreply, state}
+
+  def handle_info(
+        {:theme_probe_drain_timeout, key, ref},
+        %{theme_probe: %{key: key, ref: ref, status: :draining} = probe} = state
+      ) do
+    unless Map.get(probe, :finished?, false) do
+      Breeze.Theme.finish_runtime_palette_probe(state.terminal, probe.palette)
+    end
+
     {:noreply, %{state | theme_probe: nil}}
   end
+
+  def handle_info({:theme_probe_drain_timeout, _key, _ref}, state), do: {:noreply, state}
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{server_pid: pid} = state) do
     stop(state)
@@ -163,8 +179,21 @@ defmodule Breeze.InputRouter do
   end
 
   defp theme_probe_reply?(state, data) do
-    is_map(state.theme_probe) and is_binary(data) and String.starts_with?(data, "\e]")
+    is_map(state.theme_probe) and
+      theme_probe_data?(state.theme_probe.buffer, data)
   end
+
+  defp theme_probe_data?(buffer, data) when is_binary(data) do
+    String.starts_with?(data, "\e]") or incomplete_theme_probe_reply?(buffer)
+  end
+
+  defp theme_probe_data?(_buffer, _data), do: false
+
+  defp incomplete_theme_probe_reply?(buffer) when is_binary(buffer) do
+    :binary.match(buffer, "\e]") != :nomatch
+  end
+
+  defp incomplete_theme_probe_reply?(_buffer), do: false
 
   defp stop_decoded_input?({:key, key}, state), do: stop_global_key?(key, state)
   defp stop_decoded_input?(_decoded, _state), do: false
@@ -192,26 +221,37 @@ defmodule Breeze.InputRouter do
     :exit, _reason -> false
   end
 
-  defp maybe_start_theme_probe(%{theme_probe: probe} = state, _theme) when is_map(probe),
+  defp maybe_start_theme_probe(%{theme_probe: %{status: :active}} = state, _theme),
     do: state
 
   defp maybe_start_theme_probe(state, theme) do
     if requested_system_theme?(theme) do
       case Breeze.Theme.start_runtime_palette_probe(state.terminal) do
         {:start, key, query} ->
+          cancel_theme_probe_timer(state.theme_probe)
+
+          ref = make_ref()
           terminal = Termite.Terminal.write(state.terminal, query)
 
           timer =
             Process.send_after(
               self(),
-              {:theme_probe_timeout, key},
+              {:theme_probe_timeout, key, ref},
               Breeze.Theme.runtime_palette_probe_timeout_ms()
             )
 
           %{
             state
             | terminal: terminal,
-              theme_probe: %{key: key, buffer: "", palette: %{}, timer: timer}
+              theme_probe: %{
+                key: key,
+                ref: ref,
+                buffer: "",
+                palette: %{},
+                timer: timer,
+                status: :active,
+                finished?: false
+              }
           }
 
         _ ->
@@ -229,14 +269,36 @@ defmodule Breeze.InputRouter do
 
     probe = %{probe | palette: palette, buffer: buffer}
 
-    if Breeze.Theme.runtime_palette_probe_complete?(palette) do
-      Process.cancel_timer(probe.timer)
-      Breeze.Theme.finish_runtime_palette_probe(state.terminal, palette)
-      %{state | theme_probe: nil}
-    else
-      %{state | theme_probe: probe}
+    cond do
+      Breeze.Theme.runtime_palette_probe_complete?(palette) and
+          not Map.get(probe, :finished?, false) ->
+        Breeze.Theme.finish_runtime_palette_probe(state.terminal, palette)
+        start_theme_probe_drain(state, %{probe | finished?: true})
+
+      true ->
+        %{state | theme_probe: probe}
     end
   end
+
+  defp start_theme_probe_drain(state, probe) do
+    cancel_theme_probe_timer(probe)
+
+    timer =
+      Process.send_after(
+        self(),
+        {:theme_probe_drain_timeout, probe.key, probe.ref},
+        @theme_probe_drain_timeout_ms
+      )
+
+    %{state | theme_probe: %{probe | status: :draining, timer: timer}}
+  end
+
+  defp cancel_theme_probe_timer(%{timer: timer}) when is_reference(timer) do
+    Process.cancel_timer(timer)
+    :ok
+  end
+
+  defp cancel_theme_probe_timer(_probe), do: :ok
 
   defp maybe_complete_initial_theme_probe(terminal, theme) do
     if requested_system_theme?(theme) do
@@ -273,7 +335,7 @@ defmodule Breeze.InputRouter do
 
       receive do
         {^reader, {:data, data}} = message when is_binary(data) ->
-          if String.starts_with?(data, "\e]") do
+          if theme_probe_data?(buffer, data) do
             {palette, buffer} = Breeze.Theme.merge_runtime_palette_data(buffer, palette, data)
 
             collect_initial_theme_probe_replies(
@@ -367,13 +429,35 @@ defmodule Breeze.InputRouter do
     try do
       Process.group_leader(self(), silent_group_leader)
 
+      terminal = Termite.Terminal.start(terminal_opts)
+      maybe_restore_target_shell_input_mode(terminal, original_group_leader)
+
       %TerminalStart{
-        terminal: Termite.Terminal.start(terminal_opts),
+        terminal: terminal,
         silent_group_leader: silent_group_leader
       }
     after
       Process.group_leader(self(), original_group_leader)
     end
+  end
+
+  defp maybe_restore_target_shell_input_mode(
+         %Termite.Terminal{adapter: {Termite.Terminal.Shell, _shell}},
+         group_leader
+       )
+       when node(group_leader) != node() do
+    set_target_shell_input_mode(:cooked)
+  end
+
+  defp maybe_restore_target_shell_input_mode(_terminal, _group_leader), do: :ok
+
+  defp set_target_shell_input_mode(mode) when mode in [:raw, :cooked] do
+    case :shell.start_interactive({:noshell, mode}) do
+      :ok -> :ok
+      {:error, _reason} -> :ok
+    end
+  catch
+    _kind, _reason -> :ok
   end
 
   defp maybe_replace_iex_shell_reader(

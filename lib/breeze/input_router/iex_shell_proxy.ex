@@ -1,28 +1,36 @@
 defmodule Breeze.InputRouter.IExShellProxy do
   @moduledoc false
 
-  def start_link(target) do
-    previous_group_leader = Process.group_leader()
+  def start_link(target, opts \\ []) do
+    previous_group_leader = Keyword.get(opts, :group_leader, Process.group_leader())
+    input_mode_fun = Keyword.get(opts, :input_mode_fun, &set_input_mode/2)
 
-    with {:ok, user_drv, previous_group, reader} <- start_reader(target) do
+    with {:ok, user_drv, previous_group, reader} <-
+           start_reader(target, previous_group_leader, opts) do
       {:ok,
        %{
          pid: reader,
          user_drv: user_drv,
          previous_group: previous_group,
-         previous_group_leader: previous_group_leader
+         previous_group_leader: previous_group_leader,
+         input_mode_fun: input_mode_fun
        }}
     end
   end
 
   def stop(nil), do: :ok
 
-  def stop(%{
-        pid: pid,
-        user_drv: user_drv,
-        previous_group: previous_group,
-        previous_group_leader: previous_group_leader
-      }) do
+  def stop(%{} = proxy) do
+    %{
+      pid: pid,
+      user_drv: user_drv,
+      previous_group: previous_group,
+      previous_group_leader: previous_group_leader
+    } = proxy
+
+    input_mode_fun = Map.get(proxy, :input_mode_fun, &set_input_mode/2)
+
+    restore_input_mode(user_drv, input_mode_fun)
     restore_user_drv_group(user_drv, previous_group)
     restore_process_group_leader(previous_group_leader)
     stop_proxy(pid)
@@ -30,9 +38,13 @@ defmodule Breeze.InputRouter.IExShellProxy do
     :ok
   end
 
-  defp start_reader(target) do
-    with user_drv when is_pid(user_drv) <- Process.whereis(:user_drv),
-         {:ok, previous_group, _user_group} <- current_user_drv_groups(user_drv) do
+  defp start_reader(target, group_leader, opts) do
+    user_drv_lookup = Keyword.get(opts, :user_drv_lookup, &user_drv_on_node/1)
+    input_mode_fun = Keyword.get(opts, :input_mode_fun, &set_input_mode/2)
+
+    with user_drv when is_pid(user_drv) <- user_drv_lookup.(node(group_leader)),
+         {:ok, previous_group, _user_group} <- current_user_drv_groups(user_drv),
+         :ok <- input_mode_fun.(node(user_drv), :raw) do
       proxy = spawn_link(fn -> proxy_loop(target, user_drv, %{}) end)
       set_user_drv_group(user_drv, proxy)
       Process.group_leader(self(), proxy)
@@ -43,6 +55,14 @@ defmodule Breeze.InputRouter.IExShellProxy do
     end
   catch
     _kind, _reason -> :error
+  end
+
+  defp user_drv_on_node(target_node) when target_node == node(), do: Process.whereis(:user_drv)
+
+  defp user_drv_on_node(target_node) do
+    :erpc.call(target_node, :erlang, :whereis, [:user_drv])
+  catch
+    _kind, _reason -> nil
   end
 
   defp proxy_loop(target, user_drv, pending) do
@@ -193,6 +213,31 @@ defmodule Breeze.InputRouter.IExShellProxy do
   end
 
   defp restore_user_drv_group(_user_drv, _previous_group), do: :ok
+
+  defp restore_input_mode(user_drv, input_mode_fun) when is_pid(user_drv) do
+    input_mode_fun.(node(user_drv), :cooked)
+    :ok
+  catch
+    _kind, _reason -> :ok
+  end
+
+  defp restore_input_mode(_user_drv, _input_mode_fun), do: :ok
+
+  defp set_input_mode(target_node, mode) when mode in [:raw, :cooked] do
+    result =
+      if target_node == node() do
+        :shell.start_interactive({:noshell, mode})
+      else
+        :erpc.call(target_node, :shell, :start_interactive, [{:noshell, mode}])
+      end
+
+    case result do
+      :ok -> :ok
+      {:error, _reason} -> :ok
+    end
+  catch
+    _kind, _reason -> :ok
+  end
 
   defp restore_process_group_leader(previous_group_leader) when is_pid(previous_group_leader) do
     Process.group_leader(self(), previous_group_leader)

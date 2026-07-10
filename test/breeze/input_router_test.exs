@@ -65,6 +65,84 @@ defmodule Breeze.InputRouterTest do
     end
   end
 
+  defmodule SplitPaletteAdapter do
+    @behaviour Termite.Terminal.Adapter
+
+    def start(_opts) do
+      {:ok, %{ref: make_ref(), size: %{width: 80, height: 24}}}
+    end
+
+    def reader(term), do: {:ok, term.ref}
+    def resize(term), do: term.size
+
+    def write(term, str) do
+      if String.contains?(str, "\e]10;?") do
+        owner = self()
+        ref = term.ref
+
+        send(owner, {ref, {:data, "\e]10;rgb:f0f0/f0f0/f0f0\a"}})
+        send(owner, {ref, {:data, "\e]11;rgb:1010/1111/1212\a"}})
+        send(owner, {ref, {:data, "\e]4;1;rgb:aaaa/2222/3333\a"}})
+        send(owner, {ref, {:data, "\e]4;2;rgb:2222/aaaa/3333\a"}})
+        send(owner, {ref, {:data, "\e]4;3;rgb:cccc/bbbb/3333\a"}})
+        send(owner, {ref, {:data, "\e]4;4;rgb:3333/5555/aaaa\a"}})
+        send(owner, {ref, {:data, "\e]4;5;rgb:9999/3333/aaaa\a"}})
+        send(owner, {ref, {:data, "\e]4;6;rgb:3333/aaaa/aaaa\a"}})
+        send(owner, {ref, {:data, "\e]4;9;rgb:dddd/6666/4444\a"}})
+        send(owner, {ref, {:data, "\e]4;10;rgb:4444/cccc/5555\a"}})
+        send(owner, {ref, {:data, "\e]4;11;rgb:e6e6/d1d1/5a5a\a"}})
+        send(owner, {ref, {:data, "\e]4;12;rgb:5f5f/7b7b/e0e0\a"}})
+        send(owner, {ref, {:data, "\e]4;13;rgb:b3b3/6b6b/d4d4\a"}})
+        send(owner, {ref, {:data, "\e]"}})
+        send(owner, {ref, {:data, "4;14;rgb:5a5a/d6d6/d6d6\a"}})
+      end
+
+      {:ok, term}
+    end
+  end
+
+  defmodule DelayedPaletteAdapter do
+    @behaviour Termite.Terminal.Adapter
+
+    def start(_opts) do
+      {:ok, %{ref: make_ref(), size: %{width: 80, height: 24}}}
+    end
+
+    def reader(term), do: {:ok, term.ref}
+    def resize(term), do: term.size
+
+    def write(term, str) do
+      if String.contains?(str, "\e]10;?") do
+        owner = self()
+        ref = term.ref
+
+        send(owner, {ref, {:data, "\e]10;rgb:f0f0/f0f0/f0f0\a"}})
+        send(owner, {ref, {:data, "\e]11;rgb:1010/1111/1212\a"}})
+        send(owner, {ref, {:data, "\e]4;1;rgb:aaaa/2222/3333\a"}})
+        send(owner, {ref, {:data, "\e]4;2;rgb:2222/aaaa/3333\a"}})
+        send(owner, {ref, {:data, "\e]4;3;rgb:cccc/bbbb/3333\a"}})
+        send(owner, {ref, {:data, "\e]4;4;rgb:3333/5555/aaaa\a"}})
+
+        Process.send_after(
+          owner,
+          {ref,
+           {:data,
+            "\e]4;5;rgb:9999/3333/aaaa\a" <>
+              "\e]4;6;rgb:3333/aaaa/aaaa\a" <>
+              "\e]4;9;rgb:dddd/6666/4444\a" <>
+              "\e]4;10;rgb:4444/cccc/5555\a" <>
+              "\e]4;11;rgb:e6e6/d1d1/5a5a\a" <>
+              "\e]4;12;rgb:5f5f/7b7b/e0e0\a" <>
+              "\e]4;13;rgb:b3b3/6b6b/d4d4\a" <>
+              "\e]4;14;rgb:5a5a/d6d6/d6d6\a"}},
+          Breeze.Theme.runtime_palette_probe_timeout_ms() + 20
+        )
+      end
+
+      {:ok, term}
+    end
+  end
+
   defmodule BlockingView do
     use Breeze.View
 
@@ -277,6 +355,35 @@ defmodule Breeze.InputRouterTest do
     wait_until(fn ->
       Enum.all?([supervisor, server, root, child], &(not Process.alive?(&1)))
     end)
+  end
+
+  defmodule ThemeProbeLeakView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok,
+       term
+       |> put_theme(Theme.builtin(:gruvbox))
+       |> assign(parent: Keyword.fetch!(opts, :parent))}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>probe</box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "t"}, term) do
+      send(term.assigns.parent, :theme_switch)
+      {:noreply, put_theme(term, :system)}
+    end
+
+    def handle_event(_, event, term) do
+      send(term.assigns.parent, {:leaked_input, event})
+      {:noreply, term}
+    end
+
+    def handle_info(_, term), do: {:noreply, term}
   end
 
   test "stop global keys are handled even while the app server is blocked" do
@@ -721,6 +828,71 @@ defmodule Breeze.InputRouterThemeSyncTest do
       end,
       100
     )
+
+    Process.exit(pid, :normal)
+  end
+
+  test "split runtime palette replies are consumed instead of forwarded as input" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: ThemeProbeLeakView,
+        start_opts: [parent: parent],
+        hide_cursor: false,
+        terminal_opts: [adapter: SplitPaletteAdapter],
+        halt_fun: fn -> send(parent, :halted) end
+      )
+
+    state = :sys.get_state(pid)
+    reader = state.reader
+    server_pid = state.server_pid
+    child_pid = :sys.get_state(server_pid).view_pid
+
+    send(pid, {reader, {:data, "t"}})
+    assert_receive :theme_switch
+
+    wait_until(fn ->
+      metadata = ChildServer.metadata(child_pid)
+      metadata.theme.mode == :system and metadata.theme.variables[:palette_probe_status] == :ready
+    end)
+
+    refute_receive {:leaked_input, _event}, 50
+
+    Process.exit(pid, :normal)
+  end
+
+  test "late runtime palette replies are drained instead of forwarded as input" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: ThemeProbeLeakView,
+        start_opts: [parent: parent],
+        hide_cursor: false,
+        terminal_opts: [adapter: DelayedPaletteAdapter],
+        halt_fun: fn -> send(parent, :halted) end
+      )
+
+    state = :sys.get_state(pid)
+    reader = state.reader
+    server_pid = state.server_pid
+    child_pid = :sys.get_state(server_pid).view_pid
+
+    send(pid, {reader, {:data, "t"}})
+    assert_receive :theme_switch
+
+    wait_until(
+      fn ->
+        metadata = ChildServer.metadata(child_pid)
+
+        metadata.theme.mode == :system and
+          metadata.theme.variables[:palette_probe_status] == :ready
+      end,
+      80
+    )
+
+    refute_receive {:leaked_input, _event}, 50
 
     Process.exit(pid, :normal)
   end
