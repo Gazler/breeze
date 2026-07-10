@@ -69,6 +69,35 @@ defmodule Breeze.RemoteInspectorTest do
     end
   end
 
+  defmodule ThemeTabView do
+    use Breeze.View
+    import Breeze.RemoteInspector.View, only: [theme_tab: 1]
+
+    def mount(_opts, term) do
+      rows =
+        Enum.map(1..12, fn index ->
+          %{
+            class: "width-full",
+            style: nil,
+            text: if(index == 12, do: "LAST PALETTE SWATCH", else: "palette row #{index}")
+          }
+        end)
+
+      {:ok, term |> assign(rows: rows) |> focus("theme-scroll")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen overflow-hidden">
+        <.theme_tab active={true} scroll_id="theme-scroll" active_theme_text="demo" rows={@rows}/>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   test "remote inspector view renders rich snapshot details" do
     theme =
       Breeze.Theme.new(%{
@@ -220,10 +249,10 @@ defmodule Breeze.RemoteInspectorTest do
           },
           latest_source: {:app@host, "#PID<0.1.0>"},
           panel_tab: "theme",
-          screen: %{width: 80, height: 32}
+          screen: %{width: 90, height: 32}
         },
         theme: true,
-        terminal: %Termite.Terminal{size: %{width: 80, height: 40}}
+        terminal: %Termite.Terminal{size: %{width: 90, height: 40}}
       )
 
     tree_output =
@@ -330,6 +359,35 @@ defmodule Breeze.RemoteInspectorTest do
                %{"value" => "layout"},
                %{term | local_keybindings: tree_keybindings}
              )
+  end
+
+  test "theme tab can scroll its final palette row fully into view" do
+    terminal = %Termite.Terminal{size: %{width: 40, height: 8}}
+    {:ok, pid} = Breeze.ChildServer.start(view: ThemeTabView, start_opts: [], terminal: terminal)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: GenServer.stop(pid, :normal)
+    end)
+
+    {:ok, _acc, initial_box} =
+      Breeze.ChildServer.render(pid,
+        focused: "theme-scroll",
+        implicit_state: %{},
+        terminal: terminal
+      )
+
+    refute initial_box.content =~ "LAST PALETTE SWATCH"
+
+    assert {:noreply, "theme-scroll", true} = Breeze.ChildServer.dispatch_input(pid, "End")
+
+    {:ok, _acc, scrolled_box} =
+      Breeze.ChildServer.render(pid,
+        focused: "theme-scroll",
+        implicit_state: %{},
+        terminal: terminal
+      )
+
+    assert scrolled_box.content =~ "LAST PALETTE SWATCH"
   end
 
   test "remote inspector render tree selection updates expansion and delegates selection" do

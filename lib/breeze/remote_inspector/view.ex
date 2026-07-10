@@ -143,7 +143,7 @@ defmodule Breeze.RemoteInspector.View do
               highlight="primary"
               br-change="tab_changed"
               class="width-full height-full border-rounded bg"
-              item_class="width-9"
+              item_class="width-10"
             >
               <:tab value="logs" label="Logs">
                 <.logs_tab
@@ -501,8 +501,10 @@ defmodule Breeze.RemoteInspector.View do
 
   def theme_tab(assigns) do
     ~H"""
-    <.scroll id={@scroll_id} class="width-full height-full padding-top-1">
+    <.scroll id={@scroll_id} class="width-full height-full">
       <box class="width-full">
+        <box class="width-full">
+        </box>
         <box :if={!is_nil(@active)} class="width-full text-muted">theme={@active_theme_text}</box>
         <box :if={!is_nil(@active)} class="width-full">
         </box>
@@ -513,6 +515,8 @@ defmodule Breeze.RemoteInspector.View do
           style={Map.get(row, :style)}
         >
           {row.text}
+        </box>
+        <box :if={!is_nil(@active)} class="width-full">
         </box>
       </box>
     </.scroll>
