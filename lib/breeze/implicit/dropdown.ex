@@ -18,6 +18,7 @@ defmodule Breeze.Implicit.Dropdown do
     open? = Map.get(last_state, :open?, false)
 
     %{
+      id: Map.get(root_attrs, :id),
       values: values,
       selected: selected,
       selected_index: selected_index,
@@ -31,6 +32,21 @@ defmodule Breeze.Implicit.Dropdown do
 
   def handle_event(_, %{"key" => key}, %{open?: false} = state)
       when key in ["Enter", " ", "ArrowDown", "ArrowUp", "j", "k"] do
+    {:noreply, open(state)}
+  end
+
+  def handle_event(
+        _,
+        %{"mouse" => %{button: :left, action: :press}, "target" => target},
+        %{open?: true} = state
+      ) do
+    case clicked_item_index(state, target) do
+      nil -> {:noreply, close(state)}
+      index -> select_index(state, index)
+    end
+  end
+
+  def handle_event(_, %{"mouse" => %{button: :left, action: :press}}, %{open?: false} = state) do
     {:noreply, open(state)}
   end
 
@@ -49,17 +65,7 @@ defmodule Breeze.Implicit.Dropdown do
   end
 
   def handle_event(_, %{"key" => key}, %{open?: true} = state) when key in ["Enter", " "] do
-    selected_index = state.highlighted_index || state.selected_index
-    selected = Enum.at(state.values, selected_index)
-
-    next_state = %{
-      close(state)
-      | selected: selected,
-        selected_index: selected_index,
-        highlighted_index: selected_index
-    }
-
-    {{:change, %{value: selected, index: selected_index}}, next_state}
+    select_index(state, state.highlighted_index || state.selected_index)
   end
 
   def handle_event(_, _, state), do: {:noreply, state}
@@ -145,6 +151,34 @@ defmodule Breeze.Implicit.Dropdown do
 
   defp next_index(%{values: values, highlighted_index: index}, delta) do
     rem((index || 0) + delta + length(values), length(values))
+  end
+
+  defp clicked_item_index(%{id: id, values: values}, target)
+       when is_binary(id) and is_binary(target) do
+    prefix = "#{id}-item-"
+
+    with true <- String.starts_with?(target, prefix),
+         {index, ""} <- target |> String.replace_prefix(prefix, "") |> Integer.parse(),
+         true <- index >= 0 and index < length(values) do
+      index
+    else
+      _ -> nil
+    end
+  end
+
+  defp clicked_item_index(_state, _target), do: nil
+
+  defp select_index(state, selected_index) do
+    selected = Enum.at(state.values, selected_index)
+
+    next_state = %{
+      close(state)
+      | selected: selected,
+        selected_index: selected_index,
+        highlighted_index: selected_index
+    }
+
+    {{:change, %{value: selected, index: selected_index}}, next_state}
   end
 
   defp normalize_index(index, []) when is_integer(index), do: index

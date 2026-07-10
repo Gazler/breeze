@@ -409,6 +409,7 @@ defmodule Breeze.Blocks do
       </box>
       <box
         :for={{item, index, item_style} <- @item_styles}
+        id={"#{@id}-item-#{index}"}
         dropdown-item
         dropdown-item-index={index}
         value={item.value}
