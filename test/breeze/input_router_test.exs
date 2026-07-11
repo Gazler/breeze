@@ -163,6 +163,11 @@ defmodule Breeze.InputRouterTest do
       {:noreply, term}
     end
 
+    def handle_event(_, %{"key" => "n"}, term) do
+      send(term.assigns.parent, :next_handled)
+      {:noreply, term}
+    end
+
     def handle_event(_, _, term), do: {:noreply, term}
     def handle_info(_, term), do: {:noreply, term}
   end
@@ -408,6 +413,29 @@ defmodule Breeze.InputRouterTest do
     send(pid, {reader, {:data, "q"}})
     assert_receive :halted
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+  end
+
+  test "input queued during an asynchronous dispatch is handled after it completes" do
+    parent = self()
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: BlockingView,
+        start_opts: [parent: parent],
+        terminal: terminal
+      )
+
+    on_exit(fn -> Process.exit(pid, :shutdown) end)
+
+    send(pid, {reader, {:data, "r"}})
+    assert_receive :started
+
+    send(pid, {reader, {:data, "n"}})
+
+    assert_receive :finished, 500
+    assert_receive :next_handled, 500
   end
 
   test "ctrl-c always halts regardless of global keybindings" do

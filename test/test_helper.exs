@@ -1,4 +1,3 @@
-ExUnit.start()
 Code.require_file("../test_support/snapshot_assertions.ex", __DIR__)
 Code.require_file("support/wait_until.ex", __DIR__)
 Code.require_file("support/storybook_case.ex", __DIR__)
@@ -11,4 +10,5 @@ for file <- ~w(counter.exs docs.exs modal.exs posting.exs snake.exs tabs.exs) do
   Code.require_file(Path.expand("../examples/#{file}", __DIR__))
 end
 
-_ = Breeze.Storybook.Registry.stories("storybook")
+Breeze.Storybook.Registry.stories("storybook")
+ExUnit.start()

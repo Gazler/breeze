@@ -236,7 +236,7 @@ defmodule Breeze.RemoteInspector.Server do
   end
 
   def subscribe(pid, subscriber) do
-    GenServer.cast(pid, {:subscribe, subscriber})
+    GenServer.call(pid, {:subscribe, subscriber})
   end
 
   def publish(pid, source_pid, snapshot) do
@@ -278,8 +278,7 @@ defmodule Breeze.RemoteInspector.Server do
     {:reply, public_state(state), state}
   end
 
-  @impl true
-  def handle_cast({:subscribe, subscriber}, state) do
+  def handle_call({:subscribe, subscriber}, _from, state) do
     if is_pid(subscriber), do: Process.monitor(subscriber)
 
     state =
@@ -287,9 +286,10 @@ defmodule Breeze.RemoteInspector.Server do
       |> Map.update!(:subscribers, &MapSet.put(&1, subscriber))
       |> push_state()
 
-    {:noreply, state}
+    {:reply, :ok, state}
   end
 
+  @impl true
   def handle_cast({:snapshot, source_pid, snapshot}, state) do
     source = %{pid: source_pid, node: node(source_pid)}
 

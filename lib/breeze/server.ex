@@ -590,7 +590,10 @@ defmodule Breeze.Server do
   end
 
   def handle_info({:event_reply, ref, reply}, %{input: %{pending_ref: ref}} = state) do
-    apply_event_reply(state, reply)
+    case apply_event_reply(state, reply) do
+      {:noreply, state} -> {:noreply, schedule_input_flush(state)}
+      other -> other
+    end
   end
 
   def handle_info({:event_reply, _ref, _reply}, state), do: {:noreply, state}
@@ -2514,6 +2517,9 @@ defmodule Breeze.Server do
       {:crash, _crash} -> %{}
     end
   end
+
+  defp schedule_input_flush(%{input: %{pending_ref: ref}} = state) when not is_nil(ref),
+    do: state
 
   defp schedule_input_flush(state) do
     Input.schedule_flush(state, @flush_input_batch)

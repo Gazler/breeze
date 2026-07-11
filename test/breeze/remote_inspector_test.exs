@@ -365,9 +365,7 @@ defmodule Breeze.RemoteInspectorTest do
     terminal = %Termite.Terminal{size: %{width: 40, height: 8}}
     {:ok, pid} = Breeze.ChildServer.start(view: ThemeTabView, start_opts: [], terminal: terminal)
 
-    on_exit(fn ->
-      if Process.alive?(pid), do: GenServer.stop(pid, :normal)
-    end)
+    on_exit(fn -> stop_process(pid) end)
 
     {:ok, _acc, initial_box} =
       Breeze.ChildServer.render(pid,
@@ -393,9 +391,7 @@ defmodule Breeze.RemoteInspectorTest do
   test "remote inspector render tree selection updates expansion and delegates selection" do
     {:ok, source_pid} = SelectCaptureServer.start_link(self())
 
-    on_exit(fn ->
-      if Process.alive?(source_pid), do: GenServer.stop(source_pid)
-    end)
+    on_exit(fn -> stop_process(source_pid) end)
 
     key = {:app@host, inspect(source_pid)}
 
@@ -444,9 +440,7 @@ defmodule Breeze.RemoteInspectorTest do
   test "remote inspector t key toggles the tree between rendered and code modes" do
     {:ok, source_pid} = SelectCaptureServer.start_link(self())
 
-    on_exit(fn ->
-      if Process.alive?(source_pid), do: GenServer.stop(source_pid)
-    end)
+    on_exit(fn -> stop_process(source_pid) end)
 
     key = {:app@host, inspect(source_pid)}
 
@@ -493,9 +487,7 @@ defmodule Breeze.RemoteInspectorTest do
   test "remote inspector render tree scroll changes stay local" do
     {:ok, source_pid} = SelectCaptureServer.start_link(self())
 
-    on_exit(fn ->
-      if Process.alive?(source_pid), do: GenServer.stop(source_pid)
-    end)
+    on_exit(fn -> stop_process(source_pid) end)
 
     key = {:app@host, inspect(source_pid)}
 
@@ -604,6 +596,17 @@ defmodule Breeze.RemoteInspectorTest do
              view: Breeze.RemoteInspector.View
            ) == :breeze
   end
+
+  defp stop_process(pid) when is_pid(pid) do
+    ref = Process.monitor(pid)
+    if Process.alive?(pid), do: Process.exit(pid, :shutdown)
+
+    receive do
+      {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+    after
+      500 -> Process.demonitor(ref, [:flush])
+    end
+  end
 end
 
 defmodule Breeze.RemoteInspectorSyncTest do
@@ -616,26 +619,28 @@ defmodule Breeze.RemoteInspectorSyncTest do
   test "local remote inspector server does not count as a remote delegate" do
     {:ok, pid} = Breeze.RemoteInspector.ensure_server()
 
-    on_exit(fn ->
-      if is_pid(pid) and Process.alive?(pid) and node(pid) == node() do
-        GenServer.stop(pid)
-      end
-    end)
+    on_exit(fn -> stop_local_process(pid) end)
 
     refute Breeze.RemoteInspector.available?()
   end
 
   test "publishing to the local server updates subscribers" do
     {:ok, pid} = Breeze.RemoteInspector.ensure_server()
+    on_exit(fn -> stop_local_process(pid) end)
     :ok = Breeze.RemoteInspector.subscribe(self())
+
+    assert_receive {:remote_inspector, _payload}
+    _state = Breeze.RemoteInspector.Server.snapshot(pid)
+    drain_remote_inspector_notifications()
 
     snapshot = %{enabled?: true, visible?: true, root_view: Posting, selected_id: "url"}
 
     Breeze.RemoteInspector.Server.publish(pid, self(), snapshot)
+    published = Breeze.RemoteInspector.Server.snapshot(pid)
 
-    assert_receive {:remote_inspector, _payload}, 500
-    assert_receive {:remote_inspector, %{snapshots: snapshots}}, 500
+    assert_receive {:remote_inspector, %{snapshots: snapshots}}
     assert map_size(snapshots) >= 1
+    assert snapshots == published.snapshots
   end
 
   test "starting the remote inspector server pulls current snapshots from inspector-enabled apps" do
@@ -647,11 +652,8 @@ defmodule Breeze.RemoteInspectorSyncTest do
     {:ok, inspector_pid} = Breeze.RemoteInspector.ensure_server()
 
     on_exit(fn ->
-      if Process.alive?(app_pid), do: GenServer.stop(app_pid)
-
-      if Process.alive?(inspector_pid) and node(inspector_pid) == node() do
-        GenServer.stop(inspector_pid)
-      end
+      stop_local_process(app_pid)
+      stop_local_process(inspector_pid)
     end)
 
     wait_until(fn ->
@@ -670,11 +672,8 @@ defmodule Breeze.RemoteInspectorSyncTest do
     {:ok, inspector_pid} = Breeze.RemoteInspector.ensure_server()
 
     on_exit(fn ->
-      if Process.alive?(source_pid), do: GenServer.stop(source_pid)
-
-      if Process.alive?(inspector_pid) and node(inspector_pid) == node() do
-        GenServer.stop(inspector_pid)
-      end
+      stop_local_process(source_pid)
+      stop_local_process(inspector_pid)
     end)
 
     Breeze.RemoteInspector.Server.publish(
@@ -695,5 +694,26 @@ defmodule Breeze.RemoteInspectorSyncTest do
 
       match?(%{alive?: false, snapshot: %{root_view: InspectorAppView}}, snapshots[key])
     end)
+  end
+
+  defp stop_local_process(pid) when is_pid(pid) and node(pid) == node() do
+    ref = Process.monitor(pid)
+    if Process.alive?(pid), do: Process.exit(pid, :shutdown)
+
+    receive do
+      {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+    after
+      500 -> Process.demonitor(ref, [:flush])
+    end
+  end
+
+  defp stop_local_process(_pid), do: :ok
+
+  defp drain_remote_inspector_notifications do
+    receive do
+      {:remote_inspector, _payload} -> drain_remote_inspector_notifications()
+    after
+      0 -> :ok
+    end
   end
 end
