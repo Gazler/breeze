@@ -205,6 +205,7 @@ defmodule Breeze.Inspector do
         view_pid: Map.get(state, :view_pid)
       },
       screen: screen,
+      breakpoint: Breeze.Style.breakpoint(screen.width),
       last_render_at: nested_state_field(state, :frame, :last_render_at),
       last_interaction_at: nested_state_field(state, :input, :last_interaction_at),
       counts: %{
@@ -987,7 +988,7 @@ defmodule Breeze.Inspector do
         ),
       meta_text:
         truncate(
-          "hovered=#{selected_label(snapshot.hovered, snapshot.hovered_id || "-")} selected=#{selected_label(selected, snapshot.selected_id || "-")} focused=#{snapshot.focused || "-"} dock=#{snapshot.panel_position} move=#{snapshot.move_key}",
+          "screen=#{snapshot.screen.width}x#{snapshot.screen.height} breakpoint=#{snapshot.breakpoint} hovered=#{selected_label(snapshot.hovered, snapshot.hovered_id || "-")} selected=#{selected_label(selected, snapshot.selected_id || "-")} focused=#{snapshot.focused || "-"} dock=#{snapshot.panel_position} move=#{snapshot.move_key}",
           width - 2
         ),
       layout_text: truncate(layout_line(selected), width - 2),

@@ -192,6 +192,35 @@ defmodule Breeze.ExampleSnapshotTest do
     )
   end
 
+  test "responsive example progressively adds layout chrome" do
+    compact = Breeze.Test.start!(Responsive, size: {39, 24})
+    medium = Breeze.Test.start!(Responsive, size: {60, 24})
+    large = Breeze.Test.start!(Responsive, size: {80, 24})
+
+    on_exit(fn ->
+      Breeze.Test.stop(compact)
+      Breeze.Test.stop(medium)
+      Breeze.Test.stop(large)
+    end)
+
+    compact_content = Breeze.Test.render!(compact)
+    assert compact_content =~ "39×24 · base breakpoint"
+    assert compact_content =~ "[O] [A] [Q] [N]"
+    assert compact_content =~ "Nodes"
+    refute compact_content =~ "▁"
+    refute compact_content =~ "╭"
+
+    medium_content = Breeze.Test.render!(medium)
+    assert medium_content =~ "60×24 · md breakpoint"
+    assert medium_content =~ "Overview  Activity  Queue  Nodes"
+    assert medium_content =~ "▁"
+
+    large_content = Breeze.Test.render!(large)
+    assert large_content =~ "80×24 · lg breakpoint"
+    assert large_content =~ "╭"
+    assert large_content =~ "single row"
+  end
+
   test "docs example snapshots stdlib scrolling" do
     session =
       Breeze.Test.start!(Docs,

@@ -482,6 +482,21 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule ResponsiveHiddenGridChildExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="grid grid-cols-1 md:grid-cols-2 width-full height-6">
+        <box id="collection" focusable class="hidden md:block">
+          <box>Collection</box>
+        </box>
+        <box>Request</box>
+      </box>
+      """
+    end
+  end
+
   describe "render_to_string/2" do
     test "converts the boxes to terminal output" do
       assert Renderer.render_to_string(Example, %{name: "world"}) ==
@@ -507,6 +522,32 @@ defmodule Breeze.RendererTest do
     test "inline overflow-hidden boxes keep their intrinsic width" do
       assert Renderer.render_to_string(InlineOverflowExample, %{}) =~ "Esc"
       assert Renderer.render_to_string(InlineOverflowExample, %{}) =~ "Close"
+    end
+
+    test "hidden responsive children do not occupy grid tracks" do
+      narrow_terminal = %Termite.Terminal{size: %{width: 59, height: 6}}
+      wide_terminal = %Termite.Terminal{size: %{width: 60, height: 6}}
+
+      narrow =
+        Renderer.render_to_string(ResponsiveHiddenGridChildExample, %{},
+          terminal: narrow_terminal
+        )
+
+      wide =
+        Renderer.render_to_string(ResponsiveHiddenGridChildExample, %{}, terminal: wide_terminal)
+
+      {narrow_acc, _narrow_box} =
+        Renderer.render(ResponsiveHiddenGridChildExample, %{}, terminal: narrow_terminal)
+
+      {wide_acc, _wide_box} =
+        Renderer.render(ResponsiveHiddenGridChildExample, %{}, terminal: wide_terminal)
+
+      assert narrow |> String.split("\n") |> hd() |> String.trim() == "Request"
+      refute narrow =~ "Collection"
+      refute "collection" in narrow_acc.focusables
+      assert wide =~ "Collection"
+      assert wide =~ "Request"
+      assert "collection" in wide_acc.focusables
     end
 
     test "accepts BackBreeze.Style structs" do

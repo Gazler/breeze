@@ -114,6 +114,8 @@ defmodule Breeze.RemoteInspectorTest do
       focused: "url",
       last_render_at: 123,
       last_interaction_at: 456,
+      screen: %{width: 59, height: 24},
+      breakpoint: "sm",
       theme: theme,
       source: %{node: :app@host, server_pid: self(), view_pid: self()},
       render_tree: %{
@@ -275,6 +277,9 @@ defmodule Breeze.RemoteInspectorTest do
       )
 
     assert output =~ "Remote Inspector"
+    assert output =~ "screen=59x24"
+    assert output =~ "breakpoint=sm"
+    refute output =~ "screen=80x32"
     assert output =~ "theme=demo mode=custom dark=true"
     assert output =~ "counts=elements=12 focusables=3"
     assert output =~ "mouse_targets=9 children=1"

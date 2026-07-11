@@ -66,10 +66,10 @@ defmodule Posting do
             <box class="inline width-full height-1">
               <box class="bold text-primary">Req It Ralph</box>
               <box class="text-muted"> 0.0.1</box>
-              <box class="text-muted">
+              <box class="hidden md:block text-muted">
                 {" "}{@breeze.theme.name}/{@breeze.theme.actual_mode} ({@breeze.theme.status})
               </box>
-              <box class="width-full text-right text-muted">{@user_host}</box>
+              <box class="hidden md:block md:width-full text-right text-muted">{@user_host}</box>
             </box>
           </box>
           <box style="grid grid-cols-5 height-2 padding-bottom-1">
@@ -95,21 +95,25 @@ defmodule Posting do
             <box style="bg-primary text-bg width-1">▐</box>
           </box>
           <box style="grid grid-cols-1 grid-rows-2 height-full">
-            <box style="grid grid-cols-2 height-full">
-              <.panel id="collection-panel" class="height-full width-full overflow-hidden bg">
-                <box class="width-full height-full padding-right-1 padding-bottom-1 overflow-hidden">
-                  <.list
-                    id="collection"
-                    variant="muted"
-                    list-scroll-padding={1}
-                    class="bg height-full width-full overflow-scroll border-0 focus:border-0"
-                    item_style="width-full"
+            <box class="grid grid-cols-1 md:grid-cols-2 height-full">
+              <box class="hidden md:block">
+                <.panel id="collection-panel" class="height-full width-full overflow-hidden bg">
+                  <box
+                    class="width-full height-full padding-right-1 padding-bottom-1 overflow-hidden"
                   >
-                    <:item :for={{val, label} <- @collection} value={val}>{label}</:item>
-                  </.list>
-                </box>
-              </.panel>
-              <box style="grid grid-cols-1 grid-rows-2 height-full">
+                    <.list
+                      id="collection"
+                      variant="muted"
+                      list-scroll-padding={1}
+                      class="bg height-full width-full overflow-scroll border-0 focus:border-0"
+                      item_style="width-full"
+                    >
+                      <:item :for={{val, label} <- @collection} value={val}>{label}</:item>
+                    </.list>
+                  </box>
+                </.panel>
+              </box>
+              <box class="grid grid-cols-1 grid-rows-2 height-full">
                 <.panel id="request-panel" class="height-full overflow-hidden bg focus:border-accent">
                   <.tabs
                     id="request-tabs"
@@ -322,8 +326,6 @@ defmodule Posting do
 
   def handle_event(_, %{"key" => "q"}, term), do: {:stop, term}
   def handle_event(_, _, term), do: {:noreply, term}
-
-  def handle_info(:resize, term), do: {:noreply, term}
 
   def handle_info(_, term), do: {:noreply, term}
 

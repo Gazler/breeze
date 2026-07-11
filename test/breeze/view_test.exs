@@ -9,7 +9,9 @@ defmodule Breeze.ViewTest do
 
     def render(assigns) do
       ~H"""
-      <box>{@breeze.theme.name}/{@breeze.theme.actual_mode}/{@breeze.theme.status}</box>
+      <box>
+        {@breeze.theme.name}/{@breeze.theme.actual_mode}/{@breeze.theme.status}/{@breeze.terminal.width}x{@breeze.terminal.height}/{@breeze.breakpoint}
+      </box>
       """
     end
 
@@ -265,7 +267,7 @@ defmodule Breeze.ViewTest do
   test "rendering exposes theme metadata in the Breeze assigns namespace" do
     session = Breeze.Test.start!(BreezeAssignsView, theme: Breeze.Theme.builtin(:gruvbox))
 
-    assert Breeze.Test.render!(session) =~ "gruvbox-dark/custom/ready"
+    assert Breeze.Test.render!(session) =~ "gruvbox-dark/custom/ready/80x24/lg"
 
     Breeze.Test.stop(session)
   end

@@ -84,6 +84,73 @@ defmodule Breeze.StyleTest do
     assert element.style.overflow == :hidden
   end
 
+  describe "responsive modifiers" do
+    test "applies width breakpoints at their minimum width" do
+      class =
+        "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6"
+
+      assert grid_columns(class, {39, 24}) == 1
+      assert grid_columns(class, {40, 24}) == 2
+      assert grid_columns(class, {60, 24}) == 3
+      assert grid_columns(class, {80, 24}) == 4
+      assert grid_columns(class, {120, 24}) == 5
+      assert grid_columns(class, {160, 24}) == 6
+    end
+
+    test "supports chained responsive and state modifiers" do
+      class = "text-1 md:focus:text-2 focus:md:bold"
+
+      narrow = responsive_element(class, {59, 24}, focus: true)
+      wide_unfocused = responsive_element(class, {60, 24})
+      wide_focused = responsive_element(class, {60, 24}, focus: true)
+
+      assert narrow.style.foreground_color == 1
+      refute narrow.style.bold
+      assert wide_unfocused.style.foreground_color == 1
+      refute wide_unfocused.style.bold
+      assert wide_focused.style.foreground_color == 2
+      assert wide_focused.style.bold
+    end
+
+    test "display utilities reveal a responsively hidden box" do
+      narrow = responsive_element("hidden md:block", {59, 24})
+      wide = responsive_element("hidden md:block", {60, 24})
+
+      assert narrow.style.width == 0
+      assert narrow.style.height == 0
+      assert narrow.style.overflow == :hidden
+
+      assert wide.attributes.display == :block
+      assert wide.style.width == :auto
+      assert wide.style.height == :auto
+      assert wide.style.overflow == :auto
+    end
+
+    test "hidden suppresses decorative styles until a display utility reveals them" do
+      class = "hidden md:block border-rounded padding-2 bg-primary"
+      narrow = responsive_element(class, {59, 24})
+      wide = responsive_element(class, {60, 24})
+
+      assert narrow.style.border == BackBreeze.Border.none()
+      assert narrow.style.padding == 0
+      assert narrow.style.background_color == nil
+
+      assert wide.style.border == BackBreeze.Border.rounded()
+      assert wide.style.padding == 2
+      assert wide.style.background_color == 4
+    end
+
+    test "does not apply responsive modifiers without terminal dimensions" do
+      element =
+        Style.empty()
+        |> Style.put_class("text-1 sm:text-2 sm:bold")
+        |> Style.to_element([])
+
+      assert element.style.foreground_color == 1
+      refute element.style.bold
+    end
+  end
+
   test "supports border-invisible class" do
     element =
       Style.empty()
@@ -93,6 +160,20 @@ defmodule Breeze.StyleTest do
     assert element.style.border == BackBreeze.Border.invisible()
     assert element.style.border.left == " "
     assert element.style.border.top == " "
+  end
+
+  defp grid_columns(class, size) do
+    class
+    |> responsive_element(size)
+    |> then(& &1.attributes.display.columns)
+  end
+
+  defp responsive_element(class, {width, height}, opts \\ []) do
+    terminal = %Termite.Terminal{size: %{width: width, height: height}}
+
+    Style.empty()
+    |> Style.put_class(class)
+    |> Style.to_element(Keyword.put(opts, :terminal, terminal))
   end
 
   test "supports border-none class" do

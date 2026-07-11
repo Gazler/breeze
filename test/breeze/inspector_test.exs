@@ -88,6 +88,8 @@ defmodule Breeze.InspectorTest do
     assert snapshot.hovered_id == "nested"
     assert snapshot.toggle_key == "F4"
     assert snapshot.move_key == "PageUp"
+    assert snapshot.screen == %{width: 80, height: 24}
+    assert snapshot.breakpoint == "lg"
     assert snapshot.selected.actual_id == "field"
     assert snapshot.selected.focus_meta == %{group: :form}
     assert snapshot.hovered.actual_id == "nested"
@@ -452,6 +454,7 @@ defmodule Breeze.InspectorTest do
 
     assert length(content_rows) == Inspector.panel_height()
     assert Enum.any?(content_rows, &String.contains?(&1.content, "Inspector [F4]"))
+    assert Enum.any?(content_rows, &String.contains?(&1.content, "screen=80x24 breakpoint=lg"))
     assert Enum.any?(marker_rows, &(&1.char == "("))
     assert Enum.any?(marker_rows, &(&1.char == "["))
   end
