@@ -146,7 +146,8 @@ defmodule Breeze.RemoteInspector do
   end
 
   def local_server_pid do
-    Process.whereis(Server) || Enum.find(members(), &(node(&1) == node()))
+    Process.whereis(Server) ||
+      Enum.find(members(), &(node(&1) == node() and Process.alive?(&1)))
   end
 
   def remote_server_pid do

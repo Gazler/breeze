@@ -2011,7 +2011,7 @@ defmodule Breeze.LiveView.CrashTest do
 
       send(pid, {reader, {:data, "y"}})
 
-      assert_receive {:copied_crash_details, details}
+      assert_receive {:copied_crash_details, details}, 500
       assert details =~ "Breeze Error"
       assert details =~ "Crash Details"
       assert details =~ "CrashingView"
@@ -2067,7 +2067,7 @@ defmodule Breeze.LiveView.CrashTest do
 
       send(pid, {reader, {:data, "Y"}})
 
-      assert_receive {:copied_crash_details, details}
+      assert_receive {:copied_crash_details, details}, 500
       assert details =~ "Breeze Error"
       assert details =~ "RuntimeError"
 
