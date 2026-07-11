@@ -79,6 +79,45 @@ defmodule Breeze.Implicit.DropdownTest do
     def handle_event(_, _, term), do: {:noreply, term}
   end
 
+  defmodule PanelDropdownView do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_, term), do: {:ok, focus(term, "choice")}
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <.panel id="panel" class="width-72 height-21">
+          <:title>Panel</:title>
+          <box class="inline height-1">
+            <box class="width-18">Starter</box>
+            <.dropdown id="choice" selected="counter" class="width-32">
+              <:item value="blank">Blank</:item>
+              <:item value="counter">Counter</:item>
+              <:item value="list">List</:item>
+            </.dropdown>
+          </box>
+          <box class="padding-left-18 width-66">An interactive counter with keyboard controls.</box>
+          <box class="height-1">
+          </box>
+          <box class="inline height-1">
+            <box class="width-18">Theme</box>
+            <.dropdown id="theme" selected="gruvbox" class="width-32">
+              <:item value="dracula">Dracula</:item>
+              <:item value="gruvbox">Gruvbox</:item>
+              <:item value="system">System</:item>
+            </.dropdown>
+          </box>
+        </.panel>
+        <box id="footer">Footer</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
   test "opens on enter and selects the highlighted item" do
     children = [
       %{:"dropdown-item" => true, value: "GET"},
@@ -132,6 +171,11 @@ defmodule Breeze.Implicit.DropdownTest do
              Dropdown.handle_modifiers(:child, [{:"dropdown-item", true}, {:value, "GET"}], state)
   end
 
+  test "an open dropdown raises its root above closed sibling dropdowns" do
+    assert [style: "layer-40"] = Dropdown.handle_modifiers(:root, [], %{open?: true})
+    assert [] = Dropdown.handle_modifiers(:root, [], %{open?: false})
+  end
+
   test "highlighted item gets selected modifier when open" do
     state = %{
       values: ["GET", "POST"],
@@ -143,7 +187,7 @@ defmodule Breeze.Implicit.DropdownTest do
       menu_height: 4
     }
 
-    assert [selected: true, style: "absolute left-0 top-1 width-12 layer-21"] =
+    assert [selected: true, style: "absolute left-0 top-1 width-12 height-1 layer-21"] =
              Dropdown.handle_modifiers(
                :child,
                [{:"dropdown-item", true}, {:"dropdown-item-index", 0}, {:value, "POST"}],
@@ -165,7 +209,7 @@ defmodule Breeze.Implicit.DropdownTest do
     assert [style: "absolute left-0 top-1 width-full height-4 overflow-hidden layer-20"] =
              Dropdown.handle_modifiers(:child, [{:"dropdown-frame", true}], state)
 
-    assert [selected: true, style: "absolute left-0 top-2 width-full layer-21"] =
+    assert [selected: true, style: "absolute left-0 top-2 width-full height-1 layer-21"] =
              Dropdown.handle_modifiers(
                :child,
                [{:"dropdown-item", true}, {:"dropdown-item-index", 1}, {:value, "POST"}],
@@ -326,5 +370,28 @@ defmodule Breeze.Implicit.DropdownTest do
     assert box.content =~ "GET"
     assert box.content =~ "POST"
     assert box.content =~ "PUT"
+  end
+
+  test "opening a dropdown does not expand its containing panel" do
+    session = Breeze.Test.start!(PanelDropdownView, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    Breeze.Test.render!(session)
+    closed_elements = :sys.get_state(session.pid).elements
+    Breeze.Test.input(session, "Enter")
+    opened = Breeze.Test.render!(session)
+    opened_elements = :sys.get_state(session.pid).elements
+
+    assert opened =~ "Counter"
+    assert opened =~ "List"
+    refute opened =~ "An interactive"
+    assert opened =~ "oard controls."
+    assert opened =~ "Theme"
+
+    theme_row = opened |> String.split("\n") |> Enum.find(&String.contains?(&1, "Theme"))
+    assert theme_row =~ "List"
+    refute theme_row =~ "Gruvbox"
+    assert opened_elements["panel"].height == closed_elements["panel"].height
+    assert opened_elements["footer"].top == closed_elements["footer"].top
   end
 end

@@ -70,6 +70,7 @@ defmodule Breeze.Implicit.Dropdown do
 
   def handle_event(_, _, state), do: {:noreply, state}
 
+  def handle_modifiers(:root, _flags, %{open?: true}), do: [style: "layer-40"]
   def handle_modifiers(:root, _flags, _state), do: []
 
   def handle_modifiers(:child, flags, state) do
@@ -114,7 +115,7 @@ defmodule Breeze.Implicit.Dropdown do
   defp item_style(state, flags) do
     index = int_flag(flags, :"dropdown-item-index", 0)
 
-    "absolute left-0 top-#{1 + index} #{size_class("width", state.menu_width)} layer-21"
+    "absolute left-0 top-#{1 + index} #{size_class("width", state.menu_width)} height-1 layer-21"
   end
 
   defp indicator_style(_state, opts \\ []) do
