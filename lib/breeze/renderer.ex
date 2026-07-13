@@ -1184,7 +1184,10 @@ defmodule Breeze.Renderer do
          opts
        )
        when is_map(layer_map) and map_size(layer_map) > 0 do
-    theme = Theme.new(Keyword.get(opts, :theme_source, Keyword.get(opts, :theme)))
+    theme =
+      opts
+      |> Keyword.get(:theme, Keyword.get(opts, :theme_source))
+      |> Theme.new(terminal: Keyword.get(opts, :terminal))
 
     if screen_dimming_supported?(theme) do
       regions = screen_dim_regions(acc, dimensions)

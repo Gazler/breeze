@@ -577,6 +577,49 @@ defmodule Breeze.RendererTest do
       assert background_rgb(blank_style) == background_rgb(text_style)
     end
 
+    test "screen dim uses the resolved system theme instead of its source name" do
+      theme =
+        Breeze.Theme.system(
+          palette: %{
+            4 => "#3355aa",
+            background: "#101112",
+            foreground: "#f0f0f0"
+          }
+        )
+
+      {_acc, box} =
+        Renderer.render(ScreenDimBackdropExample, %{},
+          theme: theme,
+          theme_source: :system,
+          terminal: %Termite.Terminal{size: %{width: 12, height: 5}}
+        )
+
+      assert {"H", text_style} = layer_point(box.layer_map, 1, 1)
+
+      assert foreground_rgb(text_style) ==
+               Breeze.Theme.blend(
+                 Breeze.Theme.color(theme, :primary),
+                 Breeze.Theme.color(theme, :background),
+                 0.45
+               )
+    end
+
+    test "screen dim remains disabled for a system16 fallback" do
+      theme =
+        Breeze.Theme.system16(variables: %{requested_theme: :system})
+
+      {_acc, box} =
+        Renderer.render(ScreenDimBackdropExample, %{},
+          theme: theme,
+          theme_source: :system,
+          terminal: %Termite.Terminal{size: %{width: 12, height: 5}}
+        )
+
+      assert {"H", text_style} = layer_point(box.layer_map, 1, 1)
+      assert text_style =~ "38;5;4"
+      assert foreground_rgb(text_style) == nil
+    end
+
     test "theme: false preserves legacy unthemed defaults" do
       assert Renderer.render_to_string(ThemeDefaultsExample, %{}, theme: false) ==
                "┌─────┐\n│Hello│\n└─────┘"
@@ -877,6 +920,16 @@ defmodule Breeze.RendererTest do
 
   defp background_rgb(style) do
     case Regex.run(~r/48;2;(\d+);(\d+);(\d+)/, style) do
+      [_, red, green, blue] ->
+        {String.to_integer(red), String.to_integer(green), String.to_integer(blue)}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp foreground_rgb(style) do
+    case Regex.run(~r/38;2;(\d+);(\d+);(\d+)/, style) do
       [_, red, green, blue] ->
         {String.to_integer(red), String.to_integer(green), String.to_integer(blue)}
 
