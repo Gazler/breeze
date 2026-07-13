@@ -73,8 +73,8 @@ defmodule Breeze.Implicit do
   `:layout`.
   """
 
-  @typedoc "State owned by an implicit implementation."
-  @type state :: term()
+  @typedoc "State map owned by an implicit implementation."
+  @type state :: map()
 
   @typedoc "The implicit root or one of its child elements."
   @type element_type :: :root | :child
@@ -87,6 +87,9 @@ defmodule Breeze.Implicit do
 
   @typedoc "A decoded terminal key name."
   @type key_name :: String.t()
+
+  @typedoc "The kind of input event dispatched to an implicit."
+  @type event_type :: :input
 
   @typedoc "An option returned while initializing implicit state."
   @type init_option ::
@@ -149,7 +152,7 @@ defmodule Breeze.Implicit do
   @doc """
   Handles an event captured by the implicit and returns its next state and action.
   """
-  @callback handle_event(term(), map(), state()) :: event_reply()
+  @callback handle_event(event_type(), map(), state()) :: event_reply()
 
   @doc """
   Returns renderer modifiers for the implicit root or one of its children.
