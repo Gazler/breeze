@@ -3,6 +3,23 @@ defmodule Breeze.Storybook.RegistryTest do
 
   alias Breeze.Storybook.Registry
 
+  @block_story_ids %{
+    button: "button",
+    dropdown: "dropdown",
+    flash_group: "flash",
+    input: "input",
+    keybinding_bar: "keybinding-bar",
+    list: "list",
+    markdown: "markdown",
+    modal: "modal",
+    panel: "panel",
+    scroll: "scroll",
+    table: "table",
+    tabs: "tabs",
+    textarea: "textarea",
+    tree: "tree"
+  }
+
   test "registry stories are normalized and addressable by id" do
     stories = Registry.stories()
 
@@ -21,5 +38,16 @@ defmodule Breeze.Storybook.RegistryTest do
     [%{id: "flash", variants: variants}] = Registry.stories("storybook", file: "flash.story.exs")
 
     assert Enum.map(variants, & &1.id) == ["default", "square", "rounded"]
+  end
+
+  test "every public Breeze block has an associated story" do
+    assert MapSet.new(Map.keys(@block_story_ids)) ==
+             MapSet.new(Breeze.Blocks.__breeze_components__())
+
+    story_ids = Registry.stories() |> Enum.map(& &1.id) |> MapSet.new()
+
+    assert @block_story_ids
+           |> Map.values()
+           |> Enum.all?(&MapSet.member?(story_ids, &1))
   end
 end

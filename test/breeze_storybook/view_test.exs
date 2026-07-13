@@ -1,6 +1,52 @@
 defmodule Breeze.Storybook.RenderingTest do
   use Breeze.TestSupport.StorybookCase, async: true
 
+  test "renders stories for the keybinding bar, Markdown, and tree blocks" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    for {file, expected_content} <- [
+          {"keybinding_bar.story.exs", ["Active keybindings", "Enter Select", "d Details"]},
+          {"markdown.story.exs", ["# Release Notes", "formatted text", "inline code"]},
+          {"tree.story.exs", ["breeze", "lib", "blocks.ex"]}
+        ] do
+      {:ok, pid} =
+        Breeze.ChildServer.start(
+          view: Breeze.Storybook,
+          terminal: terminal,
+          start_opts: [directory: "storybook", file: file]
+        )
+
+      assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+      plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+
+      for content <- expected_content do
+        assert plain_content =~ content
+      end
+    end
+  end
+
+  test "tree story keeps selection in story-local state" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    {:ok, pid} =
+      Breeze.ChildServer.start(
+        view: Breeze.Storybook,
+        terminal: terminal,
+        start_opts: [directory: "storybook", file: "tree.story.exs"]
+      )
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert {:noreply, "storybook-preview::storybook-tree", true} =
+             Breeze.ChildServer.set_focus(pid, "storybook-preview::storybook-tree")
+
+    assert {:noreply, "storybook-preview::storybook-tree", true} =
+             Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+
+    child = :sys.get_state(pid).children["storybook-preview"].pid
+    assert :sys.get_state(child).assigns.selected == "lib"
+  end
+
   test "dropdown story renders a single visible closed indicator" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
@@ -699,6 +745,10 @@ defmodule Breeze.Storybook.NavigationTest do
       100
     )
 
+    view_state = :sys.get_state(view_pid)
+    input_index = Enum.find_index(view_state.assigns.stories, &(&1.id == "input"))
+    next_story_id = Enum.at(view_state.assigns.stories, input_index + 1).id
+
     send(pid, {reader, {:data, "\e[1;5B"}})
 
     wait_until(
@@ -706,7 +756,7 @@ defmodule Breeze.Storybook.NavigationTest do
         state = :sys.get_state(pid)
 
         state.focused == "storybook-nav" and
-          :sys.get_state(view_pid).assigns.current_story_id == "list" and
+          :sys.get_state(view_pid).assigns.current_story_id == next_story_id and
           state.frame.last_overlays == []
       end,
       100
