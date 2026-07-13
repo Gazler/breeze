@@ -10,8 +10,7 @@ Breeze.Example.run(
     hide_cursor: true,
     mouse: true,
     reload: true,
-    inspector: true,
-    global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+    inspector: true
   ],
   keep_alive: :infinity
 )

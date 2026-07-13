@@ -299,6 +299,47 @@ end
 defmodule Breeze.Storybook.LayoutTest do
   use Breeze.TestSupport.StorybookCase, async: true
 
+  test "renders a keybindings bar" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+
+    assert plain_content =~ "d Details"
+    assert plain_content =~ "F2 Debug"
+    assert plain_content =~ "F3 Theme"
+    assert plain_content =~ "^j/k Stories"
+    assert plain_content =~ "^h/l Variants"
+    assert plain_content =~ "q Quit"
+  end
+
+  test "d toggles story details while focus is inside the preview" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
+
+    assert {:ok, initial_acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    initial_preview_height = :sys.get_state(pid).assigns.preview_panel_height
+    assert Map.has_key?(initial_acc.boxes, "storybook-details")
+
+    assert {:noreply, "storybook-preview::storybook-button-primary", true} =
+             Breeze.ChildServer.set_focus(pid, "storybook-preview::storybook-button-primary")
+
+    assert {:noreply, "storybook-preview::storybook-button-primary", true} =
+             Breeze.ChildServer.dispatch_input(pid, "d")
+
+    assert {:ok, hidden_acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    refute Map.has_key?(hidden_acc.boxes, "storybook-details")
+    assert :sys.get_state(pid).assigns.preview_panel_height > initial_preview_height
+
+    assert {:noreply, "storybook-preview::storybook-button-primary", true} =
+             Breeze.ChildServer.dispatch_input(pid, "d")
+
+    assert {:ok, visible_acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert Map.has_key?(visible_acc.boxes, "storybook-details")
+  end
+
   test "preview panel highlights when a focused element lives inside the preview child" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
@@ -332,15 +373,15 @@ defmodule Breeze.Storybook.LayoutTest do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Breeze.Storybook, terminal: terminal)
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
-    refute plain_content =~ "Debug"
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    refute :sys.get_state(pid).assigns.show_debug
+    refute Map.has_key?(:sys.get_state(pid).children, "debug")
 
     assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "F2")
+    assert :sys.get_state(pid).assigns.show_debug
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
-    assert plain_content =~ "Debug"
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert Map.has_key?(:sys.get_state(pid).children, "debug")
   end
 
   test "F3 cycles the storybook theme" do

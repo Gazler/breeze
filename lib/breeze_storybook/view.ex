@@ -40,6 +40,7 @@ defmodule Breeze.Storybook do
        stories: stories,
        current_story_id: current && current.id,
        current_variant_id: first_variant_id(current),
+       show_details: true,
        show_debug: false
      )
      |> focus("storybook-nav")
@@ -67,13 +68,16 @@ defmodule Breeze.Storybook do
         story_note_rows:
           variant_field(current_variant, current_story, :notes) |> Enum.with_index(),
         story_source: variant_field(current_variant, current_story, :source),
+        storybook_keybindings: storybook_keybinding_hints(),
         preview_story_assigns: preview_story_assigns(assigns[:current_variant_id]),
         preview_story_top: if(variant_tabs?, do: 3, else: 2)
       )
 
     ~H"""
     <box class="width-screen height-screen bg">
-      <box class="inline width-full height-full padding-left-1 padding-right-1">
+      <box
+        class={"inline width-full height-#{@storybook_content_height} padding-left-1 padding-right-1"}
+      >
         <.panel id="storybook-nav-panel" class="width-24 height-full">
           <:title>{@nav_title}</:title>
           <box class="width-full height-full overflow-hidden">
@@ -130,7 +134,12 @@ defmodule Breeze.Storybook do
               </box>
             </box>
           </.panel>
-          <.panel id="storybook-details" class="width-full height-full" focus_within={false}>
+          <.panel
+            :if={@show_details}
+            id="storybook-details"
+            class="width-full height-full"
+            focus_within={false}
+          >
             <:title>{@details_title}</:title>
             <box
               id="storybook-details-scroll"
@@ -164,7 +173,10 @@ defmodule Breeze.Storybook do
           </.panel>
         </box>
       </box>
-      <box :if={@show_debug} class="fixed right-0 bottom-0 width-42 height-24 layer-50">
+      <box class="height-1 bg-panel overflow-hidden">
+        <.keybinding_bar keybindings={@storybook_keybindings}/>
+      </box>
+      <box :if={@show_debug} class="fixed right-0 bottom-1 width-42 height-24 layer-50">
         <live
           id="debug"
           view={Breeze.Debug}
@@ -202,6 +214,10 @@ defmodule Breeze.Storybook do
 
   def handle_event(_, %{"key" => "F3"}, term) do
     {:noreply, cycle_storybook_theme(term) |> sync_storybook_layout()}
+  end
+
+  def handle_event(_, %{"key" => "d"}, term) do
+    {:noreply, toggle_story_details(term)}
   end
 
   def handle_event(_, %{"ctrlKey" => true, "key" => "ArrowLeft"}, term) do
@@ -296,8 +312,9 @@ defmodule Breeze.Storybook do
 
   defp storybook_global_keybindings do
     [
-      {"F2", &handle_storybook_global_key/2},
-      {"F3", &handle_storybook_global_key/2},
+      {"d", "Details", &handle_storybook_global_key/2},
+      {"F2", "Debug", &handle_storybook_global_key/2},
+      {"F3", "Theme", &handle_storybook_global_key/2},
       {"ArrowLeft", &handle_storybook_global_key/2},
       {"h", &handle_storybook_global_key/2},
       {"ArrowRight", &handle_storybook_global_key/2},
@@ -305,39 +322,59 @@ defmodule Breeze.Storybook do
       {"ArrowUp", &handle_storybook_global_key/2},
       {"k", &handle_storybook_global_key/2},
       {"ArrowDown", &handle_storybook_global_key/2},
-      {"j", &handle_storybook_global_key/2}
+      {"j", &handle_storybook_global_key/2},
+      {"q", "Quit", &handle_storybook_global_key/2}
     ]
   end
 
-  defp handle_storybook_global_key(%{"ctrlKey" => true, "key" => key}, term)
+  defp handle_storybook_global_key(
+         %{"ctrlKey" => true, "key" => key},
+         %{view: __MODULE__} = term
+       )
        when key in ["ArrowLeft", "h"] do
     {:noreply,
      term |> step_variant(-1) |> focus("storybook-variant-tabs") |> sync_storybook_layout()}
   end
 
-  defp handle_storybook_global_key(%{"ctrlKey" => true, "key" => key}, term)
+  defp handle_storybook_global_key(
+         %{"ctrlKey" => true, "key" => key},
+         %{view: __MODULE__} = term
+       )
        when key in ["ArrowRight", "l"] do
     {:noreply,
      term |> step_variant(1) |> focus("storybook-variant-tabs") |> sync_storybook_layout()}
   end
 
-  defp handle_storybook_global_key(%{"ctrlKey" => true, "key" => key}, term)
+  defp handle_storybook_global_key(
+         %{"ctrlKey" => true, "key" => key},
+         %{view: __MODULE__} = term
+       )
        when key in ["ArrowUp", "k"] do
     {:noreply, term |> step_story(-1) |> focus("storybook-nav") |> sync_storybook_layout()}
   end
 
-  defp handle_storybook_global_key(%{"ctrlKey" => true, "key" => key}, term)
+  defp handle_storybook_global_key(
+         %{"ctrlKey" => true, "key" => key},
+         %{view: __MODULE__} = term
+       )
        when key in ["ArrowDown", "j"] do
     {:noreply, term |> step_story(1) |> focus("storybook-nav") |> sync_storybook_layout()}
   end
 
-  defp handle_storybook_global_key(%{"key" => "F2"}, term) do
+  defp handle_storybook_global_key(%{"key" => "F2"}, %{view: __MODULE__} = term) do
     {:noreply, assign(term, show_debug: !term.assigns.show_debug)}
   end
 
-  defp handle_storybook_global_key(%{"key" => "F3"}, term) do
+  defp handle_storybook_global_key(%{"key" => "F3"}, %{view: __MODULE__} = term) do
     {:noreply, cycle_storybook_theme(term) |> sync_storybook_layout()}
   end
+
+  defp handle_storybook_global_key(%{"key" => "d"}, %{view: __MODULE__} = term) do
+    {:noreply, toggle_story_details(term)}
+  end
+
+  defp handle_storybook_global_key(%{"key" => "q"}, %{view: __MODULE__} = term),
+    do: {:stop, term}
 
   defp handle_storybook_global_key(_event, _term), do: :continue
 
@@ -346,6 +383,23 @@ defmodule Breeze.Storybook do
 
     term
     |> put_preview_child_theme(term.theme_source)
+  end
+
+  defp toggle_story_details(term) do
+    term
+    |> assign(show_details: !Map.get(term.assigns, :show_details, true))
+    |> sync_storybook_layout()
+  end
+
+  defp storybook_keybinding_hints do
+    Breeze.Keybindings.normalize_list([
+      {"d", "Details"},
+      {"F2", "Debug"},
+      {"F3", "Theme"},
+      {"^j/k", "Stories"},
+      {"^h/l", "Variants"},
+      {"q", "Quit"}
+    ])
   end
 
   defp put_preview_child_theme(term, theme) do
@@ -433,13 +487,24 @@ defmodule Breeze.Storybook do
       |> Map.take([:stories, :current_story_id, :story_directory, :story_file])
       |> current_story()
 
+    show_details = Map.get(term.assigns, :show_details, true)
+    storybook_content_height = max(screen_height - 1, 1)
     preview_panel_width = max(screen_width - 27, 20)
     variant_rows = if Map.get(current_story, :variants, []) == [], do: 0, else: 1
-    preview_panel_height = max(div(screen_height, 2), 10)
+
+    preview_panel_height =
+      if show_details do
+        max(div(storybook_content_height, 2), 10)
+      else
+        storybook_content_height
+      end
+
     preview_story_width = max(preview_panel_width - 2, 1)
     preview_story_height = max(preview_panel_height - 4 - variant_rows, 1)
 
     assign(term,
+      show_details: show_details,
+      storybook_content_height: storybook_content_height,
       preview_panel_height: preview_panel_height,
       preview_story_width: preview_story_width,
       preview_story_height: preview_story_height
