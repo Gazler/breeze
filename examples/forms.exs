@@ -23,15 +23,10 @@ defmodule FormsDemo do
        screen_width: screen_width,
        field_width: default_field_width(screen_width),
        name: "",
-       name_cursor: 0,
        email: "dev@example.com",
-       email_cursor: String.length("dev@example.com"),
        website: @website,
-       website_cursor: String.length(@website),
        path: @path,
-       path_cursor: String.length(@path),
-       message: @message,
-       message_cursor: String.length(@message)
+       message: @message
      )}
   end
 
@@ -41,7 +36,6 @@ defmodule FormsDemo do
         fields:
           Enum.map(@fields, fn {id, label} ->
             value = Map.fetch!(assigns, String.to_atom(id))
-            cursor = Map.fetch!(assigns, String.to_atom("#{id}_cursor"))
             width = field_width(id, assigns.field_width)
 
             %{
@@ -49,9 +43,7 @@ defmodule FormsDemo do
               label: label,
               width: width,
               value: value,
-              cursor: cursor,
-              row_style: row_style(id),
-              display: input_preview(value, cursor, width)
+              row_style: row_style(id)
             }
           end),
         message_height: message_height(assigns.message)
@@ -74,44 +66,36 @@ defmodule FormsDemo do
           <.input
             id={field.id}
             input-value={field.value}
-            input-cursor={field.cursor}
             br-change={"#{field.id}_changed"}
             style={"width-#{field.width} focus:inverse"}
           >
-            {field.display}
+            {field.value}
           </.input>
-          <box style="text-24">width={field.width} cursor={field.cursor} value={field.value}</box>
+          <box style="text-24">width={field.width} value={field.value}</box>
         </box>
         <box style="height-8">
           <box style="text-4 bold">Message</box>
           <.textarea
             id="message"
             textarea-value={@message}
-            textarea-cursor={@message_cursor}
             textarea-placeholder="Add some context"
             br-change="message_changed"
             style={"width-#{@field_width} height-#{@message_height} focus:inverse"}
           />
-          <box style="text-24">
-            height={@message_height} cursor={@message_cursor} value={inspect(@message)}
-          </box>
+          <box style="text-24">height={@message_height} value={inspect(@message)}</box>
         </box>
       </box>
     </box>
     """
   end
 
-  def handle_event(event, %{value: value, cursor: cursor}, term) when is_binary(event) do
+  def handle_event(event, %{value: value}, term) when is_binary(event) do
     case String.replace_suffix(event, "_changed", "") do
       ^event ->
         {:noreply, term}
 
       field ->
-        {:noreply,
-         assign(term, [
-           {String.to_atom(field), value},
-           {String.to_atom("#{field}_cursor"), cursor}
-         ])}
+        {:noreply, assign(term, String.to_atom(field), value)}
     end
   end
 
@@ -142,31 +126,6 @@ defmodule FormsDemo do
     |> Kernel.+(2)
     |> min(8)
     |> max(4)
-  end
-
-  defp input_preview(value, cursor, width) do
-    source = " " <> value
-    display_cursor = min(max(cursor, 0) + 1, String.length(source))
-    scrolled? = display_cursor >= width and width > 1
-    visible_width = if(scrolled?, do: width - 1, else: width)
-
-    scroll_left =
-      cond do
-        display_cursor >= String.length(source) and String.length(source) >= visible_width ->
-          max(String.length(source) - visible_width, 0)
-
-        display_cursor >= visible_width ->
-          display_cursor - (visible_width - 1)
-
-        true ->
-          0
-      end
-
-    source
-    |> String.graphemes()
-    |> Enum.slice(scroll_left, visible_width)
-    |> Enum.join()
-    |> String.pad_trailing(width)
   end
 end
 

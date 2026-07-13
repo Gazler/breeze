@@ -11,24 +11,7 @@ defmodule Breeze.Implicit.Textarea do
     value = Map.get(root_attrs, :"textarea-value", "")
 
     cursor =
-      case Map.fetch(root_attrs, :"textarea-cursor") do
-        {:ok, nil} ->
-          if Map.get(last_state, :value) == value and is_integer(Map.get(last_state, :cursor)) do
-            Map.get(last_state, :cursor)
-          else
-            TextEditor.max_cursor(value)
-          end
-
-        {:ok, raw_cursor} ->
-          if is_binary(raw_cursor), do: String.to_integer(raw_cursor), else: raw_cursor
-
-        :error ->
-          if Map.get(last_state, :value) == value and is_integer(Map.get(last_state, :cursor)) do
-            Map.get(last_state, :cursor)
-          else
-            TextEditor.max_cursor(value)
-          end
-      end
+      TextEditor.initial_cursor(value, Map.get(root_attrs, :"textarea-cursor"), last_state)
 
     attrs_state = %{
       value: value,

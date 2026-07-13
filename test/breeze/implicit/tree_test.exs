@@ -136,7 +136,7 @@ defmodule Breeze.Implicit.TreeTest do
       refute "src" in collapse_payload.expanded
     end
 
-    test "emits offset changes from mouse wheel events" do
+    test "updates its offset internally for mouse wheel events" do
       element = %{height: 3, viewport_height: 3, content_height: 10}
 
       state = %{
@@ -150,7 +150,7 @@ defmodule Breeze.Implicit.TreeTest do
         expanded: MapSet.new()
       }
 
-      {{:change, payload}, scrolled} =
+      {:noreply, scrolled} =
         Implicit.Tree.handle_event(
           :ignore,
           %{"mouse" => %{button: :wheel_down}, "element" => element},
@@ -158,7 +158,6 @@ defmodule Breeze.Implicit.TreeTest do
         )
 
       assert scrolled.offset == 1
-      assert payload.offset == 1
     end
   end
 

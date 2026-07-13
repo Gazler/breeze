@@ -3,6 +3,23 @@ defmodule Breeze.Implicit.TextEditor do
 
   def max_cursor(value), do: String.length(value)
 
+  def initial_cursor(value, _requested_cursor, %{value: value, cursor: cursor})
+      when is_integer(cursor) do
+    clamp_cursor(cursor, value)
+  end
+
+  def initial_cursor(value, requested_cursor, _last_state) when is_binary(requested_cursor) do
+    requested_cursor
+    |> String.to_integer()
+    |> clamp_cursor(value)
+  end
+
+  def initial_cursor(value, requested_cursor, _last_state) when is_integer(requested_cursor) do
+    clamp_cursor(requested_cursor, value)
+  end
+
+  def initial_cursor(value, _requested_cursor, _last_state), do: max_cursor(value)
+
   def normalize_state(%{value: value, cursor: cursor} = state) do
     %{state | cursor: clamp_cursor(cursor, value)}
   end
@@ -13,12 +30,13 @@ defmodule Breeze.Implicit.TextEditor do
     {before, rest} = split_value(state.value, cursor)
     value = drop_trailing_grapheme(before) <> rest
 
-    change(
+    next_state =
       state
       |> Map.merge(%{value: value, cursor: cursor - 1})
       |> reset_preferred_column()
       |> normalize_state()
-    )
+
+    change(state, next_state)
   end
 
   def delete_previous_word(%{cursor: cursor} = state) when cursor > 0 do
@@ -32,12 +50,13 @@ defmodule Breeze.Implicit.TextEditor do
 
     value = kept_before <> rest
 
-    change(
+    next_state =
       state
       |> Map.merge(%{value: value, cursor: String.length(kept_before)})
       |> reset_preferred_column()
       |> normalize_state()
-    )
+
+    change(state, next_state)
   end
 
   def delete_previous_word(state), do: {:noreply, state}
@@ -46,12 +65,13 @@ defmodule Breeze.Implicit.TextEditor do
     {before, rest} = split_value(state.value, state.cursor)
 
     if rest != "" do
-      change(
+      next_state =
         state
         |> Map.put(:value, before <> drop_leading_grapheme(rest))
         |> reset_preferred_column()
         |> normalize_state()
-      )
+
+      change(state, next_state)
     else
       {:noreply, state}
     end
@@ -61,12 +81,13 @@ defmodule Breeze.Implicit.TextEditor do
     {before, rest} = split_value(state.value, state.cursor)
     value = before <> "\n" <> rest
 
-    change(
+    next_state =
       state
       |> Map.merge(%{value: value, cursor: state.cursor + 1})
       |> reset_preferred_column()
       |> normalize_state()
-    )
+
+    change(state, next_state)
   end
 
   def submit(state) do
@@ -74,14 +95,14 @@ defmodule Breeze.Implicit.TextEditor do
   end
 
   def move_left(%{cursor: cursor} = state) when cursor > 0 do
-    change(state |> Map.put(:cursor, cursor - 1) |> reset_preferred_column() |> normalize_state())
+    update(state |> Map.put(:cursor, cursor - 1) |> reset_preferred_column() |> normalize_state())
   end
 
   def move_left(state), do: {:noreply, state}
 
   def move_right(state) do
     if state.cursor < max_cursor(state.value) do
-      change(
+      update(
         state
         |> Map.put(:cursor, state.cursor + 1)
         |> reset_preferred_column()
@@ -95,7 +116,7 @@ defmodule Breeze.Implicit.TextEditor do
   def move_to_start(%{cursor: 0} = state), do: {:noreply, state}
 
   def move_to_start(state) do
-    change(state |> Map.put(:cursor, 0) |> reset_preferred_column() |> normalize_state())
+    update(state |> Map.put(:cursor, 0) |> reset_preferred_column() |> normalize_state())
   end
 
   def move_to_end(state) do
@@ -104,7 +125,7 @@ defmodule Breeze.Implicit.TextEditor do
     if state.cursor == end_cursor do
       {:noreply, state}
     else
-      change(
+      update(
         state
         |> Map.put(:cursor, end_cursor)
         |> reset_preferred_column()
@@ -119,7 +140,7 @@ defmodule Breeze.Implicit.TextEditor do
     if state.cursor == line_start do
       {:noreply, state}
     else
-      change(
+      update(
         state
         |> Map.put(:cursor, line_start)
         |> reset_preferred_column()
@@ -134,7 +155,7 @@ defmodule Breeze.Implicit.TextEditor do
     if state.cursor == line_end do
       {:noreply, state}
     else
-      change(state |> Map.put(:cursor, line_end) |> reset_preferred_column() |> normalize_state())
+      update(state |> Map.put(:cursor, line_end) |> reset_preferred_column() |> normalize_state())
     end
   end
 
@@ -151,7 +172,7 @@ defmodule Breeze.Implicit.TextEditor do
         preferred_column = Map.get(state, :preferred_column) || line_offset
         cursor = cursor_for_line(lines, target_index, preferred_column)
 
-        change(
+        update(
           state
           |> Map.merge(%{cursor: cursor, preferred_column: preferred_column})
           |> normalize_state()
@@ -164,20 +185,27 @@ defmodule Breeze.Implicit.TextEditor do
       {before, rest} = split_value(state.value, state.cursor)
       value = before <> key <> rest
 
-      change(
+      next_state =
         state
         |> Map.merge(%{value: value, cursor: state.cursor + String.length(key)})
         |> reset_preferred_column()
         |> normalize_state()
-      )
+
+      change(state, next_state)
     else
       {:noreply, state}
     end
   end
 
-  defp change(state) do
-    {{:change, %{value: state.value, cursor: state.cursor}}, state}
+  defp change(previous_state, state) do
+    if state.value == previous_state.value do
+      update(state)
+    else
+      {{:change, %{value: state.value, cursor: state.cursor}}, state}
+    end
   end
+
+  defp update(state), do: {:noreply, state}
 
   defp reset_preferred_column(state) do
     if Map.has_key?(state, :preferred_column),

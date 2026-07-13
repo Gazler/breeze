@@ -163,10 +163,10 @@ defmodule Breeze.Implicit.InputTest do
     assert meta[:requires_layout_rerender] == true
   end
 
-  test "backspace clamps an out-of-range cursor" do
+  test "cursor movement clamps an out-of-range cursor without emitting change" do
     state = %{value: "", cursor: 1}
 
-    assert {{:change, %{value: "", cursor: 0}}, %{value: "", cursor: 0}} =
+    assert {:noreply, %{value: "", cursor: 0}} =
              Input.handle_event(nil, %{"key" => "ArrowLeft"}, state)
 
     assert {:noreply, %{value: "", cursor: 0}} =
@@ -220,6 +220,15 @@ defmodule Breeze.Implicit.InputTest do
     assert meta[:active_when_focused] == true
     assert meta[:captures_printable_keys] == true
     assert meta[:requires_layout_rerender] == true
+  end
+
+  test "init preserves the previous cursor when the same value includes an input-cursor hint" do
+    assert {:ok, %{value: "hello", cursor: 2, placeholder: nil}, _meta} =
+             Input.init([], %{:"input-value" => "hello", :"input-cursor" => 4}, %{
+               value: "hello",
+               cursor: 2,
+               placeholder: nil
+             })
   end
 
   test "init moves the cursor to the end when the value changes without input-cursor" do
@@ -415,7 +424,7 @@ defmodule Breeze.Implicit.InputTest do
     assert {:noreply, %{value: "hello", cursor: 5}} =
              Input.handle_event(nil, %{"key" => "ArrowRight"}, %{value: "hello", cursor: 5})
 
-    assert {{:change, %{value: "hello", cursor: 5}}, %{value: "hello", cursor: 5}} =
+    assert {:noreply, %{value: "hello", cursor: 5}} =
              Input.handle_event(nil, %{"key" => "End"}, %{value: "hello", cursor: 2})
   end
 

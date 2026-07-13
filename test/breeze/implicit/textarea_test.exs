@@ -111,6 +111,15 @@ defmodule Breeze.Implicit.TextareaTest do
     assert meta[:requires_layout_rerender] == true
   end
 
+  test "init preserves the previous cursor when the same value includes a textarea-cursor hint" do
+    assert {:ok, %{value: "hello", cursor: 2, placeholder: nil}, _meta} =
+             Textarea.init([], %{:"textarea-value" => "hello", :"textarea-cursor" => 4}, %{
+               value: "hello",
+               cursor: 2,
+               placeholder: nil
+             })
+  end
+
   test "enter inserts a newline" do
     assert {{:change, %{value: "hello\n", cursor: 6}},
             %{value: "hello\n", cursor: 6, preferred_column: nil, submit_on_enter?: false}} =
@@ -140,24 +149,20 @@ defmodule Breeze.Implicit.TextareaTest do
   test "arrow up and down move between explicit lines" do
     state = %{value: "alpha\nbeta\ngamma", cursor: 8, preferred_column: nil}
 
-    assert {{:change, %{value: "alpha\nbeta\ngamma", cursor: 2}},
-            %{cursor: 2, preferred_column: 2}} =
+    assert {:noreply, %{cursor: 2, preferred_column: 2}} =
              Textarea.handle_event(nil, %{"key" => "ArrowUp"}, state)
 
-    assert {{:change, %{value: "alpha\nbeta\ngamma", cursor: 13}},
-            %{cursor: 13, preferred_column: 2}} =
+    assert {:noreply, %{cursor: 13, preferred_column: 2}} =
              Textarea.handle_event(nil, %{"key" => "ArrowDown"}, state)
   end
 
   test "home and end move within the current line" do
     state = %{value: "alpha\nbeta\ngamma", cursor: 8, preferred_column: nil}
 
-    assert {{:change, %{value: "alpha\nbeta\ngamma", cursor: 6}},
-            %{cursor: 6, preferred_column: nil}} =
+    assert {:noreply, %{cursor: 6, preferred_column: nil}} =
              Textarea.handle_event(nil, %{"key" => "Home"}, state)
 
-    assert {{:change, %{value: "alpha\nbeta\ngamma", cursor: 10}},
-            %{cursor: 10, preferred_column: nil}} =
+    assert {:noreply, %{cursor: 10, preferred_column: nil}} =
              Textarea.handle_event(nil, %{"key" => "End"}, state)
   end
 

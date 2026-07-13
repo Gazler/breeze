@@ -1330,7 +1330,11 @@ defmodule Breeze.Blocks do
   attr :class, :string, default: nil
   attr :style, :any, default: nil
   attr :"input-value", :string, default: ""
-  attr :"input-cursor", :any, default: nil
+
+  attr :"input-cursor", :any,
+    default: nil,
+    doc: "Cursor position used initially and when adopting a new input-value"
+
   attr :"input-placeholder", :string, default: nil
   attr :rest, :global
 
@@ -1367,7 +1371,11 @@ defmodule Breeze.Blocks do
   attr :class, :string, default: nil
   attr :style, :any, default: nil
   attr :"textarea-value", :string, default: ""
-  attr :"textarea-cursor", :any, default: nil
+
+  attr :"textarea-cursor", :any,
+    default: nil,
+    doc: "Cursor position used initially and when adopting a new textarea-value"
+
   attr :"textarea-placeholder", :string, default: nil
   attr :"textarea-prefix", :string, default: nil
   attr :"textarea-submit-on-enter", :boolean, default: false

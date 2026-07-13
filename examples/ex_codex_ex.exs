@@ -13,7 +13,6 @@ defmodule ExCodexEx do
      |> focus("composer")
      |> assign(
        prompt: @initial_prompt,
-       prompt_cursor: String.length(@initial_prompt),
        run_count: 0,
        status: "idle",
        screen_height: screen_height(term),
@@ -56,7 +55,6 @@ defmodule ExCodexEx do
         <.textarea
           id="composer"
           textarea-value={@prompt}
-          textarea-cursor={@prompt_cursor}
           textarea-placeholder="Ask ExCodexEx to change the codebase"
           textarea-prefix="› "
           textarea-submit-on-enter
@@ -69,13 +67,13 @@ defmodule ExCodexEx do
     """
   end
 
-  def handle_event("prompt_changed", %{value: value, cursor: cursor}, term) do
-    {:noreply, assign(term, prompt: value, prompt_cursor: cursor)}
+  def handle_event("prompt_changed", %{value: value}, term) do
+    {:noreply, assign(term, prompt: value)}
   end
 
   def handle_event("prompt_submitted", %{value: value}, term) do
     term
-    |> assign(prompt: value, prompt_cursor: String.length(value))
+    |> assign(prompt: value)
     |> run_agent()
   end
 
@@ -116,7 +114,6 @@ defmodule ExCodexEx do
      assign(term,
        run_count: term.assigns.run_count + 1,
        prompt: "",
-       prompt_cursor: 0,
        status: "running",
        transcript:
          term.assigns.transcript ++
