@@ -716,6 +716,81 @@ end
 defmodule Breeze.Storybook.ServerRenderingTest do
   use Breeze.TestSupport.StorybookCase, async: true
 
+  defmodule NestedStorybookRoot do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="padding-top-3 padding-left-5 width-full height-full">
+        <live
+          id="outer"
+          view={Breeze.Storybook}
+          start_opts={[directory: "storybook", file: "input.story.exs"]}
+          class="width-60 height-18"
+          focusable
+        >
+        </live>
+      </box>
+      """
+    end
+  end
+
+  test "nested storybook cursor decorations use absolute preview coordinates" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: NestedStorybookRoot,
+        terminal: terminal
+      )
+
+    on_exit(fn -> stop_server(pid) end)
+
+    state =
+      wait_until(
+        fn ->
+          state = :sys.get_state(pid)
+
+          if Map.has_key?(state.children, "outer::storybook-preview") do
+            state
+          end
+        end,
+        100
+      )
+
+    preview_pid = state.children["outer::storybook-preview"].pid
+
+    assert {:noreply, "storybook-input-active", true} =
+             Breeze.ChildServer.set_focus(preview_pid, "storybook-input-active")
+
+    :sys.replace_state(pid, fn state ->
+      %{state | focused: "outer::storybook-preview::storybook-input-active"}
+    end)
+
+    send(pid, :child_invalidated)
+
+    {input_viewport, cursor_layout} =
+      wait_until(
+        fn ->
+          state = :sys.get_state(pid)
+
+          input_viewport =
+            state.rendered.elements["outer::storybook-preview::storybook-input-active"]
+
+          cursor =
+            Enum.find(state.frame.decorations, fn decoration ->
+              decoration.id == "outer::storybook-preview::storybook-input-active"
+            end)
+
+          if input_viewport && cursor, do: {input_viewport, cursor.layout}
+        end,
+        100
+      )
+
+    assert cursor_layout.left == input_viewport.left
+    assert cursor_layout.top == input_viewport.top
+  end
+
   test "storybook preview child patches clear the full viewport height when the dropdown collapses" do
     {terminal, pid} = start_storybook_server!("dropdown.story.exs")
     view_pid = :sys.get_state(pid).view_pid

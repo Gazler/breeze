@@ -1204,6 +1204,7 @@ defmodule Breeze.Server do
     id = fetch_live_attr!(attrs, :id)
     full_id = live_id(Keyword.get(opts, :live_prefix), id)
     expected_view = fetch_live_attr!(attrs, :view)
+    viewport = Keyword.get(opts, :live_viewport)
 
     %{
       id: id,
@@ -1215,7 +1216,12 @@ defmodule Breeze.Server do
         child_start_opts(fetch_live_attr(attrs, :start_opts, []), expected_view, state),
       expected_assigns: fetch_live_attr(attrs, :assigns, %{}) |> Map.new(),
       terminal: Keyword.get(opts, :live_terminal, state.terminal),
-      viewport: Keyword.get(opts, :live_viewport)
+      viewport: viewport,
+      decoration_viewport:
+        accumulate_live_viewport(
+          viewport,
+          Keyword.get(opts, :live_decoration_parent_viewport)
+        )
     }
   end
 
@@ -1259,6 +1265,13 @@ defmodule Breeze.Server do
              profile_scope: profile_scope,
              profile_label: "#{ctx.full_id} #{inspect(child.view)}",
              live_view: fn child_attrs, child_opts ->
+               child_opts =
+                 Keyword.put(
+                   child_opts,
+                   :live_decoration_parent_viewport,
+                   ctx.decoration_viewport
+                 )
+
                render_live_child(
                  child_attrs,
                  child_opts,
@@ -1306,7 +1319,7 @@ defmodule Breeze.Server do
     Enum.each(child_decorations, fn decoration ->
       RenderTracking.track_decoration(
         tracking_ref,
-        namespace_decoration(decoration, ctx.full_id, ctx.viewport)
+        namespace_decoration(decoration, ctx.full_id, ctx.decoration_viewport)
       )
     end)
 
@@ -1716,6 +1729,15 @@ defmodule Breeze.Server do
     |> Enum.reject(&is_nil/1)
     |> Enum.min(fn -> nil end)
   end
+
+  defp accumulate_live_viewport(
+         %{left: left, top: top} = viewport,
+         %{left: parent_left, top: parent_top}
+       ) do
+    %{viewport | left: left + parent_left, top: top + parent_top}
+  end
+
+  defp accumulate_live_viewport(viewport, _parent_viewport), do: viewport
 
   defp namespace_decoration(decoration, full_id, viewport) do
     decoration
