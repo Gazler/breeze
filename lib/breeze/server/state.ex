@@ -7,7 +7,9 @@ defmodule Breeze.Server.State.Input do
     :pending_sync_child_render_id,
     queued_input: :queue.new(),
     flush_scheduled?: false,
-    render_after_flush?: false
+    render_after_flush?: false,
+    last_interaction_at: nil,
+    global_keybindings: []
   ]
 end
 
@@ -21,7 +23,8 @@ defmodule Breeze.Server.State.Frame do
     last_overlays: [],
     decorations: [],
     animation_timer: nil,
-    next_tick_at: nil
+    next_tick_at: nil,
+    last_render_at: nil
   ]
 end
 

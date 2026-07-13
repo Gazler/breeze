@@ -205,8 +205,8 @@ defmodule Breeze.Inspector do
         view_pid: Map.get(state, :view_pid)
       },
       screen: screen,
-      last_render_at: Map.get(state, :last_render_at),
-      last_interaction_at: Map.get(state, :last_interaction_at),
+      last_render_at: nested_state_field(state, :frame, :last_render_at),
+      last_interaction_at: nested_state_field(state, :input, :last_interaction_at),
       counts: %{
         elements: map_size(rendered_field(state, :flags, :rendered_flags)),
         focusables: length(focusable_ids),
@@ -657,6 +657,13 @@ defmodule Breeze.Inspector do
 
   defp rendered_field(state, _field, legacy) do
     Map.get(state, legacy, %{})
+  end
+
+  defp nested_state_field(state, container, field) do
+    case Map.get(state, container) do
+      nested when is_map(nested) -> Map.get(nested, field, Map.get(state, field))
+      _other -> Map.get(state, field)
+    end
   end
 
   defp content_box(viewport, %BackBreeze.Box{} = box, style) do

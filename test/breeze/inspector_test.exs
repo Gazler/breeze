@@ -204,6 +204,8 @@ defmodule Breeze.InspectorTest do
         terminal: terminal,
         view: RenderTreeView,
         theme: theme,
+        input: %State.Input{last_interaction_at: 456},
+        frame: %State.Frame{last_render_at: 123},
         inspector_state: %State.Inspector{config: true, selected_id: "leaf"},
         rendered: %State.Rendered{}
       }
@@ -213,6 +215,8 @@ defmodule Breeze.InspectorTest do
 
     assert snapshot.selected_id == "leaf"
     assert snapshot.render_tree?
+    assert snapshot.last_render_at == 123
+    assert snapshot.last_interaction_at == 456
     refute Map.has_key?(snapshot, :render_tree)
 
     tree = Inspector.render_tree(state, expanded: ["root"], selected_id: "leaf", limit: 10)

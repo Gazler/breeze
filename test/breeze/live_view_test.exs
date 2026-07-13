@@ -2490,7 +2490,7 @@ defmodule Breeze.LiveView.ReloadAndFrameTest do
 
       match?(
         [{"y", _fun}],
-        state.global_keybindings
+        state.input.global_keybindings
       )
     end)
 

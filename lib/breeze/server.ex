@@ -86,10 +86,7 @@ defmodule Breeze.Server do
     :crash,
     :crash_scrollback?,
     :terminal_size_override,
-    :last_render_at,
-    :last_interaction_at,
     children: %{},
-    global_keybindings: [],
     input: %State.Input{},
     frame: %State.Frame{},
     debug: %State.Debug{},
@@ -368,11 +365,10 @@ defmodule Breeze.Server do
         child_process_flags: child_process_flags,
         clipboard_opts: Keyword.get(internal_opts, :clipboard, []),
         terminal_size_override: terminal_size_override,
-        global_keybindings: Keyword.get(opts, :global_keybindings, []),
-        last_render_at: System.monotonic_time(:millisecond),
-        last_interaction_at: nil,
-        input: %State.Input{},
-        frame: %State.Frame{},
+        input: %State.Input{
+          global_keybindings: Keyword.get(opts, :global_keybindings, [])
+        },
+        frame: %State.Frame{last_render_at: System.monotonic_time(:millisecond)},
         debug: %State.Debug{},
         inspector_state: %State.Inspector{config: Keyword.get(opts, :inspector, false)},
         rendered: %State.Rendered{tracking_table: RenderTracking.new_table()}
@@ -847,7 +843,7 @@ defmodule Breeze.Server do
   end
 
   defp touch_interaction(state) do
-    %{state | last_interaction_at: System.monotonic_time(:millisecond)}
+    update_input(state, last_interaction_at: System.monotonic_time(:millisecond))
   end
 
   defp sync_input?(state, key) do
@@ -1064,7 +1060,7 @@ defmodule Breeze.Server do
     |> Inspector.merge_render_data(result.acc, safe_root_metadata(state))
     |> update_frame(decorations: decorations)
     |> Map.put(:focused, result.focused)
-    |> Map.put(:last_render_at, System.monotonic_time(:millisecond))
+    |> update_frame(last_render_at: System.monotonic_time(:millisecond))
     |> Debug.put_stat(:last_render_cause, result.cause)
     |> Debug.put_stat(:last_root_snapshot_us, result.root_snapshot_us)
     |> Debug.put_stat(
@@ -1658,8 +1654,8 @@ defmodule Breeze.Server do
       now: now,
       pending?: pending_active?(state),
       focused?: (decoration[:owner_id] || decoration.id) == state.focused,
-      last_render_at: state.last_render_at,
-      last_interaction_at: state.last_interaction_at,
+      last_render_at: state.frame.last_render_at,
+      last_interaction_at: state.input.last_interaction_at,
       theme: state.theme,
       id: decoration.id,
       layout: decoration[:layout]
@@ -2229,7 +2225,7 @@ defmodule Breeze.Server do
              process_flags: state.child_process_flags || [],
              server: self(),
              render_tree?: Breeze.Inspector.enabled?(state),
-             global_keybindings: state.global_keybindings || [],
+             global_keybindings: state.input.global_keybindings || [],
              invalidate: fn -> send(session, :child_invalidated) end
            )
          end) do
@@ -2327,6 +2323,7 @@ defmodule Breeze.Server do
   defp apply_refreshed_server_opts(state, refreshed_opts) do
     refreshed_view = Keyword.get(refreshed_opts, :view, state.view)
     refreshed_start_opts = Keyword.get(refreshed_opts, :start_opts, state.start_opts)
+    current_global_keybindings = state.input.global_keybindings
 
     if refreshed_view != state.view or refreshed_start_opts != state.start_opts do
       {:restart,
@@ -2334,13 +2331,13 @@ defmodule Breeze.Server do
        |> Map.put(:view, refreshed_view)
        |> Map.put(:start_opts, refreshed_start_opts)
        |> Map.put(:mouse_mode, Keyword.get(refreshed_opts, :mouse, state.mouse_mode))
-       |> Map.put(
-         :global_keybindings,
-         Keyword.get(refreshed_opts, :global_keybindings, state.global_keybindings)
+       |> update_input(
+         global_keybindings:
+           Keyword.get(refreshed_opts, :global_keybindings, current_global_keybindings)
        )}
     else
       global_keybindings =
-        Keyword.get(refreshed_opts, :global_keybindings, state.global_keybindings)
+        Keyword.get(refreshed_opts, :global_keybindings, current_global_keybindings)
 
       mouse_mode = Keyword.get(refreshed_opts, :mouse, state.mouse_mode)
 
@@ -2353,7 +2350,7 @@ defmodule Breeze.Server do
         :ok ->
           {:ok,
            state
-           |> Map.put(:global_keybindings, global_keybindings)
+           |> update_input(global_keybindings: global_keybindings)
            |> Map.put(:mouse_mode, mouse_mode)
            |> Map.put(:terminal, terminal)}
 
