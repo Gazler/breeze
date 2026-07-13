@@ -17,17 +17,18 @@ defmodule Breeze.Implicit.Dropdown do
     selected = Enum.at(values, selected_index)
     open? = Map.get(last_state, :open?, false)
 
-    %{
-      id: Map.get(root_attrs, :id),
-      values: values,
-      selected: selected,
-      selected_index: selected_index,
-      highlighted_index:
-        normalize_index(Map.get(last_state, :highlighted_index, selected_index), values),
-      open?: open?,
-      menu_width: width_option(root_attrs, :"dropdown-menu-width", 12),
-      menu_height: int_option(root_attrs, :"dropdown-menu-height", length(values) + 2)
-    }
+    {:ok,
+     %{
+       id: Map.get(root_attrs, :id),
+       values: values,
+       selected: selected,
+       selected_index: selected_index,
+       highlighted_index:
+         normalize_index(Map.get(last_state, :highlighted_index, selected_index), values),
+       open?: open?,
+       menu_width: width_option(root_attrs, :"dropdown-menu-width", 12),
+       menu_height: int_option(root_attrs, :"dropdown-menu-height", length(values) + 2)
+     }}
   end
 
   def handle_event(_, %{"key" => key}, %{open?: false} = state)

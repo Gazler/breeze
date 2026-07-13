@@ -35,16 +35,17 @@ defmodule Breeze.Implicit.Tabs do
         el -> el.viewport_width
       end
 
-    %{
-      values: values,
-      widths: widths,
-      selected: selected,
-      selected_index: selected_index,
-      offset_x: offset_x,
-      viewport_width: viewport_width,
-      delegate_target: Map.get(root_attrs, :"tab-delegate"),
-      target_prefix: root_attrs |> Map.get(:id, "") |> Kernel.<>("-tab-")
-    }
+    {:ok,
+     %{
+       values: values,
+       widths: widths,
+       selected: selected,
+       selected_index: selected_index,
+       offset_x: offset_x,
+       viewport_width: viewport_width,
+       delegate_target: Map.get(root_attrs, :"tab-delegate"),
+       target_prefix: root_attrs |> Map.get(:id, "") |> Kernel.<>("-tab-")
+     }}
   end
 
   def handle_event(_, %{"key" => key}, %{values: []} = state) when key in ["ArrowRight", "l"] do

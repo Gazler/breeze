@@ -37,16 +37,17 @@ defmodule Breeze.Implicit.Tree do
       |> Common.normalize_int(Map.get(last_state, :offset, 0))
       |> min(max(length(values) - 1, 0))
 
-    %{
-      rows: rows,
-      values: values,
-      selected: selected,
-      selected_index: selected_index,
-      offset: offset,
-      loop: loop,
-      scroll_padding: scroll_padding,
-      expanded: expanded
-    }
+    {:ok,
+     %{
+       rows: rows,
+       values: values,
+       selected: selected,
+       selected_index: selected_index,
+       offset: offset,
+       loop: loop,
+       scroll_padding: scroll_padding,
+       expanded: expanded
+     }}
   end
 
   def handle_event(_, %{"key" => key, "element" => element}, state)

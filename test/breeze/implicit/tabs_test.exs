@@ -47,7 +47,7 @@ defmodule Breeze.Implicit.TabsTest do
         %{:"tab-label" => "Details", value: "details"}
       ]
 
-      state = Tabs.init(children, %{:"tab-selected" => "details"}, %{})
+      {:ok, state} = Tabs.init(children, %{:"tab-selected" => "details"}, %{})
 
       assert state.selected == "details"
       assert state.selected_index == 1
@@ -59,7 +59,7 @@ defmodule Breeze.Implicit.TabsTest do
         %{:"tab-label" => "Details", value: "details"}
       ]
 
-      state =
+      {:ok, state} =
         Tabs.init(children, %{:"tab-selected" => "details"}, %{
           selected: "overview",
           selected_index: 0

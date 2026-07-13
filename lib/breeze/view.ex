@@ -231,19 +231,19 @@ defmodule Breeze.View do
   end
   ```
 
-  The implicit module is first called with an `init/2` callback (or optional `init/3`).
-  It receives all child element attributes and the previous state. The `init/3` form
-  also receives root attributes for the implicit container.
+  The implicit module is first called with an `init/3` callback. It receives all child
+  element attributes, root attributes for the implicit container, and the previous state.
 
-  `init` can either return the implicit state directly, or `{:ok, state, options}`.
-  The options form is used for renderer-driven animation behavior such as periodic rerenders.
+  `init` returns `{:ok, state}` or `{:ok, state, options}`. The options form is used for
+  renderer-driven animation behavior such as periodic rerenders.
 
   ```elixir
   defmodule MyAppList do
     @behaviour Breeze.Implicit
 
     def init(children, root_attrs, last_state) do
-      %{values: Enum.map(children, &(&1.value)), selected: last_state[:selected], root: root_attrs}
+      {:ok,
+       %{values: Enum.map(children, &(&1.value)), selected: last_state[:selected], root: root_attrs}}
     end
   end
   ```

@@ -125,7 +125,7 @@ defmodule Breeze.Implicit.DropdownTest do
       %{:"dropdown-item" => true, value: "PUT"}
     ]
 
-    state = Dropdown.init(children, %{:"dropdown-selected" => "POST"}, %{})
+    {:ok, state} = Dropdown.init(children, %{:"dropdown-selected" => "POST"}, %{})
 
     assert {:noreply, open_state} = Dropdown.handle_event(nil, %{"key" => "Enter"}, state)
     assert open_state.open? == true
@@ -253,7 +253,7 @@ defmodule Breeze.Implicit.DropdownTest do
       %{:"dropdown-item" => true, value: "POST"}
     ]
 
-    state = Dropdown.init(children, %{:"dropdown-selected" => "POST"}, %{})
+    {:ok, state} = Dropdown.init(children, %{:"dropdown-selected" => "POST"}, %{})
     assert {:noreply, ^state} = Dropdown.handle_event(nil, %{"key" => "\x14"}, state)
   end
 

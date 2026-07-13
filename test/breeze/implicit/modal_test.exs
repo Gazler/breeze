@@ -5,7 +5,7 @@ defmodule Breeze.Implicit.ModalTest do
 
   describe "init/3" do
     test "preserves the previous state" do
-      assert Modal.init([], %{}, %{open: true}) == %{open: true}
+      assert Modal.init([], %{}, %{open: true}) == {:ok, %{open: true}}
     end
   end
 

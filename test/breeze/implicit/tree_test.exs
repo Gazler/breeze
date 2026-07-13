@@ -35,7 +35,8 @@ defmodule Breeze.Implicit.TreeTest do
         }
       ]
 
-      state = Implicit.Tree.init(children, %{:"tree-default-expanded" => ["root"]}, %{})
+      {:ok, state} =
+        Implicit.Tree.init(children, %{:"tree-default-expanded" => ["root"]}, %{})
 
       assert state.values == ["root", "src", "mix"]
       assert MapSet.equal?(state.expanded, MapSet.new(["root"]))
@@ -58,7 +59,7 @@ defmodule Breeze.Implicit.TreeTest do
         }
       ]
 
-      state = Implicit.Tree.init(children, %{}, %{expanded: MapSet.new(["root"])})
+      {:ok, state} = Implicit.Tree.init(children, %{}, %{expanded: MapSet.new(["root"])})
 
       assert state.values == ["root", "src"]
     end
@@ -70,7 +71,7 @@ defmodule Breeze.Implicit.TreeTest do
         %{value: "mix", parent: nil, parents: [], expandable?: false, depth: 0}
       ]
 
-      state =
+      {:ok, state} =
         Implicit.Tree.init([], %{:"tree-rows" => rows, :"tree-expanded" => ["root"]}, %{})
 
       assert state.rows == rows

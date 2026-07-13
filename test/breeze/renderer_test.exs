@@ -147,7 +147,7 @@ defmodule Breeze.RendererTest do
   defmodule ThemeAnimationImplicit do
     @behaviour Breeze.Implicit
 
-    def init(_children, _root_attrs, last_state), do: last_state
+    def init(_children, _root_attrs, last_state), do: {:ok, last_state}
     def handle_modifiers(_type, _flags, _state), do: []
 
     def animate(:root, box, _flags, _state, %{
@@ -186,7 +186,7 @@ defmodule Breeze.RendererTest do
 
   defmodule ScrollImplicit do
     def init(_children, _root_attrs, last_state),
-      do: %{offset_y: last_state[:offset_y] || 0, offset_x: 0}
+      do: {:ok, %{offset_y: last_state[:offset_y] || 0, offset_x: 0}}
 
     def handle_event(_, _, state), do: {:noreply, state}
 
@@ -223,7 +223,7 @@ defmodule Breeze.RendererTest do
 
   defmodule SelectedOwnerImplicit do
     def init(_children, _root_attrs, last_state),
-      do: %{selected: last_state[:selected] || "two"}
+      do: {:ok, %{selected: last_state[:selected] || "two"}}
 
     def handle_event(_, _, state), do: {:noreply, state}
     def handle_modifiers(:root, _flags, _state), do: []
@@ -444,7 +444,9 @@ defmodule Breeze.RendererTest do
   end
 
   defmodule ParentImplicit do
-    def init(_children, _root_attrs, last_state), do: %{offset_x: last_state[:offset_x] || 0}
+    def init(_children, _root_attrs, last_state),
+      do: {:ok, %{offset_x: last_state[:offset_x] || 0}}
+
     def handle_event(_, _, state), do: {:noreply, state}
     def handle_modifiers(:root, _flags, state), do: [scroll_x: state.offset_x]
     def handle_modifiers(:child, _flags, _state), do: []

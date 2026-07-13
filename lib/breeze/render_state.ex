@@ -351,7 +351,8 @@ defmodule Breeze.RenderState do
     {implicit_state, %{}}
   end
 
-  defp normalize_init_result(implicit_state) do
-    {implicit_state, %{}}
+  defp normalize_init_result(other) do
+    raise ArgumentError,
+          "expected implicit init/3 to return {:ok, state} or {:ok, state, options}, got: #{inspect(other)}"
   end
 end

@@ -8,7 +8,7 @@ defmodule Breeze.Implicit.ListTest do
     test "keeps prior selection when still present" do
       children = [%{value: "one"}, %{value: "two"}, %{value: "three"}]
 
-      state = Implicit.List.init(children, %{}, %{selected: "two", offset: 2})
+      {:ok, state} = Implicit.List.init(children, %{}, %{selected: "two", offset: 2})
 
       assert state.selected == "two"
       assert state.selected_index == 1
@@ -18,7 +18,7 @@ defmodule Breeze.Implicit.ListTest do
     test "reads root options" do
       children = [%{value: "a"}, %{value: "b"}, %{value: "c"}]
 
-      state =
+      {:ok, state} =
         Implicit.List.init(children, %{:"list-loop" => false, :"list-scroll-padding" => "2"}, %{})
 
       assert state.loop == false
@@ -28,7 +28,7 @@ defmodule Breeze.Implicit.ListTest do
     test "prefers list-selected from the root attrs over the prior internal selection" do
       children = [%{value: "one"}, %{value: "two"}, %{value: "three"}]
 
-      state =
+      {:ok, state} =
         Implicit.List.init(
           children,
           %{:"list-selected" => "three"},
@@ -42,7 +42,7 @@ defmodule Breeze.Implicit.ListTest do
     test "reads full values and offset from root attrs for windowed lists" do
       children = [%{value: "two"}, %{value: "three"}]
 
-      state =
+      {:ok, state} =
         Implicit.List.init(
           children,
           %{:"list-values" => ["one", "two", "three", "four"], :"list-offset" => 1},

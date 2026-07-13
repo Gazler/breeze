@@ -13,8 +13,7 @@ defmodule Breeze.Implicit do
   `last_state` is the state from the preceding render; once layout is known it
   also contains the previous `Breeze.Viewport` under `:__element__`.
 
-  An initializer can return the state directly, `{:ok, state}`, or
-  `{:ok, state, options}`. The options are:
+  An initializer returns `{:ok, state}` or `{:ok, state, options}`. The options are:
 
     * `:rerender_every` - a positive interval in milliseconds for asynchronous
       `animate/5` calls. It has no effect unless `animate/5` is implemented.
@@ -101,7 +100,7 @@ defmodule Breeze.Implicit do
           | {:requires_layout_rerender, boolean()}
           | {:state_change_requires_rerender, boolean()}
   @typedoc "A valid return value from `c:init/3`."
-  @type init_result :: state() | {:ok, state()} | {:ok, state(), [init_option()]}
+  @type init_result :: {:ok, state()} | {:ok, state(), [init_option()]}
 
   @typedoc "An option returned with an implicit event action."
   @type event_option :: {:focus, String.t() | nil}

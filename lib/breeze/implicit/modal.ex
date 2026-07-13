@@ -3,7 +3,7 @@ defmodule Breeze.Implicit.Modal do
 
   @behaviour Breeze.Implicit
 
-  def init(_items, _root_attrs, last_state), do: last_state
+  def init(_items, _root_attrs, last_state), do: {:ok, last_state}
 
   def handle_event(_, %{"key" => "Escape"}, state) do
     {{:change, %{action: :close}}, state}

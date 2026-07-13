@@ -13,7 +13,7 @@ defmodule Breeze.List do
   @behaviour Breeze.Implicit
 
   def init(children, _root_attrs, last_state) do
-    %{values: Enum.map(children, & &1.value), selected: last_state[:selected]}
+    {:ok, %{values: Enum.map(children, & &1.value), selected: last_state[:selected]}}
   end
 
   def handle_event(_, %{"key" => "ArrowDown"}, %{values: values} = state) do

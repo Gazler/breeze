@@ -329,7 +329,12 @@ defmodule Breeze.ErrorView do
   end
 
   defp normalize_init_result({:ok, state, meta}) when is_list(meta), do: {state, Map.new(meta)}
-  defp normalize_init_result(state), do: {state, %{}}
+  defp normalize_init_result({:ok, state}), do: {state, %{}}
+
+  defp normalize_init_result(other) do
+    raise ArgumentError,
+          "expected implicit init/3 to return {:ok, state} or {:ok, state, options}, got: #{inspect(other)}"
+  end
 
   defp selected_index(crash, entries) do
     default = default_selected_index(entries)

@@ -46,15 +46,16 @@ defmodule Breeze.Implicit.List do
 
     selected = selected_value(cache, selected_index)
 
-    Map.merge(cache, %{
-      values: values,
-      selected: selected,
-      selected_index: selected_index,
-      offset: list_offset(root_attrs, last_state, cache),
-      loop: loop,
-      scroll_padding: scroll_padding,
-      width: width
-    })
+    {:ok,
+     Map.merge(cache, %{
+       values: values,
+       selected: selected,
+       selected_index: selected_index,
+       offset: list_offset(root_attrs, last_state, cache),
+       loop: loop,
+       scroll_padding: scroll_padding,
+       width: width
+     })}
   end
 
   def handle_event(_, %{"key" => key, "element" => element}, state)
