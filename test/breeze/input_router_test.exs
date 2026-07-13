@@ -4,6 +4,7 @@ defmodule Breeze.InputRouterTest do
 
   alias Breeze.ChildServer
   alias Breeze.Theme
+  alias Breeze.Theme.Probe, as: ThemeProbe
 
   defmodule FakeAdapter do
     @behaviour Termite.Terminal.Adapter
@@ -135,7 +136,7 @@ defmodule Breeze.InputRouterTest do
               "\e]4;12;rgb:5f5f/7b7b/e0e0\a" <>
               "\e]4;13;rgb:b3b3/6b6b/d4d4\a" <>
               "\e]4;14;rgb:5a5a/d6d6/d6d6\a"}},
-          Breeze.Theme.runtime_palette_probe_timeout_ms() + 20
+          ThemeProbe.runtime_palette_probe_timeout_ms() + 20
         )
       end
 

@@ -2,6 +2,7 @@ defmodule Breeze.ThemeTest do
   use ExUnit.Case, async: true
 
   alias Breeze.Theme
+  alias Breeze.Theme.Probe, as: ThemeProbe
 
   defmodule PaletteAdapter do
     @behaviour Termite.Terminal.Adapter
@@ -87,13 +88,6 @@ defmodule Breeze.ThemeTest do
            ]
   end
 
-  test "resolve_theme resolves special and built-in named themes" do
-    assert Theme.resolve_theme(:system16) == {:system16, :system16}
-    assert Theme.resolve_theme(:system) == {:system, :system}
-    assert {:gruvbox, %Theme{name: "gruvbox-dark"}} = Theme.resolve_theme(:gruvbox)
-    assert {:commander, %Theme{name: "commander-blue"}} = Theme.resolve_theme(:commander)
-  end
-
   test "next_theme advances through a theme cycle" do
     assert {:commander, %Theme{name: "commander-blue"}} = Theme.next_theme(:dracula)
     assert {:nord, %Theme{name: "nord"}} = Theme.next_theme(:gruvbox)
@@ -171,7 +165,7 @@ defmodule Breeze.ThemeTest do
       size: %{width: 80, height: 24}
     }
 
-    assert {:start, {:reader, ^ref}, query} = Theme.start_runtime_palette_probe(terminal)
+    assert {:start, {:reader, ^ref}, query} = ThemeProbe.start_runtime_palette_probe(terminal)
     refute query =~ "\a"
     assert query =~ "\e]10;?\e\\"
     assert query =~ "\e]4;14;?\e\\"
@@ -186,12 +180,12 @@ defmodule Breeze.ThemeTest do
       size: %{width: 80, height: 24}
     }
 
-    assert {:start, {:reader, ^ref}, query} = Theme.start_runtime_palette_probe(terminal)
-    assert :ok = Theme.ensure_runtime_palette_async(terminal, self())
+    assert {:start, {:reader, ^ref}, query} = ThemeProbe.start_runtime_palette_probe(terminal)
+    assert :ok = ThemeProbe.ensure_runtime_palette_async(terminal, self())
     _terminal = Termite.Terminal.write(terminal, query)
 
     palette = collect_probe_palette(%{})
-    assert :ready = Theme.finish_runtime_palette_probe(terminal, palette)
+    assert :ready = ThemeProbe.finish_runtime_palette_probe(terminal, palette)
     assert_receive {:breeze_theme_palette, {:reader, ^ref}, :ready}
 
     theme = Theme.new(:system, terminal: terminal)
@@ -219,7 +213,7 @@ defmodule Breeze.ThemeTest do
       background: {24, 24, 37}
     }
 
-    assert :unavailable = Theme.finish_runtime_palette_probe(terminal, partial)
+    assert :unavailable = ThemeProbe.finish_runtime_palette_probe(terminal, partial)
     assert Theme.new(:system, terminal: terminal).mode == :system16
   end
 
@@ -237,15 +231,15 @@ defmodule Breeze.ThemeTest do
       background: {24, 24, 37}
     }
 
-    assert :unavailable = Theme.finish_runtime_palette_probe(terminal, partial)
-    assert {:start, {:reader, ^ref}, query} = Theme.start_runtime_palette_probe(terminal)
+    assert :unavailable = ThemeProbe.finish_runtime_palette_probe(terminal, partial)
+    assert {:start, {:reader, ^ref}, query} = ThemeProbe.start_runtime_palette_probe(terminal)
 
-    assert :ok = Theme.ensure_runtime_palette_async(terminal, self())
+    assert :ok = ThemeProbe.ensure_runtime_palette_async(terminal, self())
 
     _terminal = Termite.Terminal.write(terminal, query)
 
     palette = collect_probe_palette(%{})
-    assert :ready = Theme.finish_runtime_palette_probe(terminal, palette)
+    assert :ready = ThemeProbe.finish_runtime_palette_probe(terminal, palette)
     assert_receive {:breeze_theme_palette, {:reader, ^ref}, :ready}
     assert Theme.new(:system, terminal: terminal).mode == :system
   end
@@ -255,9 +249,9 @@ defmodule Breeze.ThemeTest do
   defp collect_probe_palette(palette, buffer) do
     receive do
       {_ref, {:data, data}} ->
-        {palette, buffer} = Theme.merge_runtime_palette_data(buffer, palette, data)
+        {palette, buffer} = ThemeProbe.merge_runtime_palette_data(buffer, palette, data)
 
-        if Theme.runtime_palette_probe_complete?(palette) do
+        if ThemeProbe.runtime_palette_probe_complete?(palette) do
           palette
         else
           collect_probe_palette(palette, buffer)

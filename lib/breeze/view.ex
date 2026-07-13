@@ -1010,7 +1010,7 @@ defmodule Breeze.View do
   """
   @spec switch_theme(map(), atom() | {term(), term()}, keyword()) :: map()
   def switch_theme(%{theme: _} = term, theme, opts \\ []) when is_list(opts) do
-    {name, theme} = Breeze.Theme.resolve_theme(theme)
+    {name, theme} = resolve_theme(theme)
 
     term
     |> put_theme(theme)
@@ -1067,6 +1067,11 @@ defmodule Breeze.View do
   defp theme_source_name(:system16), do: :system16
   defp theme_source_name(:system), do: :system
   defp theme_source_name(_theme_source), do: nil
+
+  defp resolve_theme({name, theme}), do: {name, theme}
+  defp resolve_theme(:system16), do: {:system16, :system16}
+  defp resolve_theme(:system), do: {:system, :system}
+  defp resolve_theme(name) when is_atom(name), do: {name, Breeze.Theme.builtin(name)}
 
   defp put_breeze_theme_metadata(term, name, opts) do
     if Keyword.get(opts, :assign, true) do

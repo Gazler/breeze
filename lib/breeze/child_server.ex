@@ -3,6 +3,8 @@ defmodule Breeze.ChildServer do
 
   use GenServer
 
+  alias Breeze.Theme.Probe, as: ThemeProbe
+
   def start(opts) do
     GenServer.start(__MODULE__, opts)
   end
@@ -399,7 +401,7 @@ defmodule Breeze.ChildServer do
   defp maybe_probe_system_theme(theme, terminal, server) do
     if requested_system_theme?(theme) do
       if is_pid(server), do: send(server, {:ensure_runtime_palette, :system})
-      Breeze.Theme.ensure_runtime_palette_async(terminal, self())
+      ThemeProbe.ensure_runtime_palette_async(terminal, self())
     else
       :ok
     end

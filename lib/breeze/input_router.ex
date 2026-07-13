@@ -5,6 +5,7 @@ defmodule Breeze.InputRouter do
 
   alias Breeze.InputRouter.{IExShellProxy, SilentGroupLeader, TerminalStart}
   alias Breeze.InputCapture
+  alias Breeze.Theme.Probe, as: ThemeProbe
 
   @theme_probe_drain_timeout_ms 1_000
 
@@ -124,7 +125,7 @@ defmodule Breeze.InputRouter do
         %{theme_probe: %{key: key, ref: ref, status: :draining} = probe} = state
       ) do
     unless Map.get(probe, :finished?, false) do
-      Breeze.Theme.finish_runtime_palette_probe(state.terminal, probe.palette)
+      ThemeProbe.finish_runtime_palette_probe(state.terminal, probe.palette)
     end
 
     {:noreply, %{state | theme_probe: nil}}
@@ -226,7 +227,7 @@ defmodule Breeze.InputRouter do
 
   defp maybe_start_theme_probe(state, theme) do
     if requested_system_theme?(theme) do
-      case Breeze.Theme.start_runtime_palette_probe(state.terminal) do
+      case ThemeProbe.start_runtime_palette_probe(state.terminal) do
         {:start, key, query} ->
           cancel_theme_probe_timer(state.theme_probe)
 
@@ -237,7 +238,7 @@ defmodule Breeze.InputRouter do
             Process.send_after(
               self(),
               {:theme_probe_timeout, key, ref},
-              Breeze.Theme.runtime_palette_probe_timeout_ms()
+              ThemeProbe.runtime_palette_probe_timeout_ms()
             )
 
           %{
@@ -265,14 +266,14 @@ defmodule Breeze.InputRouter do
   defp requested_system_theme?(theme), do: Breeze.Theme.requested_system?(theme)
 
   defp consume_theme_probe_reply(%{theme_probe: probe} = state, data) do
-    {palette, buffer} = Breeze.Theme.merge_runtime_palette_data(probe.buffer, probe.palette, data)
+    {palette, buffer} = ThemeProbe.merge_runtime_palette_data(probe.buffer, probe.palette, data)
 
     probe = %{probe | palette: palette, buffer: buffer}
 
     cond do
-      Breeze.Theme.runtime_palette_probe_complete?(palette) and
+      ThemeProbe.runtime_palette_probe_complete?(palette) and
           not Map.get(probe, :finished?, false) ->
-        Breeze.Theme.finish_runtime_palette_probe(state.terminal, palette)
+        ThemeProbe.finish_runtime_palette_probe(state.terminal, palette)
         start_theme_probe_drain(state, %{probe | finished?: true})
 
       true ->
@@ -302,7 +303,7 @@ defmodule Breeze.InputRouter do
 
   defp maybe_complete_initial_theme_probe(terminal, theme) do
     if requested_system_theme?(theme) do
-      case Breeze.Theme.start_runtime_palette_probe(terminal) do
+      case ThemeProbe.start_runtime_palette_probe(terminal) do
         {:start, _key, query} ->
           terminal = Termite.Terminal.write(terminal, query)
 
@@ -310,13 +311,13 @@ defmodule Breeze.InputRouter do
             collect_initial_theme_probe_replies(
               terminal.reader,
               System.monotonic_time(:millisecond) +
-                Breeze.Theme.runtime_palette_probe_timeout_ms(),
+                ThemeProbe.runtime_palette_probe_timeout_ms(),
               "",
               %{},
               []
             )
 
-          _status = Breeze.Theme.finish_runtime_palette_probe(terminal, palette)
+          _status = ThemeProbe.finish_runtime_palette_probe(terminal, palette)
           {terminal, deferred_messages}
 
         _ ->
@@ -328,7 +329,7 @@ defmodule Breeze.InputRouter do
   end
 
   defp collect_initial_theme_probe_replies(reader, deadline, buffer, palette, deferred_messages) do
-    if Breeze.Theme.runtime_palette_probe_complete?(palette) do
+    if ThemeProbe.runtime_palette_probe_complete?(palette) do
       {palette, deferred_messages}
     else
       timeout = max(deadline - System.monotonic_time(:millisecond), 0)
@@ -336,7 +337,7 @@ defmodule Breeze.InputRouter do
       receive do
         {^reader, {:data, data}} = message when is_binary(data) ->
           if theme_probe_data?(buffer, data) do
-            {palette, buffer} = Breeze.Theme.merge_runtime_palette_data(buffer, palette, data)
+            {palette, buffer} = ThemeProbe.merge_runtime_palette_data(buffer, palette, data)
 
             collect_initial_theme_probe_replies(
               reader,

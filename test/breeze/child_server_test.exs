@@ -2,6 +2,7 @@ defmodule Breeze.ChildServerTest do
   use ExUnit.Case, async: true
 
   alias Breeze.Theme
+  alias Breeze.Theme.Probe, as: ThemeProbe
 
   defmodule MouseView do
     use Breeze.View
@@ -229,7 +230,7 @@ defmodule Breeze.ChildServerTest do
     assert %{theme: %{mode: :system16}} = Breeze.ChildServer.metadata(pid)
 
     assert :ready =
-             Theme.finish_runtime_palette_probe(terminal, %{
+             ThemeProbe.finish_runtime_palette_probe(terminal, %{
                1 => {170, 34, 51},
                2 => {34, 170, 51},
                3 => {204, 187, 51},

@@ -184,13 +184,6 @@ defmodule Breeze.Theme do
     ]
   end
 
-  @doc "Resolves a built-in name or `{name, theme}` entry into a named theme tuple."
-  @spec resolve_theme(atom() | {term(), term()}) :: {term(), term()}
-  def resolve_theme({name, theme}), do: {name, theme}
-  def resolve_theme(:system16), do: {:system16, :system16}
-  def resolve_theme(:system), do: {:system, :system}
-  def resolve_theme(name) when is_atom(name), do: {name, builtin(name)}
-
   @doc "Returns the theme after `current` in a cycle, wrapping at the end."
   @spec next_theme(term(), [atom() | {term(), term()}]) :: {term(), term()} | nil
   def next_theme(current, themes \\ default_cycle()) when is_list(themes) do
@@ -333,51 +326,6 @@ defmodule Breeze.Theme do
     end
   end
 
-  @doc "Ensures an asynchronous terminal-palette probe is running."
-  @spec ensure_runtime_palette_async(%Termite.Terminal{} | nil, pid()) :: :ok
-  def ensure_runtime_palette_async(%Termite.Terminal{} = terminal, notify_pid)
-      when is_pid(notify_pid) do
-    Breeze.Theme.Probe.ensure_runtime_palette_async(terminal, notify_pid)
-  end
-
-  def ensure_runtime_palette_async(_terminal, _notify_pid), do: :ok
-
-  @doc "Starts a terminal-palette probe and returns its initial state."
-  @spec start_runtime_palette_probe(%Termite.Terminal{} | nil) ::
-          {:start, term(), binary()} | :ready | :pending | :unavailable | :error
-  def start_runtime_palette_probe(%Termite.Terminal{} = terminal) do
-    Breeze.Theme.Probe.start_runtime_palette_probe(terminal)
-  end
-
-  def start_runtime_palette_probe(_terminal), do: :error
-
-  @doc "Returns the terminal-palette probe timeout in milliseconds."
-  @spec runtime_palette_probe_timeout_ms() :: pos_integer()
-  def runtime_palette_probe_timeout_ms, do: Breeze.Theme.Probe.runtime_palette_probe_timeout_ms()
-
-  @doc "Merges terminal response data into an in-progress palette probe."
-  @spec merge_runtime_palette_data(binary(), map(), binary()) :: {map(), binary()}
-  def merge_runtime_palette_data(buffer, palette, data)
-      when is_binary(buffer) and is_map(palette) and is_binary(data) do
-    Breeze.Theme.Probe.merge_runtime_palette_data(buffer, palette, data)
-  end
-
-  @doc "Returns whether a palette probe has collected all required colors."
-  @spec runtime_palette_probe_complete?(map()) :: boolean()
-  def runtime_palette_probe_complete?(palette) when is_map(palette),
-    do: Breeze.Theme.Probe.runtime_palette_probe_complete?(palette)
-
-  def runtime_palette_probe_complete?(_palette), do: false
-
-  @doc "Stores a completed runtime palette and returns its availability status."
-  @spec finish_runtime_palette_probe(%Termite.Terminal{} | nil, map()) :: :ready | :unavailable
-  def finish_runtime_palette_probe(%Termite.Terminal{} = terminal, palette)
-      when is_map(palette) do
-    Breeze.Theme.Probe.finish_runtime_palette_probe(terminal, palette)
-  end
-
-  def finish_runtime_palette_probe(_terminal, _palette), do: :unavailable
-
   @doc "Normalizes a theme name, map, keyword list, or struct into a theme."
   @spec new(t() | map() | keyword() | atom() | nil, keyword()) :: t()
   def new(theme, opts \\ [])
@@ -459,7 +407,7 @@ defmodule Breeze.Theme do
       extra_color(theme.extras, key)
   end
 
-  @doc "Resolves a semantic color name while preserving literal color values."
+  @doc false
   @spec resolve_color(t() | map() | keyword() | atom() | nil, term()) :: term()
   def resolve_color(theme, value)
 
@@ -849,6 +797,11 @@ defmodule Breeze.Theme do
   defp normalize_key_name(key) when is_atom(key), do: Atom.to_string(key)
   defp normalize_key_name(key) when is_binary(key), do: String.replace(key, "-", "_")
   defp normalize_key_name(_key), do: nil
+
+  defp resolve_theme({name, theme}), do: {name, theme}
+  defp resolve_theme(:system16), do: {:system16, :system16}
+  defp resolve_theme(:system), do: {:system, :system}
+  defp resolve_theme(name) when is_atom(name), do: {name, builtin(name)}
 
   defp parse_hex_color!(<<_::binary-size(6)>> = hex) do
     List.to_tuple(for <<pair::binary-size(2) <- hex>>, do: hex_byte!(pair))
