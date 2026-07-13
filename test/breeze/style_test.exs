@@ -154,6 +154,26 @@ defmodule Breeze.StyleTest do
     assert element.style.scrollbar.vertical.track.foreground_color == {238, 238, 238}
   end
 
+  test "theme default backgrounds propagate to scrollbar segments" do
+    theme =
+      Breeze.Theme.new(
+        defaults: %{
+          foreground_color: "#eeeeee",
+          background_color: "#111111",
+          border_color: "#666666"
+        }
+      )
+
+    element =
+      Style.empty()
+      |> Style.put_class("border overflow-scroll scrollbar-arrows")
+      |> Style.to_element(theme: theme, apply_theme_defaults: true)
+
+    assert element.style.background_color == {17, 17, 17}
+    assert element.style.scrollbar.vertical.thumb.background_color == {17, 17, 17}
+    assert element.style.scrollbar.vertical.track.background_color == {17, 17, 17}
+  end
+
   test "semantic scrollbar colors apply only when their modifier matches" do
     theme =
       Breeze.Theme.new(

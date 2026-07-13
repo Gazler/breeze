@@ -998,7 +998,7 @@ defmodule Breeze.Style do
     if border == BackBreeze.Border.none() do
       style
     else
-      %{style | background_color: Map.get(defaults, :background_color)}
+      BackBreeze.Style.background_color(style, Map.get(defaults, :background_color))
     end
   end
 

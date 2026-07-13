@@ -742,7 +742,10 @@ defmodule Breeze.Storybook.ServerRenderingTest do
       end)
 
     assert redraw_or_full_viewport_patch?(writes, viewport)
-    assert Enum.any?(writes, &String.contains?(&1, "\e[48;5;0m"))
+
+    assert Enum.any?(writes, fn write ->
+             write =~ ~r/\e\[[0-9;]*48;5;0(?:;[0-9;]*)?m/
+           end)
   end
 
   test "storybook preview child patches clear the full viewport height when preview tabs switch" do

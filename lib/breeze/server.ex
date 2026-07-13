@@ -323,11 +323,23 @@ defmodule Breeze.Server do
 
     Process.monitor(view_pid)
 
-    {focused, theme} =
+    {focused, theme, apply_theme_defaults?} =
       case Breeze.ChildServer.metadata(view_pid) do
-        %{focused: focused, theme: child_theme} -> {focused, child_theme}
-        %{focused: focused} -> {focused, theme}
-        _ -> {nil, theme}
+        %{
+          focused: focused,
+          theme: child_theme,
+          apply_theme_defaults?: child_apply_theme_defaults?
+        } ->
+          {focused, child_theme, child_apply_theme_defaults?}
+
+        %{focused: focused, theme: child_theme} ->
+          {focused, child_theme, apply_theme_defaults?}
+
+        %{focused: focused} ->
+          {focused, theme, apply_theme_defaults?}
+
+        _ ->
+          {nil, theme, apply_theme_defaults?}
       end
 
     state =
@@ -935,7 +947,9 @@ defmodule Breeze.Server do
 
       root_snapshot_us = System.monotonic_time(:microsecond) - root_started_at
 
-      {metadata_focused, metadata_theme} = safe_focused_metadata(state)
+      {metadata_focused, metadata_theme, metadata_apply_theme_defaults?} =
+        safe_focused_metadata(state)
+
       focused = metadata_focused || state.focused
 
       %{
@@ -955,6 +969,7 @@ defmodule Breeze.Server do
         attempts: attempts,
         focused: focused,
         metadata_theme: metadata_theme,
+        metadata_apply_theme_defaults?: metadata_apply_theme_defaults?,
         acc: acc,
         box: box,
         decorations: decorations,
@@ -983,13 +998,30 @@ defmodule Breeze.Server do
   end
 
   defp continue_base_render(
-         %{theme: previous_theme} = state,
-         %{attempts: attempts, metadata_theme: metadata_theme, cause: cause}
+         %{
+           theme: previous_theme,
+           apply_theme_defaults?: previous_apply_theme_defaults?
+         } = state,
+         %{
+           attempts: attempts,
+           metadata_theme: metadata_theme,
+           metadata_apply_theme_defaults?: metadata_apply_theme_defaults?,
+           cause: cause
+         }
        )
-       when attempts > 0 and metadata_theme != previous_theme do
+       when attempts > 0 and
+              (metadata_theme != previous_theme or
+                 metadata_apply_theme_defaults? != previous_apply_theme_defaults?) do
     state =
-      %{state | theme: metadata_theme}
-      |> cascade_live_child_theme_if_changed(previous_theme)
+      %{
+        state
+        | theme: metadata_theme,
+          apply_theme_defaults?: metadata_apply_theme_defaults?
+      }
+      |> cascade_live_child_theme_if_changed(
+        previous_theme,
+        previous_apply_theme_defaults?
+      )
 
     render_base(state, cause, attempts - 1)
   end
@@ -1003,10 +1035,19 @@ defmodule Breeze.Server do
       RenderTracking.dedupe_decorations(result.decorations ++ result.child_decorations)
 
     previous_theme = state.theme
+    previous_apply_theme_defaults? = state.apply_theme_defaults?
 
     state =
-      %{state | focused: result.focused, theme: result.metadata_theme}
-      |> cascade_live_child_theme_if_changed(previous_theme)
+      %{
+        state
+        | focused: result.focused,
+          theme: result.metadata_theme,
+          apply_theme_defaults?: result.metadata_apply_theme_defaults?
+      }
+      |> cascade_live_child_theme_if_changed(
+        previous_theme,
+        previous_apply_theme_defaults?
+      )
 
     prep_started_at = System.monotonic_time(:microsecond)
     {base_output, decorations} = prepare_decorations(result.box.content, decorations, state)
@@ -1087,17 +1128,25 @@ defmodule Breeze.Server do
 
   defp safe_focused_metadata(state) do
     case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
+      {:ok,
+       %{
+         focused: focused,
+         theme: theme,
+         apply_theme_defaults?: apply_theme_defaults?
+       }} ->
+        {focused, theme, apply_theme_defaults?}
+
       {:ok, %{focused: focused, theme: theme}} ->
-        {focused, theme}
+        {focused, theme, state.apply_theme_defaults?}
 
       {:ok, %{focused: focused}} ->
-        {focused, state.theme}
+        {focused, state.theme, state.apply_theme_defaults?}
 
       {:crash, _crash} ->
-        {nil, state.theme}
+        {nil, state.theme, state.apply_theme_defaults?}
 
       _ ->
-        {nil, state.theme}
+        {nil, state.theme, state.apply_theme_defaults?}
     end
   end
 
@@ -2316,8 +2365,13 @@ defmodule Breeze.Server do
     end
   end
 
-  defp cascade_live_child_theme_if_changed(%{theme: theme} = state, previous_theme) do
-    if theme == previous_theme do
+  defp cascade_live_child_theme_if_changed(
+         %{theme: theme} = state,
+         previous_theme,
+         previous_apply_theme_defaults?
+       ) do
+    if theme == previous_theme and
+         state.apply_theme_defaults? == previous_apply_theme_defaults? do
       state
     else
       Enum.each(state.children, fn
@@ -2487,6 +2541,7 @@ defmodule Breeze.Server do
         server: self(),
         terminal: terminal,
         theme: theme,
+        apply_theme_defaults?: state.apply_theme_defaults?,
         process_flags: state.child_process_flags || [],
         render_tree?: Breeze.Inspector.enabled?(state),
         invalidate: invalidate

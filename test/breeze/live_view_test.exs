@@ -308,6 +308,33 @@ defmodule Breeze.LiveViewTest do
     def handle_event(_, _, term), do: {:noreply, term}
   end
 
+  defmodule MountedThemeLiveParent do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok,
+       term
+       |> put_theme(Breeze.Theme.builtin(:gruvbox))
+       |> focus("switch")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box id="switch" focusable>Switch</box>
+        <live id="themed-child" view={ThemeLeafLiveChild}>
+        </live>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "t"}, term) do
+      {:noreply, put_theme(term, Breeze.Theme.builtin(:nebula))}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
   defmodule HeaderedLiveChild do
     use Breeze.View
 
@@ -1272,6 +1299,40 @@ defmodule Breeze.LiveView.CoreTest do
     assert ChildServer.metadata(pid).theme.name == "nebula"
     assert ChildServer.metadata(branch).theme.name == "nebula"
     assert ChildServer.metadata(leaf).theme.name == "nebula"
+  end
+
+  test "server preserves mounted theme defaults for live children across theme changes" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: Breeze.LiveViewTest.MountedThemeLiveParent,
+        terminal: terminal
+      )
+
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+
+    state = :sys.get_state(pid)
+    child = state.children["themed-child"].pid
+
+    assert state.theme.name == "gruvbox-dark"
+    assert state.apply_theme_defaults?
+    assert ChildServer.metadata(child).apply_theme_defaults?
+
+    assert {:noreply, "switch", true} =
+             ChildServer.dispatch_event(state.view_pid, "switch", %{"key" => "t"})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      child_metadata = ChildServer.metadata(child)
+
+      state.theme.name == "nebula" and child_metadata.theme.name == "nebula"
+    end)
+
+    state = :sys.get_state(pid)
+
+    assert state.apply_theme_defaults?
+    assert ChildServer.metadata(child).apply_theme_defaults?
   end
 
   test "child server stops nested live children when it terminates" do
