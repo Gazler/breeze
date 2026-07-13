@@ -1,35 +1,28 @@
 defmodule Snake do
   use Breeze.View
 
+  @board_width 15
+  @board_height 10
+
   def mount(opts, term) do
     maybe_seed_rand(Keyword.get(opts, :seed))
 
-    path = [{1, 1}, {1, 2}, {1, 3}, {1, 4}]
-    size = %{width: 15, height: 10}
-    food = random_food(size, path)
+    size = board_size()
+    tick_ms = Keyword.get(opts, :tick_ms, 100)
 
-    term =
-      assign(term, %{size: size, direction: :right, path: path, food: food, input_buffer: []})
-
-    if tick_ms = Keyword.get(opts, :tick_ms, 100) do
-      :timer.send_interval(tick_ms, self(), :tick)
-    end
-
-    {:ok, term}
+    {:ok, reset(term, size, tick_ms)}
   end
 
   def render(assigns) do
+    assigns = assign(assigns, size: board_size())
+
     ~H"""
     <.panel width={@size.width * 2} height={@size.height + 1}>
       <:title>
-        <box style="text-3">Score: {length(@path) - 4}</box>
+        <box style="text-3">{score_label(@path, @stopped?)}</box>
       </:title>
       <box :for={{x, y} <- @path} style={"bg-7 absolute left-#{x * 2 - 1} top-#{y + 1}"}>██</box>
-      <box
-        style={"width-2 text-2 absolute text-#{@food.color} left-#{@food.x * 2 - 1} top-#{@food.y + 1}"}
-      >
-        {@food.glyph}
-      </box>
+      <box style={"absolute left-#{@food.x * 2 - 1} top-#{@food.y + 1}"}>{@food.glyph}</box>
     </.panel>
     """
   end
@@ -49,14 +42,39 @@ defmodule Snake do
     """
   end
 
+  def handle_event(_, %{"key" => "r"}, term), do: {:noreply, restart(term)}
+  def handle_event(_, %{"key" => "p"}, term), do: {:noreply, pause(term)}
+
+  def handle_event(_, %{"key" => _key}, %{assigns: %{stopped?: true}} = term) do
+    {:noreply, term}
+  end
+
+  def handle_event(_, %{"key" => _}, %{assigns: %{paused: true}} = term) do
+    term = term |> assign(paused: false) |> schedule_tick()
+    {:noreply, term}
+  end
+
   def handle_event(_, %{"key" => "ArrowUp"}, term), do: {:noreply, change_dir(term, :up)}
   def handle_event(_, %{"key" => "ArrowDown"}, term), do: {:noreply, change_dir(term, :down)}
   def handle_event(_, %{"key" => "ArrowLeft"}, term), do: {:noreply, change_dir(term, :left)}
   def handle_event(_, %{"key" => "ArrowRight"}, term), do: {:noreply, change_dir(term, :right)}
+  def handle_event(_, %{"key" => "k"}, term), do: {:noreply, change_dir(term, :up)}
+  def handle_event(_, %{"key" => "j"}, term), do: {:noreply, change_dir(term, :down)}
+  def handle_event(_, %{"key" => "h"}, term), do: {:noreply, change_dir(term, :left)}
+  def handle_event(_, %{"key" => "l"}, term), do: {:noreply, change_dir(term, :right)}
   def handle_event(_, _, term), do: {:noreply, term}
 
-  def handle_info(:tick, term) do
-    %{input_buffer: input_buffer, path: path, size: size, food: food} = term.assigns
+  def handle_info({:timeout, timer, :tick}, %{assigns: %{tick_timer: timer}} = term) do
+    {:noreply, term |> assign(tick_timer: nil) |> tick() |> schedule_tick()}
+  end
+
+  def handle_info({:timeout, _timer, :tick}, term), do: {:noreply, term}
+
+  defp tick(%{assigns: %{paused: true}} = term), do: term
+
+  defp tick(term) do
+    %{input_buffer: input_buffer, path: path, food: food} = term.assigns
+    size = board_size()
 
     {direction, buffer} =
       case input_buffer do
@@ -83,19 +101,74 @@ defmodule Snake do
 
     cond do
       {x, y} == {food.x, food.y} ->
-        {:noreply, assign(term, path: new_path, food: random_food(size, new_path))}
+        assign(term, path: new_path, food: random_food(size, new_path))
 
       wall_collision? || tail_collision? ->
-        {:stop, term}
+        stop(term)
 
       true ->
-        {:noreply, assign(term, path: tl(path) ++ [{x, y}])}
+        assign(term, path: tl(path) ++ [{x, y}])
     end
+  end
+
+  defp schedule_tick(%{assigns: %{paused: true}} = term), do: term
+  defp schedule_tick(%{assigns: %{stopped?: true}} = term), do: term
+  defp schedule_tick(%{assigns: %{tick_ms: nil}} = term), do: term
+  defp schedule_tick(%{assigns: %{tick_timer: timer}} = term) when is_reference(timer), do: term
+
+  defp schedule_tick(term) do
+    timer = :erlang.start_timer(term.assigns.tick_ms, self(), :tick)
+    assign(term, tick_timer: timer)
+  end
+
+  defp pause(term) do
+    case Map.get(term.assigns, :tick_timer) do
+      timer when is_reference(timer) -> Process.cancel_timer(timer)
+      _other -> :ok
+    end
+
+    assign(term, paused: true, tick_timer: nil)
+  end
+
+  defp restart(term) do
+    term
+    |> pause()
+    |> reset(board_size(), 100)
+  end
+
+  defp stop(term) do
+    term
+    |> pause()
+    |> assign(stopped?: true)
+  end
+
+  defp reset(term, size, tick_ms) do
+    path = [{1, 1}, {2, 1}, {3, 1}, {4, 1}]
+
+    assign(term, %{
+      size: size,
+      direction: :right,
+      path: path,
+      food: random_food(size, path),
+      input_buffer: [],
+      tick_ms: tick_ms,
+      tick_timer: nil,
+      paused: true,
+      stopped?: false
+    })
+  end
+
+  defp score_label(path, stopped?) do
+    label = "Score: #{length(path) - 4}"
+
+    if stopped?,
+      do: label <> " - r to restart",
+      else: label
   end
 
   defp change_dir(term, dir) do
     %{input_buffer: buffer, direction: direction} = term.assigns
-    old_dir = if buffer == [], do: direction, else: hd(buffer)
+    old_dir = if buffer == [], do: direction, else: List.last(buffer)
 
     {dir, changed?} =
       case {old_dir, dir} do
@@ -129,12 +202,15 @@ defmodule Snake do
   defp maybe_seed_rand({a, b, c}) do
     :rand.seed(:exsss, {a, b, c})
   end
+
+  defp board_size, do: %{width: @board_width, height: @board_height}
 end
 
 Breeze.Example.run(
   [
     view: Snake,
     hide_cursor: true,
+    reload: true,
     global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
   ],
   keep_alive: :infinity
