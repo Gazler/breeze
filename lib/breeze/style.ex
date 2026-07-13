@@ -481,7 +481,7 @@ defmodule Breeze.Style do
 
   defp merge_style_map(style_map, {style, attrs}, theme) do
     Enum.reduce(style_map, {style, attrs}, fn {key, value}, {acc_style, acc_attrs} ->
-      merge_style_entry(normalize_style_key(key), value, {acc_style, acc_attrs}, theme)
+      merge_style_entry(key, value, {acc_style, acc_attrs}, theme)
     end)
   end
 
@@ -617,16 +617,6 @@ defmodule Breeze.Style do
     do: {%{style | foreground_color: Theme.resolve_color(theme, value)}, attrs}
 
   defp merge_style_entry(_key, _value, acc, _theme), do: acc
-
-  defp normalize_style_key(key) when is_atom(key), do: key
-
-  defp normalize_style_key(key) when is_binary(key) do
-    key
-    |> String.replace("-", "_")
-    |> String.to_atom()
-  end
-
-  defp normalize_style_key(key), do: key |> to_string() |> normalize_style_key()
 
   defp put_scrollbar_color(style, nil), do: style
 

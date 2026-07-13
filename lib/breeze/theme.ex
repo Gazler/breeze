@@ -100,7 +100,6 @@ defmodule Breeze.Theme do
             variables: %{},
             terminal_palette: nil
 
-  @reserved_keys ~w(name mode type dark defaults palette extras variables terminal_palette)a
   @default_aliases %{
     text: :foreground_color,
     fg: :foreground_color,
@@ -110,7 +109,14 @@ defmodule Breeze.Theme do
     border: :border_color
   }
   @palette_aliases %{fg: :text}
-  @legacy_palette_keys ~w(muted primary secondary warning error success accent surface panel)a
+  @palette_keys ~w(muted primary secondary warning error success accent surface panel)a
+  @known_key_lookup (Map.keys(@default_aliases) ++
+                       Map.values(@default_aliases) ++
+                       Map.keys(@palette_aliases) ++
+                       Map.values(@palette_aliases) ++
+                       @palette_keys ++ [:foreground, :background])
+                    |> Enum.uniq()
+                    |> Map.new(&{Atom.to_string(&1), &1})
 
   @typedoc "An RGB color tuple."
   @type rgb :: {0..255, 0..255, 0..255}
@@ -446,11 +452,11 @@ defmodule Breeze.Theme do
   @spec color(t() | map() | keyword() | atom() | nil, atom() | String.t()) :: color() | nil
   def color(theme, key) do
     theme = new(theme)
-    key = normalize_key(key)
+    normalized_key = normalize_key(key)
 
-    default_color(theme, key) ||
-      Map.get(theme.palette, canonical_palette_key(key)) ||
-      Map.get(theme.extras, key)
+    default_color(theme, normalized_key) ||
+      Map.get(theme.palette, canonical_palette_key(normalized_key)) ||
+      extra_color(theme.extras, key)
   end
 
   @doc "Resolves a semantic color name while preserving literal color values."
@@ -509,28 +515,13 @@ defmodule Breeze.Theme do
   end
 
   defp build_custom(theme) do
-    defaults =
-      theme
-      |> explicit_defaults()
-      |> Map.merge(legacy_defaults(theme))
-
-    palette =
-      theme
-      |> explicit_palette()
-      |> Map.merge(legacy_palette(theme))
-
-    extras =
-      theme
-      |> explicit_extras()
-      |> Map.merge(legacy_extras(theme))
-
     %__MODULE__{
       name: theme[:name],
       mode: :custom,
       dark: theme[:dark],
-      defaults: defaults,
-      palette: palette,
-      extras: extras,
+      defaults: explicit_defaults(theme),
+      palette: explicit_palette(theme),
+      extras: explicit_extras(theme),
       variables: theme[:variables] || %{},
       terminal_palette: normalize_terminal_palette(theme[:terminal_palette])
     }
@@ -551,64 +542,6 @@ defmodule Breeze.Theme do
   defp explicit_extras(theme) do
     theme
     |> Map.get(:extras, %{})
-    |> normalize_palette_entries()
-  end
-
-  defp legacy_defaults(theme) do
-    Enum.reduce(theme, %{}, fn {key, value}, acc ->
-      case normalize_key(key) do
-        :foreground_color -> Map.put(acc, :foreground_color, value)
-        :background_color -> Map.put(acc, :background_color, value)
-        :border_color -> Map.put(acc, :border_color, value)
-        :text -> Map.put(acc, :foreground_color, value)
-        :background -> Map.put(acc, :background_color, value)
-        :stroke -> Map.put(acc, :border_color, value)
-        :border -> Map.put(acc, :border_color, value)
-        _ -> acc
-      end
-    end)
-    |> normalize_default_map()
-  end
-
-  defp legacy_palette(theme) do
-    Enum.reduce(theme, %{}, fn {key, value}, acc ->
-      key = normalize_key(key)
-
-      if key in @legacy_palette_keys do
-        Map.put(acc, key, value)
-      else
-        acc
-      end
-    end)
-    |> normalize_palette_entries()
-  end
-
-  defp legacy_extras(theme) do
-    Enum.reduce(theme, %{}, fn {key, value}, acc ->
-      key = normalize_key(key)
-
-      cond do
-        key in @reserved_keys ->
-          acc
-
-        key in [
-          :foreground_color,
-          :background_color,
-          :border_color,
-          :text,
-          :background,
-          :stroke,
-          :border
-        ] ->
-          acc
-
-        key in @legacy_palette_keys ->
-          acc
-
-        true ->
-          Map.put(acc, key, value)
-      end
-    end)
     |> normalize_palette_entries()
   end
 
@@ -756,8 +689,11 @@ defmodule Breeze.Theme do
   end
 
   defp normalize_terminal_palette(palette) when is_map(palette) do
-    Map.new(palette, fn {key, value} ->
-      {normalize_terminal_palette_key(key), normalize_color_value(value)}
+    Enum.reduce(palette, %{}, fn {key, value}, acc ->
+      case normalize_terminal_palette_key(key) do
+        nil -> acc
+        key -> Map.put(acc, key, normalize_color_value(value))
+      end
     end)
   end
 
@@ -800,8 +736,11 @@ defmodule Breeze.Theme do
   end
 
   defp normalize_palette_entries(values) when is_map(values) do
-    Map.new(values, fn {key, value} ->
-      {canonical_palette_key(key), normalize_color_value(value)}
+    Enum.reduce(values, %{}, fn {key, value}, acc ->
+      case canonical_palette_key(key) do
+        nil -> acc
+        key -> Map.put(acc, key, normalize_color_value(value))
+      end
     end)
   end
 
@@ -830,6 +769,23 @@ defmodule Breeze.Theme do
     case canonical_default_key(key) do
       nil -> nil
       target -> Map.get(theme.defaults, target)
+    end
+  end
+
+  defp extra_color(extras, key) do
+    case Map.fetch(extras, key) do
+      {:ok, color} ->
+        color
+
+      :error ->
+        key_name = normalize_key_name(key)
+
+        case Enum.find(extras, fn {extra_key, _color} ->
+               normalize_key_name(extra_key) == key_name
+             end) do
+          {_key, color} -> color
+          nil -> nil
+        end
     end
   end
 
@@ -884,11 +840,15 @@ defmodule Breeze.Theme do
 
   defp normalize_key(key) when is_binary(key) do
     key
-    |> String.replace("-", "_")
-    |> String.to_atom()
+    |> normalize_key_name()
+    |> then(&Map.get(@known_key_lookup, &1))
   end
 
-  defp normalize_key(key), do: key |> to_string() |> normalize_key()
+  defp normalize_key(_key), do: nil
+
+  defp normalize_key_name(key) when is_atom(key), do: Atom.to_string(key)
+  defp normalize_key_name(key) when is_binary(key), do: String.replace(key, "-", "_")
+  defp normalize_key_name(_key), do: nil
 
   defp parse_hex_color!(<<_::binary-size(6)>> = hex) do
     List.to_tuple(for <<pair::binary-size(2) <- hex>>, do: hex_byte!(pair))

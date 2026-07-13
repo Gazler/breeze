@@ -312,6 +312,26 @@ defmodule Breeze.ThemeTest do
     assert Theme.color(theme, :background) == {13, 33, 55}
   end
 
+  test "resolves known string keys and atom-keyed extras without creating atoms" do
+    unknown_key = "unknown-theme-key-#{System.unique_integer([:positive])}"
+
+    assert_raise ArgumentError, fn -> String.to_existing_atom(unknown_key) end
+
+    theme =
+      Theme.new(
+        defaults: %{"foreground-color" => "#D6E7FF"},
+        palette: %{"primary" => "#4A9CFF"},
+        extras: %{unknown_key => "#FFFFFF", brand: "#9B8AFB"}
+      )
+
+    assert Theme.color(theme, "foreground-color") == {214, 231, 255}
+    assert Theme.color(theme, "primary") == {74, 156, 255}
+    assert Theme.color(theme, "brand") == {155, 138, 251}
+    assert Theme.color(theme, unknown_key) == nil
+    refute Map.has_key?(theme.extras, nil)
+    assert_raise ArgumentError, fn -> String.to_existing_atom(unknown_key) end
+  end
+
   test "nebula uses a quieter default border than its focus color" do
     theme = Theme.builtin(:nebula)
 

@@ -522,7 +522,11 @@ defmodule Breeze.RendererTest do
     end
 
     test "resolves semantic tokens against custom themes" do
-      theme = Breeze.Theme.new(primary: "#268bd2", background: "#002b36", border: "#586e75")
+      theme =
+        Breeze.Theme.new(
+          defaults: %{background: "#002b36", border: "#586e75"},
+          palette: %{primary: "#268bd2"}
+        )
 
       {_state, box} = Renderer.render(SemanticThemeExample, %{}, theme: theme)
 

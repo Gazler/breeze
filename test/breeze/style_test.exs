@@ -24,6 +24,20 @@ defmodule Breeze.StyleTest do
     assert element.style.background_color == 0
   end
 
+  test "ignores string keys in inline style maps without creating atoms" do
+    unknown_key = "unknown-style-#{System.unique_integer([:positive])}"
+
+    assert_raise ArgumentError, fn -> String.to_existing_atom(unknown_key) end
+
+    element =
+      Style.empty()
+      |> Style.put_style(%{"bold" => true, unknown_key => true})
+      |> Style.to_element([])
+
+    refute element.style.bold
+    assert_raise ArgumentError, fn -> String.to_existing_atom(unknown_key) end
+  end
+
   test "accepts BackBreeze.Style structs as inline styles" do
     inline_style =
       BackBreeze.Style.border()

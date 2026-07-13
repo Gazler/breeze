@@ -307,7 +307,7 @@ defmodule Breeze.Renderer do
     mod =
       case mod do
         value when is_atom(value) -> value
-        value -> String.to_atom(to_string(value))
+        value -> String.to_existing_atom(to_string(value))
       end
 
     acc = %{acc | flags: Keyword.put(acc.flags, :implicit, mod)}
