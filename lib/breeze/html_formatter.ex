@@ -61,7 +61,7 @@ defmodule Breeze.HTMLFormatter do
       |> Map.put(:file, Keyword.get(opts, :file, "nofile"))
       |> Map.put(:line, 1)
 
-    Breeze.Template.compile!(source, env)
+    Breeze.Template.parse!(source, env)
   end
 
   defp format_nodes(nodes, indent, line_length) when is_list(nodes) do
@@ -246,39 +246,7 @@ defmodule Breeze.HTMLFormatter do
   end
 
   defp expr_to_string(expr) do
-    expr
-    |> denormalize_assign_refs()
-    |> Macro.to_string()
-  end
-
-  defp denormalize_assign_refs(ast) do
-    Macro.prewalk(ast, fn
-      {:__breeze_assign__, name} when is_atom(name) ->
-        {:@, [], [{name, [], nil}]}
-
-      {:__breeze_var__, name} when is_atom(name) ->
-        {name, [], nil}
-
-      {:__breeze_literal__, value} ->
-        value
-
-      {:__breeze_access__, receiver, field} when is_atom(field) ->
-        {{:., [], [receiver, field]}, [no_parens: true], []}
-
-      {:__breeze_helper__, _module, name, _arity, args} when is_atom(name) and is_list(args) ->
-        {name, [], args}
-
-      {{:., _, [{:__aliases__, _, [:Map]}, :get]}, _, [{:assigns, _, _}, name]}
-      when is_atom(name) ->
-        {:@, [], [{name, [], nil}]}
-
-      {{:., _, [_module, :__breeze_eval_helper__]}, _, [name, _arity, args]}
-      when is_atom(name) and is_list(args) ->
-        {name, [], args}
-
-      node ->
-        node
-    end)
+    Macro.to_string(expr)
   end
 
   defp indent(level), do: String.duplicate(" ", level)

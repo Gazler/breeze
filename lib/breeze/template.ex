@@ -1,10 +1,37 @@
 defmodule Breeze.Template do
   @moduledoc false
 
+  defmodule Syntax do
+    @moduledoc false
+
+    defstruct [:nodes, :env]
+
+    @type t :: %__MODULE__{nodes: list(), env: Macro.Env.t()}
+  end
+
   defstruct [:nodes, :env]
 
   @type t :: %__MODULE__{nodes: list(), env: Macro.Env.t()}
   @type rendered :: t() | {t(), map()}
+
+  @expression_pseudo_vars [:__CALLER__, :__DIR__, :__ENV__, :__MODULE__, :__STACKTRACE__]
+  @bitstring_specifiers [
+    :big,
+    :binary,
+    :bitstring,
+    :bits,
+    :bytes,
+    :float,
+    :integer,
+    :little,
+    :native,
+    :signed,
+    :unit,
+    :unsigned,
+    :utf8,
+    :utf16,
+    :utf32
+  ]
 
   defguardp is_name_char(char)
             when (char >= ?a and char <= ?z) or (char >= ?A and char <= ?Z) or
@@ -13,14 +40,76 @@ defmodule Breeze.Template do
 
   defguardp is_ws(char) when char == ?\s or char == ?\n or char == ?\t or char == ?\r
 
-  def compile!(source, %Macro.Env{} = env) when is_binary(source) do
+  def parse!(source, %Macro.Env{} = env) when is_binary(source) do
     {nodes, rest} = parse_nodes(source, nil, env, [])
 
     if rest != "" do
       raise "unexpected trailing template content: #{inspect(rest)}"
     end
 
-    %__MODULE__{nodes: nodes, env: Macro.Env.prune_compile_info(env)}
+    %Syntax{nodes: nodes, env: Macro.Env.prune_compile_info(env)}
+  end
+
+  def compile!(source, %Macro.Env{} = env) when is_binary(source) do
+    compile!(source, env, [])
+  end
+
+  def compile!(source, %Macro.Env{} = env, opts) when is_binary(source) and is_list(opts) do
+    %Syntax{nodes: nodes} = parse!(source, env)
+
+    %__MODULE__{
+      nodes: compile_nodes(nodes, env, opts),
+      env: Macro.Env.prune_compile_info(env)
+    }
+  end
+
+  defp compile_nodes(nodes, env, opts) do
+    Enum.map(nodes, &compile_node(&1, env, opts))
+  end
+
+  defp compile_node({:text, segments}, env, opts) do
+    segments =
+      Enum.map(segments, fn
+        {:expr, expr} -> {:expr, compile_expr(expr, env, opts)}
+        text -> text
+      end)
+
+    {:text, segments}
+  end
+
+  defp compile_node({:expr, expr}, env, opts), do: {:expr, compile_expr(expr, env, opts)}
+
+  defp compile_node({:element, name, attrs, directives, children}, env, opts) do
+    attrs =
+      Enum.map(attrs, fn
+        {:dynamic, attr_name, expr} -> {:dynamic, attr_name, compile_expr(expr, env, opts)}
+        {:spread, expr} -> {:spread, compile_expr(expr, env, opts)}
+        attr -> attr
+      end)
+
+    directives = %{
+      for: compile_for_directive(directives[:for], env, opts),
+      if: compile_optional_expr(directives[:if], env, opts),
+      let: compile_let_directive(directives[:let], env, opts)
+    }
+
+    {:element, name, attrs, directives, compile_nodes(children, env, opts)}
+  end
+
+  defp compile_optional_expr(nil, _env, _opts), do: nil
+  defp compile_optional_expr(expr, env, opts), do: compile_expr(expr, env, opts)
+
+  defp compile_for_directive(nil, _env, _opts), do: nil
+
+  defp compile_for_directive({pattern_string, pattern_ast, enumerable_ast}, env, opts) do
+    {pattern_string, compile_for_pattern(pattern_ast, env, opts),
+     compile_expr(enumerable_ast, env, opts)}
+  end
+
+  defp compile_let_directive(nil, _env, _opts), do: nil
+
+  defp compile_let_directive({pattern_string, pattern_ast}, env, opts) do
+    {pattern_string, compile_for_pattern(pattern_ast, env, opts)}
   end
 
   def render_to_string({%__MODULE__{} = template, comp_assigns}, _assigns) do
@@ -289,6 +378,9 @@ defmodule Breeze.Template do
 
   defp node_local_helper_captures(_node), do: []
 
+  defp expr_local_helper_captures({:__breeze_compiled__, _module, _id, helpers}), do: helpers
+  defp expr_local_helper_captures({:__breeze_compiled_pattern__, _module, _id}), do: []
+
   defp expr_local_helper_captures(expr) do
     {_expr, helpers} =
       Macro.prewalk(expr, [], fn
@@ -366,15 +458,13 @@ defmodule Breeze.Template do
 
   defp render_node({:text, segments}, ctx) do
     Enum.map_join(segments, "", fn
-      {:expr, expr} -> expr |> eval_expr(ctx) |> normalize_output()
+      {:expr, expr} -> render_expr_to_string(expr, ctx)
       text when is_binary(text) -> text
     end)
   end
 
   defp render_node({:expr, expr}, ctx) do
-    expr
-    |> eval_expr(ctx)
-    |> normalize_output()
+    render_expr_to_string(expr, ctx)
   end
 
   defp render_node({:element, name, attrs, directives, children}, ctx) do
@@ -386,6 +476,23 @@ defmodule Breeze.Template do
         ""
       end
     end)
+  end
+
+  defp render_expr_to_string(expr, ctx) do
+    case expr do
+      {:render_slot, _meta, [slot_arg]} ->
+        slot_arg
+        |> eval_expr(ctx)
+        |> Breeze.View.render_slot()
+
+      {:render_slot, _meta, [slot_arg, assigns_arg]} ->
+        Breeze.View.render_slot(eval_expr(slot_arg, ctx), eval_expr(assigns_arg, ctx))
+
+      _ ->
+        expr
+        |> eval_expr(ctx)
+        |> normalize_output()
+    end
   end
 
   defp render_element("." <> component, attrs, children, ctx) do
@@ -617,6 +724,12 @@ defmodule Breeze.Template do
           :error -> :error
         end
 
+      {:__breeze_compiled_pattern__, module, id} ->
+        case apply(module, :__breeze_match_pattern__, [id, value, ctx.vars]) do
+          {:ok, new_vars} -> {:ok, Map.merge(ctx.vars, new_vars)}
+          :error -> :error
+        end
+
       _ ->
         binding = Map.to_list(ctx.vars) ++ [assigns: ctx.assigns, breeze_value: value]
 
@@ -649,6 +762,9 @@ defmodule Breeze.Template do
       {:__breeze_helper__, module, name, arity, args} ->
         values = Enum.map(args, &eval_expr(&1, ctx))
         apply(module, :__breeze_eval_helper__, [name, arity, values])
+
+      {:__breeze_compiled__, module, id, _helpers} ->
+        apply(module, :__breeze_eval_expr__, [id, ctx.assigns, ctx.vars])
 
       _ ->
         binding = Map.to_list(ctx.vars) ++ [assigns: ctx.assigns]
@@ -721,7 +837,7 @@ defmodule Breeze.Template do
     cond do
       String.starts_with?(source, "<%=") ->
         {expr, rest} = take_between(source, "<%=", "%>")
-        node = {:expr, compile_expr(expr, env)}
+        node = {:expr, parse_expr(expr, env)}
         parse_nodes(rest, closing, env, [node | acc])
 
       String.starts_with?(source, "</") ->
@@ -822,7 +938,7 @@ defmodule Breeze.Template do
 
   defp parse_attribute("{" <> _rest = source, env) do
     {expr, rest} = take_braced(source)
-    {{:spread, compile_expr(expr, env)}, rest}
+    {{:spread, parse_expr(expr, env)}, rest}
   end
 
   defp parse_attribute(source, env) do
@@ -858,18 +974,17 @@ defmodule Breeze.Template do
   end
 
   defp build_attribute(":if", {:dynamic, expr}, env) do
-    {:directive, :if, compile_expr(expr, env)}
+    {:directive, :if, parse_expr(expr, env)}
   end
 
   defp build_attribute(":for", {:dynamic, expr}, env) do
     {pattern, enumerable} = split_for_expression(expr)
 
-    {:directive, :for,
-     {pattern, compile_for_pattern(pattern, env), compile_expr(enumerable, env)}}
+    {:directive, :for, {pattern, parse_expr(pattern, env), parse_expr(enumerable, env)}}
   end
 
   defp build_attribute(":let", {:dynamic, expr}, env) do
-    {:directive, :let, {String.trim(expr), compile_for_pattern(expr, env)}}
+    {:directive, :let, {String.trim(expr), parse_expr(expr, env)}}
   end
 
   defp build_attribute(":if", _other, _env) do
@@ -885,7 +1000,7 @@ defmodule Breeze.Template do
   end
 
   defp build_attribute(name, {:dynamic, expr}, env) do
-    {:dynamic, name, compile_expr(expr, env)}
+    {:dynamic, name, parse_expr(expr, env)}
   end
 
   defp build_attribute(name, {:static, value}, _env) do
@@ -918,7 +1033,7 @@ defmodule Breeze.Template do
         acc =
           acc
           |> maybe_push_text(plain)
-          |> then(&[{:expr, compile_expr(expr, env)} | &1])
+          |> then(&[{:expr, parse_expr(expr, env)} | &1])
 
         compile_text_segments(rest, env, acc)
     end
@@ -959,14 +1074,34 @@ defmodule Breeze.Template do
     end
   end
 
-  defp compile_for_pattern(pattern_string, env) do
-    pattern_ast = Code.string_to_quoted!(pattern_string, file: env.file, line: env.line)
-
+  defp compile_for_pattern(pattern_ast, env, opts) do
     case compile_simple_pattern(pattern_ast) do
       {:ok, pattern} ->
         {:__breeze_pattern__, pattern}
 
       :error ->
+        compile_runtime_pattern(pattern_ast, env, opts)
+    end
+  end
+
+  defp compile_runtime_pattern(pattern_ast, env, opts) do
+    case Keyword.get(opts, :module) do
+      module when is_atom(module) and module == env.module ->
+        id = Module.get_attribute(module, :__breeze_template_pattern_counter__) || 0
+        Module.put_attribute(module, :__breeze_template_pattern_counter__, id + 1)
+
+        vars = collect_pattern_vars(pattern_ast)
+        pinned_vars = collect_pinned_pattern_vars(pattern_ast)
+
+        Module.put_attribute(
+          module,
+          :__breeze_template_patterns__,
+          {id, pattern_ast, vars, pinned_vars}
+        )
+
+        {:__breeze_compiled_pattern__, module, id}
+
+      _ ->
         vars = collect_pattern_vars(pattern_ast)
         result_map = {:%{}, [], Enum.map(vars, fn name -> {name, {name, [], nil}} end)}
 
@@ -981,6 +1116,20 @@ defmodule Breeze.Template do
            ]
          ]}
     end
+  end
+
+  defp collect_pinned_pattern_vars(pattern_ast) do
+    {_ast, vars} =
+      Macro.prewalk(pattern_ast, MapSet.new(), fn
+        {:^, _meta, [{name, _var_meta, context}]} = node, vars
+        when is_atom(name) and is_atom(context) ->
+          {node, MapSet.put(vars, name)}
+
+        node, vars ->
+          {node, vars}
+      end)
+
+    vars |> MapSet.to_list() |> Enum.sort()
   end
 
   defp compile_simple_pattern({name, _meta, ctx}) when is_atom(name) and is_atom(ctx),
@@ -1091,14 +1240,96 @@ defmodule Breeze.Template do
 
   defp do_collect_vars(_ast, acc), do: acc
 
-  defp compile_expr(expr, env) do
-    expr = String.trim(expr)
-
+  defp parse_expr(expr, env) do
     expr
+    |> String.trim()
     |> Code.string_to_quoted!(file: env.file, line: env.line)
-    |> normalize_assign_refs()
-    |> wrap_local_helper_calls(env.module)
-    |> simplify_expr()
+  end
+
+  defp compile_expr(expr, env, opts) do
+    normalized =
+      expr
+      |> normalize_assign_refs()
+      |> wrap_local_helper_calls(env.module)
+
+    case normalized do
+      {:render_slot, meta, args} when is_list(args) ->
+        {:render_slot, meta, Enum.map(args, &compile_expr(&1, env, opts))}
+
+      _ ->
+        case simplify_expr(normalized) do
+          ^normalized -> compile_runtime_expr(normalized, env, opts)
+          simplified -> simplified
+        end
+    end
+  end
+
+  defp compile_runtime_expr(expr, env, opts) do
+    case Keyword.get(opts, :module) do
+      module when is_atom(module) and module == env.module ->
+        id = Module.get_attribute(module, :__breeze_template_expression_counter__) || 0
+        Module.put_attribute(module, :__breeze_template_expression_counter__, id + 1)
+
+        vars = collect_expression_vars(expr)
+        compiled_expr = put_compiled_assigns_context(expr)
+        Module.put_attribute(module, :__breeze_template_expressions__, {id, compiled_expr, vars})
+
+        helpers = expr_local_helper_captures(expr)
+        {:__breeze_compiled__, module, id, helpers}
+
+      _ ->
+        expr
+    end
+  end
+
+  defp collect_expression_vars(expr) do
+    expr
+    |> do_collect_expression_vars(MapSet.new())
+    |> MapSet.to_list()
+    |> Enum.sort()
+  end
+
+  defp do_collect_expression_vars({:__aliases__, _meta, _parts}, vars), do: vars
+
+  defp do_collect_expression_vars({:"::", _meta, [value, spec]}, vars) do
+    vars
+    |> then(&do_collect_expression_vars(value, &1))
+    |> then(&do_collect_bitstring_spec_vars(spec, &1))
+  end
+
+  defp do_collect_expression_vars({name, _meta, context}, vars)
+       when is_atom(name) and is_atom(context) and name not in [:_, :assigns] do
+    if name in @expression_pseudo_vars, do: vars, else: MapSet.put(vars, name)
+  end
+
+  defp do_collect_expression_vars({form, _meta, args}, vars) when is_list(args) do
+    vars = if is_atom(form), do: vars, else: do_collect_expression_vars(form, vars)
+    do_collect_expression_vars(args, vars)
+  end
+
+  defp do_collect_expression_vars({left, right}, vars) do
+    vars
+    |> then(&do_collect_expression_vars(left, &1))
+    |> then(&do_collect_expression_vars(right, &1))
+  end
+
+  defp do_collect_expression_vars(list, vars) when is_list(list) do
+    Enum.reduce(list, vars, &do_collect_expression_vars/2)
+  end
+
+  defp do_collect_expression_vars(_literal, vars), do: vars
+
+  defp do_collect_bitstring_spec_vars({name, _meta, nil}, vars)
+       when name in @bitstring_specifiers,
+       do: vars
+
+  defp do_collect_bitstring_spec_vars(spec, vars), do: do_collect_expression_vars(spec, vars)
+
+  defp put_compiled_assigns_context(expr) do
+    Macro.prewalk(expr, fn
+      {:assigns, meta, nil} -> {:assigns, meta, __MODULE__}
+      node -> node
+    end)
   end
 
   defp wrap_local_helper_calls(ast, module) do
