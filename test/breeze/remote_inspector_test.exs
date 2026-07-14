@@ -588,6 +588,79 @@ defmodule Breeze.RemoteInspectorTest do
              )
   end
 
+  test "remote inspector merges incremental snapshot updates without replacing logs" do
+    old_key = {:app@host, "#PID<0.1.0>"}
+    new_key = {:app@host, "#PID<0.2.0>"}
+    logs = %{old_key => %{entries: [%{level: :info, line: "retained"}]}}
+
+    term = %Breeze.Term{
+      view: Breeze.RemoteInspector.View,
+      assigns: %{
+        snapshots: %{
+          old_key => %{
+            source: %{node: :app@host, pid: self()},
+            snapshot: %{root_view: InspectorAppView, selected_id: "old"},
+            updated_at: 1,
+            alive?: true
+          }
+        },
+        latest_source: old_key,
+        active_source: old_key,
+        logs: logs
+      }
+    }
+
+    changed_snapshots = %{
+      old_key => %{term.assigns.snapshots[old_key] | alive?: false},
+      new_key => %{
+        source: %{node: :app@host, pid: self()},
+        snapshot: %{root_view: InspectorAppView, selected_id: "new"},
+        updated_at: 2,
+        alive?: true
+      }
+    }
+
+    assert {:noreply, term} =
+             Breeze.RemoteInspector.View.handle_info(
+               {:remote_inspector_snapshots,
+                %{snapshots: changed_snapshots, latest_source: new_key}},
+               term
+             )
+
+    assert term.assigns.active_source == new_key
+    assert term.assigns.latest_source == new_key
+    assert term.assigns.snapshots[old_key].alive? == false
+    assert term.assigns.snapshots[new_key].snapshot.selected_id == "new"
+    assert term.assigns.logs == logs
+  end
+
+  test "remote inspector removes disconnected log sources incrementally" do
+    key = {:app@host, "#PID<0.1.0>"}
+
+    term = %Breeze.Term{
+      view: Breeze.RemoteInspector.View,
+      assigns: %{
+        logs: %{
+          key => %{
+            source: %{node: :app@host, pid: self()},
+            entries: [%{level: :info, line: "removed"}],
+            updated_at: 1
+          }
+        },
+        log_sources: %{}
+      }
+    }
+
+    assert {:noreply, term} =
+             Breeze.RemoteInspector.View.handle_info(
+               {:remote_inspector_logs, {:delete, key}},
+               term
+             )
+
+    assert term.assigns.logs == %{}
+    assert term.assigns.log_sources == %{}
+  end
+
   test "distribution names default for apps and the remote inspector" do
     assert Breeze.RemoteInspector.default_distribution_name(:inspector) == :inspector
     assert Breeze.RemoteInspector.default_distribution_name(:app, []) == :app
@@ -637,10 +710,65 @@ defmodule Breeze.RemoteInspectorSyncTest do
 
     Breeze.RemoteInspector.Server.publish(pid, self(), snapshot)
     published = Breeze.RemoteInspector.Server.snapshot(pid)
+    key = {node(), inspect(self())}
 
-    assert_receive {:remote_inspector, %{snapshots: snapshots}}
-    assert map_size(snapshots) >= 1
-    assert snapshots == published.snapshots
+    assert_receive {:remote_inspector_snapshots,
+                    %{snapshots: %{^key => entry}, latest_source: ^key}}
+
+    assert entry.snapshot == snapshot
+    assert published.snapshots[key] == entry
+  end
+
+  test "snapshot broadcasts are coalesced and do not resend logs" do
+    {:ok, pid} = Breeze.RemoteInspector.ensure_server()
+    on_exit(fn -> stop_local_process(pid) end)
+
+    log_entry = %{level: :info, line: String.duplicate("log", 1_000)}
+    Breeze.RemoteInspector.Server.publish_logs(pid, self(), [log_entry])
+    %{logs: logs} = Breeze.RemoteInspector.Server.snapshot(pid)
+
+    :ok = Breeze.RemoteInspector.subscribe(self())
+    assert_receive {:remote_inspector, %{logs: ^logs}}
+    drain_remote_inspector_notifications()
+
+    Enum.each(1..20, fn index ->
+      Breeze.RemoteInspector.Server.publish(pid, self(), %{selected_id: "item-#{index}"})
+    end)
+
+    _state = Breeze.RemoteInspector.Server.snapshot(pid)
+    key = {node(), inspect(self())}
+
+    assert_receive {:remote_inspector_snapshots,
+                    %{snapshots: %{^key => entry}, latest_source: ^key}}
+
+    assert entry.snapshot.selected_id == "item-20"
+    refute_receive {:remote_inspector_snapshots, _update}, 30
+  end
+
+  test "disconnecting a logs-only source sends an incremental deletion" do
+    {:ok, pid} = Breeze.RemoteInspector.ensure_server()
+    source_pid = spawn(fn -> Process.sleep(:infinity) end)
+
+    on_exit(fn ->
+      stop_local_process(source_pid)
+      stop_local_process(pid)
+    end)
+
+    Breeze.RemoteInspector.Server.publish_logs(pid, source_pid, [
+      %{level: :info, line: "temporary"}
+    ])
+
+    key = {node(source_pid), inspect(source_pid)}
+    assert %{logs: %{^key => _entry}} = Breeze.RemoteInspector.Server.snapshot(pid)
+
+    :ok = Breeze.RemoteInspector.subscribe(self())
+    assert_receive {:remote_inspector, %{logs: %{^key => _entry}}}
+    drain_remote_inspector_notifications()
+
+    Process.exit(source_pid, :shutdown)
+
+    assert_receive {:remote_inspector_logs, {:delete, ^key}}
+    refute Map.has_key?(Breeze.RemoteInspector.Server.snapshot(pid).logs, key)
   end
 
   test "starting the remote inspector server pulls current snapshots from inspector-enabled apps" do
@@ -712,6 +840,8 @@ defmodule Breeze.RemoteInspectorSyncTest do
   defp drain_remote_inspector_notifications do
     receive do
       {:remote_inspector, _payload} -> drain_remote_inspector_notifications()
+      {:remote_inspector_snapshots, _payload} -> drain_remote_inspector_notifications()
+      {:remote_inspector_logs, _payload} -> drain_remote_inspector_notifications()
     after
       0 -> :ok
     end

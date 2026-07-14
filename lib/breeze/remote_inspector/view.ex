@@ -560,17 +560,27 @@ defmodule Breeze.RemoteInspector.View do
         {:remote_inspector, %{snapshots: snapshots, latest_source: latest_source} = state},
         term
       ) do
-    active_source = normalize_active_source(term.assigns.active_source, snapshots, latest_source)
     logs = Map.get(state, :logs, Map.get(term.assigns, :logs, %{}))
 
     term =
       term
-      |> assign(
-        snapshots: snapshots,
-        latest_source: latest_source,
-        active_source: active_source
-      )
+      |> assign_snapshot_state(snapshots, latest_source)
       |> assign_logs(logs)
+      |> refresh_active_render_tree()
+
+    {:noreply, term}
+  end
+
+  def handle_info(
+        {:remote_inspector_snapshots,
+         %{snapshots: changed_snapshots, latest_source: latest_source}},
+        term
+      ) do
+    snapshots = Map.merge(term.assigns.snapshots, changed_snapshots)
+
+    term =
+      term
+      |> assign_snapshot_state(snapshots, latest_source)
       |> refresh_active_render_tree()
 
     {:noreply, term}
@@ -578,6 +588,11 @@ defmodule Breeze.RemoteInspector.View do
 
   def handle_info({:remote_inspector_logs, {:snapshot, key, entry}}, term) do
     logs = Map.put(Map.get(term.assigns, :logs, %{}), key, entry)
+    {:noreply, assign_logs(term, logs)}
+  end
+
+  def handle_info({:remote_inspector_logs, {:delete, key}}, term) do
+    logs = Map.delete(Map.get(term.assigns, :logs, %{}), key)
     {:noreply, assign_logs(term, logs)}
   end
 
@@ -660,6 +675,16 @@ defmodule Breeze.RemoteInspector.View do
 
   defp active_entry(%{snapshots: snapshots, latest_source: latest_source} = assigns) do
     Map.get(snapshots, active_source(assigns) || latest_source)
+  end
+
+  defp assign_snapshot_state(term, snapshots, latest_source) do
+    active_source = normalize_active_source(term.assigns.active_source, snapshots, latest_source)
+
+    assign(term,
+      snapshots: snapshots,
+      latest_source: latest_source,
+      active_source: active_source
+    )
   end
 
   defp assign_logs(term, logs) do

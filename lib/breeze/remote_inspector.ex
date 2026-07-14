@@ -231,6 +231,7 @@ defmodule Breeze.RemoteInspector.Server do
   @max_log_bytes 2_000_000
   @max_log_entry_bytes 100_000
   @log_flush_interval 50
+  @snapshot_flush_interval 16
 
   def start_link do
     GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
@@ -267,6 +268,8 @@ defmodule Breeze.RemoteInspector.Server do
        snapshots: %{},
        latest_source: nil,
        logs: %{},
+       dirty_snapshots: MapSet.new(),
+       snapshot_flush_ref: nil,
        dirty_logs: MapSet.new(),
        log_flush_ref: nil,
        subscribers: MapSet.new(),
@@ -285,7 +288,7 @@ defmodule Breeze.RemoteInspector.Server do
     state =
       state
       |> Map.update!(:subscribers, &MapSet.put(&1, subscriber))
-      |> push_state()
+      |> push_state([subscriber])
 
     {:reply, :ok, state}
   end
@@ -308,7 +311,7 @@ defmodule Breeze.RemoteInspector.Server do
       |> ensure_source_monitor(source_pid, key)
       |> put_in([:snapshots, key], entry)
       |> Map.put(:latest_source, key)
-      |> push_state()
+      |> mark_snapshot_dirty(key)
 
     {:noreply, state}
   end
@@ -356,6 +359,24 @@ defmodule Breeze.RemoteInspector.Server do
   end
 
   @impl true
+  def handle_info(:flush_snapshots, state) do
+    snapshots =
+      state.snapshots
+      |> Map.take(MapSet.to_list(state.dirty_snapshots))
+
+    state =
+      if map_size(snapshots) == 0 do
+        state
+      else
+        push_snapshot_event(state, %{
+          snapshots: snapshots,
+          latest_source: state.latest_source
+        })
+      end
+
+    {:noreply, %{state | dirty_snapshots: MapSet.new(), snapshot_flush_ref: nil}}
+  end
+
   def handle_info(:flush_logs, state) do
     state =
       Enum.reduce(state.dirty_logs, state, fn key, acc ->
@@ -377,20 +398,19 @@ defmodule Breeze.RemoteInspector.Server do
           state
           |> put_in([:snapshots, key, :alive?], false)
           |> update_in([:source_monitors], &drop_source_monitor(&1, key))
-          |> push_state()
+          |> mark_snapshot_dirty(key)
 
         Map.has_key?(state.logs, key) ->
           state
           |> update_in([:logs], &Map.delete(&1, key))
           |> update_in([:dirty_logs], &MapSet.delete(&1, key))
           |> update_in([:source_monitors], &drop_source_monitor(&1, key))
-          |> push_state()
+          |> push_log_event({:delete, key})
 
         true ->
           state
           |> Map.update!(:subscribers, &MapSet.delete(&1, pid))
           |> update_snapshots(key)
-          |> push_state()
       end
 
     {:noreply, state}
@@ -434,11 +454,25 @@ defmodule Breeze.RemoteInspector.Server do
   end
 
   defp push_state(state) do
+    push_state(state, state.subscribers)
+  end
+
+  defp push_state(state, subscribers) do
     payload = public_state(state)
 
-    Enum.each(state.subscribers, fn subscriber ->
+    Enum.each(subscribers, fn subscriber ->
       if is_pid(subscriber) and Process.alive?(subscriber) do
         send(subscriber, {:remote_inspector, payload})
+      end
+    end)
+
+    state
+  end
+
+  defp push_snapshot_event(state, event) do
+    Enum.each(state.subscribers, fn subscriber ->
+      if is_pid(subscriber) and Process.alive?(subscriber) do
+        send(subscriber, {:remote_inspector_snapshots, event})
       end
     end)
 
@@ -462,6 +496,20 @@ defmodule Breeze.RemoteInspector.Server do
 
   defp mark_log_dirty(state, key) do
     %{state | dirty_logs: MapSet.put(state.dirty_logs, key)}
+  end
+
+  defp mark_snapshot_dirty(%{snapshot_flush_ref: nil} = state, key) do
+    ref = Process.send_after(self(), :flush_snapshots, @snapshot_flush_interval)
+
+    %{
+      state
+      | dirty_snapshots: MapSet.put(state.dirty_snapshots, key),
+        snapshot_flush_ref: ref
+    }
+  end
+
+  defp mark_snapshot_dirty(state, key) do
+    %{state | dirty_snapshots: MapSet.put(state.dirty_snapshots, key)}
   end
 
   defp sync_apps(state) do
