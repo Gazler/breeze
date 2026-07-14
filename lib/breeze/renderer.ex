@@ -888,11 +888,17 @@ defmodule Breeze.Renderer do
   defp maybe_attach_live_viewports(root_tag, root_children, opts) do
     case Keyword.get(opts, :live_view) do
       fun when is_function(fun, 2) ->
-        Keyword.put(
-          opts,
-          :live_viewports,
-          live_placeholder_viewports(root_tag, root_children, opts)
-        )
+        case live_ids(root_tag, root_children, opts) do
+          [] ->
+            opts
+
+          _live_ids ->
+            Keyword.put(
+              opts,
+              :live_viewports,
+              live_placeholder_viewports(root_tag, root_children, opts)
+            )
+        end
 
       _ ->
         opts
