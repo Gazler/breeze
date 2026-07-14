@@ -1911,13 +1911,10 @@ defmodule Breeze.ChildServer do
   defp profile(nil, _label, _metric, fun), do: fun.()
 
   defp profile(scope, label, metric, fun) do
-    :telemetry.span(
+    Breeze.Telemetry.span(
       [:breeze, :render],
       %{scope: scope, label: label, metric: metric},
-      fn ->
-        result = fun.()
-        {result, %{scope: scope, label: label, metric: metric}}
-      end
+      fun
     )
   end
 end

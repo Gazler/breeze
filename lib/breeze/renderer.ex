@@ -1724,35 +1724,20 @@ defmodule Breeze.Renderer do
   defp profile(nil, _label, _metric, fun), do: fun.()
 
   defp profile(scope, label, metric, fun) do
-    if telemetry_enabled?() do
-      :telemetry.span(
-        [:breeze, :render],
-        %{scope: scope, label: label, metric: metric},
-        fn ->
-          result = fun.()
-          {result, %{scope: scope, label: label, metric: metric}}
-        end
-      )
-    else
-      fun.()
-    end
+    Breeze.Telemetry.span(
+      [:breeze, :render],
+      %{scope: scope, label: label, metric: metric},
+      fun
+    )
   end
 
   defp emit_metric(nil, _label, _metric, _value), do: :ok
 
   defp emit_metric(scope, label, metric, value) do
-    if telemetry_enabled?() do
-      :telemetry.execute(
-        [:breeze, :render, :metric],
-        %{value: value},
-        %{scope: scope, label: label, metric: metric}
-      )
-    else
-      :ok
-    end
-  end
-
-  defp telemetry_enabled? do
-    not Application.get_env(:breeze, :disable_telemetry, false)
+    Breeze.Telemetry.execute(
+      [:breeze, :render, :metric],
+      %{value: value},
+      %{scope: scope, label: label, metric: metric}
+    )
   end
 end
