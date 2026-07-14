@@ -598,6 +598,8 @@ defmodule Breeze.ChildServer do
         extract_async_decorations(term)
       end)
 
+    term = %{term | last_render_at: System.monotonic_time(:millisecond)}
+
     {term, acc, box, decorations}
   end
 
@@ -609,7 +611,7 @@ defmodule Breeze.ChildServer do
          profile_scope,
          profile_label
        ) do
-    if term.implicit_state == %{} and term.implicit_meta == %{} do
+    if is_nil(term.last_render_at) do
       prepass_opts =
         opts
         |> Keyword.put(:implicit_state, implicit_state)

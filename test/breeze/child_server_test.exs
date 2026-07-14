@@ -149,6 +149,43 @@ defmodule Breeze.ChildServerTest do
     assert box.content == "1"
   end
 
+  test "bootstrap prepass runs only once for views without implicit state" do
+    terminal = %Termite.Terminal{size: %{width: 20, height: 5}}
+    {:ok, pid} = Breeze.ChildServer.start(view: MouseView, terminal: terminal)
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+    assert is_nil(:sys.get_state(pid).last_render_at)
+
+    first_scope = make_ref()
+    Breeze.DebugProfiler.reset(first_scope)
+
+    assert {:ok, _acc, _box} =
+             Breeze.ChildServer.render(pid,
+               terminal: terminal,
+               profile_scope: first_scope,
+               profile_label: "bootstrap-once"
+             )
+
+    assert is_integer(:sys.get_state(pid).last_render_at)
+
+    assert Enum.any?(Breeze.DebugProfiler.snapshot(first_scope), fn entry ->
+             entry.metric == :bootstrap_render_tree_us
+           end)
+
+    second_scope = make_ref()
+    Breeze.DebugProfiler.reset(second_scope)
+
+    assert {:ok, _acc, _box} =
+             Breeze.ChildServer.render(pid,
+               terminal: terminal,
+               profile_scope: second_scope,
+               profile_label: "bootstrap-once"
+             )
+
+    refute Enum.any?(Breeze.DebugProfiler.snapshot(second_scope), fn entry ->
+             entry.metric == :bootstrap_render_tree_us
+           end)
+  end
+
   test "wheel mouse events do not steal focus" do
     terminal = %Termite.Terminal{size: %{width: 20, height: 5}}
     {:ok, wheel_pid} = Breeze.ChildServer.start(view: MouseFocusView, terminal: terminal)
