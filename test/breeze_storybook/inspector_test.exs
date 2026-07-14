@@ -1,6 +1,7 @@
 defmodule Breeze.Storybook.InspectorTest do
   use ExUnit.Case, async: true
 
+  import Breeze.TestSupport.ProcessHelpers, only: [stop_gen_server: 1]
   import Breeze.TestSupport.WaitUntil
 
   defmodule RecordingAdapter do
@@ -35,7 +36,7 @@ defmodule Breeze.Storybook.InspectorTest do
         inspector: [remote: false]
       )
 
-    on_exit(fn -> stop_server(pid) end)
+    on_exit(fn -> stop_gen_server(pid) end)
 
     refute :sys.get_state(pid).inspector_state.visible?
 
@@ -44,11 +45,5 @@ defmodule Breeze.Storybook.InspectorTest do
     wait_until(fn ->
       :sys.get_state(pid).inspector_state.visible?
     end)
-  end
-
-  defp stop_server(pid) do
-    if Process.alive?(pid), do: GenServer.stop(pid, :normal)
-  catch
-    :exit, _reason -> :ok
   end
 end

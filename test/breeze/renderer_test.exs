@@ -1,5 +1,6 @@
 defmodule Breeze.RendererTest do
   use ExUnit.Case, async: true
+  import Breeze.TestSupport.ProcessHelpers, only: [stop_gen_server: 1]
   alias BackBreeze.VirtualText.Source
   alias Breeze.Renderer
 
@@ -665,7 +666,7 @@ defmodule Breeze.RendererTest do
 
     test "scroll panels wire the scroll implicit" do
       {:ok, pid} = Breeze.ChildServer.start(view: ScrollPanelExample, start_opts: [])
-      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+      on_exit(fn -> stop_gen_server(pid) end)
 
       {:ok, _acc, initial_box} =
         Breeze.ChildServer.render(pid, focused: "theme-demo", implicit_state: %{})

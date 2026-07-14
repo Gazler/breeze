@@ -1,5 +1,6 @@
 defmodule Breeze.ChildServerTest do
   use ExUnit.Case, async: true
+  import Breeze.TestSupport.ProcessHelpers, only: [stop_gen_server: 1]
 
   alias Breeze.Theme
   alias Breeze.Theme.Probe, as: ThemeProbe
@@ -152,7 +153,7 @@ defmodule Breeze.ChildServerTest do
   test "bootstrap prepass runs only once for views without implicit state" do
     terminal = %Termite.Terminal{size: %{width: 20, height: 5}}
     {:ok, pid} = Breeze.ChildServer.start(view: MouseView, terminal: terminal)
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+    on_exit(fn -> stop_gen_server(pid) end)
     assert is_nil(:sys.get_state(pid).last_render_at)
 
     first_scope = make_ref()

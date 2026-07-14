@@ -1,5 +1,6 @@
 defmodule Breeze.InputRouterTest do
   use ExUnit.Case, async: true
+  import Breeze.TestSupport.ProcessHelpers, only: [stop_gen_server: 1]
   import Breeze.TestSupport.WaitUntil
 
   alias Breeze.ChildServer
@@ -651,7 +652,7 @@ defmodule Breeze.InputRouterTest do
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+    on_exit(fn -> stop_gen_server(pid) end)
 
     wait_until(fn ->
       :sys.get_state(pid).focused == "one"

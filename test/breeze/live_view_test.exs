@@ -1246,7 +1246,7 @@ defmodule Breeze.LiveView.CoreTest do
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+    on_exit(fn -> stop_gen_server(pid) end)
 
     {child_pid, bounds} =
       wait_until(fn ->
@@ -1310,7 +1310,7 @@ defmodule Breeze.LiveView.CoreTest do
         terminal: terminal
       )
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+    on_exit(fn -> stop_gen_server(pid) end)
 
     state = :sys.get_state(pid)
     child = state.children["themed-child"].pid
@@ -1422,7 +1422,7 @@ defmodule Breeze.LiveView.CoreTest do
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+    on_exit(fn -> stop_gen_server(pid) end)
 
     initial_state = :sys.get_state(pid)
     assert Enum.any?(initial_state.frame.decorations, &(&1.id == "search"))
@@ -1461,7 +1461,7 @@ defmodule Breeze.LiveView.CoreTest do
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+    on_exit(fn -> stop_gen_server(pid) end)
 
     payload =
       wait_until(fn ->
@@ -3014,7 +3014,7 @@ defmodule Breeze.LiveView.ReloadAndFrameTest do
         terminal: terminal
       )
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+    on_exit(fn -> stop_gen_server(pid) end)
 
     drain_terminal_writes()
     previous_child = :sys.get_state(pid).children["preview"].pid

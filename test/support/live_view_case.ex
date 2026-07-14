@@ -59,6 +59,7 @@ defmodule Breeze.TestSupport.LiveViewCase do
       }
 
       import ExUnit.CaptureLog
+      import Breeze.TestSupport.ProcessHelpers, only: [stop_gen_server: 1]
     end
   end
 end

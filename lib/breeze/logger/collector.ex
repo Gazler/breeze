@@ -370,7 +370,10 @@ defmodule Breeze.Logger.Collector do
       nil -> {:error, :not_started}
     end
   catch
-    :exit, {:noproc, _} -> {:error, :not_started}
-    :exit, {:normal, _} -> {:error, :not_started}
+    :exit, reason when reason in [:noproc, :normal, :shutdown] ->
+      {:error, :not_started}
+
+    :exit, {reason, _call} when reason in [:noproc, :normal, :shutdown] ->
+      {:error, :not_started}
   end
 end

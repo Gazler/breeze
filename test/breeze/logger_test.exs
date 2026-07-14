@@ -101,6 +101,27 @@ defmodule Breeze.LoggerTest do
     wait_until(fn -> is_nil(Process.whereis(Breeze.Logger.Collector)) end)
   end
 
+  test "collector calls tolerate a process shutting down", %{collector: collector} do
+    GenServer.stop(collector, :normal)
+    parent = self()
+
+    shutting_down_collector =
+      spawn(fn ->
+        Process.register(self(), Breeze.Logger.Collector)
+        send(parent, :collector_registered)
+
+        receive do
+          {:"$gen_call", _from, {:release, _owner}} -> exit(:shutdown)
+        end
+      end)
+
+    ref = Process.monitor(shutting_down_collector)
+    assert_receive :collector_registered
+
+    assert {:error, :not_started} = Breeze.Logger.Collector.release(self())
+    assert_receive {:DOWN, ^ref, :process, ^shutting_down_collector, :shutdown}
+  end
+
   test "attach capture preserves the default logger handler" do
     assert {:ok, before_config} = :logger.get_handler_config(:default)
 

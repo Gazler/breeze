@@ -111,9 +111,7 @@ defmodule Breeze.TestSupport.StorybookHelpers do
   end
 
   def stop_server(pid) do
-    if Process.alive?(pid), do: GenServer.stop(pid, :normal)
-  catch
-    :exit, _reason -> :ok
+    Breeze.TestSupport.ProcessHelpers.stop_gen_server(pid)
   end
 
   def wait_for_preview_child(pid, story_id) do

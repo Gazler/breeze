@@ -1,5 +1,6 @@
 defmodule Breeze.ThemeTest do
   use ExUnit.Case, async: true
+  import Breeze.TestSupport.ProcessHelpers, only: [stop_gen_server: 1]
 
   alias Breeze.Theme
   alias Breeze.Theme.Probe, as: ThemeProbe
@@ -380,7 +381,7 @@ defmodule Breeze.ThemeTest do
 
   test "child metadata reflects theme changes" do
     {:ok, pid} = Breeze.ChildServer.start(view: ToggleView, start_opts: [])
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid, :normal) end)
+    on_exit(fn -> stop_gen_server(pid) end)
 
     assert Breeze.ChildServer.metadata(pid).theme.mode == :system16
     assert {:noreply, _focused, true} = Breeze.ChildServer.dispatch_input(pid, "t")
