@@ -89,15 +89,25 @@ defmodule Breeze.Server.Frame do
   end
 
   defp changed_base_rows(prev_lines, lines) do
-    lines
-    |> Enum.with_index()
-    |> Enum.reduce(MapSet.new(), fn {line, row}, acc ->
-      if line == Enum.at(prev_lines, row, "") do
-        acc
-      else
-        MapSet.put(acc, row)
-      end
-    end)
+    do_changed_base_rows(prev_lines, lines, 0, MapSet.new())
+  end
+
+  defp do_changed_base_rows(_prev_lines, [], _row, changed_rows), do: changed_rows
+
+  defp do_changed_base_rows([line | prev_lines], [line | lines], row, changed_rows) do
+    do_changed_base_rows(prev_lines, lines, row + 1, changed_rows)
+  end
+
+  defp do_changed_base_rows([_prev_line | prev_lines], [_line | lines], row, changed_rows) do
+    do_changed_base_rows(prev_lines, lines, row + 1, MapSet.put(changed_rows, row))
+  end
+
+  defp do_changed_base_rows([], ["" | lines], row, changed_rows) do
+    do_changed_base_rows([], lines, row + 1, changed_rows)
+  end
+
+  defp do_changed_base_rows([], [_line | lines], row, changed_rows) do
+    do_changed_base_rows([], lines, row + 1, MapSet.put(changed_rows, row))
   end
 
   defp changed_overlay_rows(prev_overlays, overlays) do
@@ -162,14 +172,28 @@ defmodule Breeze.Server.Frame do
   end
 
   defp row_patch_payload(lines, changed_rows, screen_width) do
+    lines = List.to_tuple(lines)
+    line_count = tuple_size(lines)
+
     changed_rows
     |> Enum.sort()
     |> Enum.map(fn row ->
-      line = Enum.at(lines, row, "")
+      line = line_at(lines, row, line_count)
       write_row_payload(row, line, screen_width)
     end)
     |> IO.iodata_to_binary()
   end
+
+  defp line_at(lines, row, line_count) when row < 0 do
+    tuple_line_at(lines, line_count + row, line_count)
+  end
+
+  defp line_at(lines, row, line_count), do: tuple_line_at(lines, row, line_count)
+
+  defp tuple_line_at(lines, row, line_count) when row >= 0 and row < line_count,
+    do: elem(lines, row)
+
+  defp tuple_line_at(_lines, _row, _line_count), do: ""
 
   defp write_row_payload(row, line, screen_width) do
     visible_width = visible_width(line)
