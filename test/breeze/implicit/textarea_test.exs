@@ -243,6 +243,30 @@ defmodule Breeze.Implicit.TextareaTest do
              )
   end
 
+  test "animate keeps explicit lines ordered when scrolling to the cursor" do
+    box = %Box{content: "", style: %BackBreeze.Style{width: 10, height: 3}}
+    value = "one\ntwo\nthree\nfour"
+
+    assert {:ok, %Box{content: "two\nthree\nfour"},
+            overlays: [%{x: 4, y: 2, char: " ", visible?: true}]} =
+             Textarea.animate(
+               :root,
+               box,
+               [focused: true],
+               %{
+                 value: value,
+                 cursor: String.length(value),
+                 placeholder: nil,
+                 preferred_column: nil
+               },
+               %{
+                 layout: %{left: 0, top: 0, viewport_width: 10, viewport_height: 3},
+                 now: 0,
+                 last_interaction_at: nil
+               }
+             )
+  end
+
   test "animate wraps the cursor to the next visual row when the bordered content width is exactly filled" do
     box =
       %Box{
