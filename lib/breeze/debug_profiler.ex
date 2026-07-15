@@ -33,7 +33,8 @@ defmodule Breeze.DebugProfiler do
   end
 
   def enabled? do
-    not Application.get_env(:breeze, :disable_telemetry, false)
+    Breeze.Telemetry.enabled?() and
+      not Application.get_env(:breeze, :disable_debug_profiler, false)
   end
 
   defp ensure_handler do

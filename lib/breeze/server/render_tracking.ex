@@ -2,7 +2,9 @@ defmodule Breeze.Server.RenderTracking do
   @moduledoc false
 
   def new_table do
-    :ets.new(__MODULE__, [:public, :bag, write_concurrency: true])
+    if not disabled?() do
+      :ets.new(__MODULE__, [:public, :bag, write_concurrency: true])
+    end
   end
 
   def begin(table) do
