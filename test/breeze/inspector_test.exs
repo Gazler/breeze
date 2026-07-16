@@ -432,7 +432,7 @@ defmodule Breeze.InspectorTest do
         inspector_state: %{visible?: true, selected_id: "field"}
       })
 
-    click = %{x: 4, y: 3}
+    click = %{"x" => 3, "y" => 2}
 
     state = Inspector.select_at(state, click)
     assert state.inspector_state.selected_id == "nested"
@@ -450,7 +450,7 @@ defmodule Breeze.InspectorTest do
         inspector_state: %{visible?: true, selected_id: "field", hovered_id: "nested"}
       })
 
-    bottom_panel_event = %{x: 10, y: 24}
+    bottom_panel_event = %{"x" => 9, "y" => 23}
 
     assert Inspector.hover_at(state, bottom_panel_event).inspector_state.hovered_id == "nested"
     assert Inspector.select_at(state, bottom_panel_event).inspector_state.selected_id == "field"
@@ -462,7 +462,7 @@ defmodule Breeze.InspectorTest do
         %{state | inspector_state: %{state.inspector_state | hovered_id: "nested"}}
       end)
 
-    top_panel_event = %{x: 10, y: 1}
+    top_panel_event = %{"x" => 9, "y" => 0}
 
     assert Inspector.hover_at(top_docked, top_panel_event).inspector_state.hovered_id == "nested"
     assert Inspector.select_at(top_docked, top_panel_event).inspector_state.selected_id == "field"

@@ -62,18 +62,19 @@ defmodule Breeze.View do
   ## Handling events
 
   Events that come from the terminal or an implicit are handled in the
-  optional `handle_event/3` callback:
+  optional `handle_event/3` callback. Terminal input uses the reserved `:input`
+  event name and a string-keyed payload:
 
   ```elixir
-  def handle_event(_, %{"key" => "ArrowUp"}, term) do
+  def handle_event(:input, %{"key" => "ArrowUp"}, term) do
     {:noreply, assign(term, counter: term.assigns.counter + 1)}
   end
 
-  def handle_event(_, %{"key" => "ArrowDown"}, term) do
+  def handle_event(:input, %{"key" => "ArrowDown"}, term) do
     {:noreply, assign(term, counter: term.assigns.counter - 1)}
   end
 
-  def handle_event(_, %{"key" => "q"}, term) do
+  def handle_event(:input, %{"key" => "q"}, term) do
     {:stop, term}
   end
 
@@ -84,6 +85,53 @@ defmodule Breeze.View do
 
   For convenience, keys are converted to a more friendly representation for example,
   instead of sending "\eA" which is provided by the terminal, we convert it to "ArrowUp".
+
+  Modified keys add JS-style boolean fields to the same string-keyed map:
+
+  ```elixir
+  %{"key" => "Backspace", "ctrlKey" => true}
+  ```
+
+  Mouse input is nested under `"mouse"`. Button and action names are strings,
+  coordinates are zero-based positions in the receiving view's coordinate
+  space, and active modifiers use the same JS-style fields as keyboard input:
+
+  ```elixir
+  %{
+    "mouse" => %{
+      "button" => "left",
+      "action" => "press",
+      "x" => 12,
+      "y" => 7,
+      "shiftKey" => true
+    },
+    "target" => "save",
+    "focused" => "url",
+    "row" => 1,
+    "col" => 4
+  }
+  ```
+
+  `"target"`, `"focused"`, `"row"`, and `"col"` are added when the pointer
+  intersects a rendered target. `"focused"` contains the focus target from
+  before the event is dispatched. Row and column are zero-based positions inside
+  the target. Root-view coordinates are screen-relative; live-child coordinates
+  are translated into the child's coordinate space.
+  Repeated wheel events may contain a positive integer `"repeat"` inside the
+  `"mouse"` map.
+
+  Events emitted by Breeze implicits use the string handler name configured by
+  `br-change` or `br-submit`. Built-in implicits currently emit atom-keyed maps:
+
+  ```elixir
+  def handle_event("selection_changed", %{value: value, index: index}, term) do
+    {:noreply, assign(term, selected: value, selected_index: index)}
+  end
+  ```
+
+  A named event's payload is otherwise unrestricted. Custom implicits and
+  callers dispatching events directly may use any term, including maps, structs,
+  lists, or scalar values.
 
   If `handle_event/3` is not implemented, events that reach the view are
   ignored. If it is implemented, normal Elixir function clause matching
@@ -362,11 +410,17 @@ defmodule Breeze.View do
   @typedoc "Assigns passed to a view or function component."
   @type assigns :: Breeze.Component.assigns()
 
-  @typedoc "A view event name."
-  @type event_name :: term()
+  @typedoc "The reserved terminal-input name or an application-defined named event."
+  @type event_name :: :input | String.t()
 
-  @typedoc "A decoded terminal or implicit event payload."
-  @type event :: map()
+  @typedoc "A string-keyed terminal input payload."
+  @type input_event :: %{optional(String.t()) => term()}
+
+  @typedoc "An unrestricted payload for an application-defined named event."
+  @type named_event_payload :: term()
+
+  @typedoc "A decoded terminal input or named event payload."
+  @type event :: input_event() | named_event_payload()
 
   @typedoc "Compiled template output returned by the `~H` sigil."
   @type rendered :: Breeze.Component.rendered()
@@ -387,7 +441,7 @@ defmodule Breeze.View do
   @doc "Renders a view or component from its assigns."
   @callback render(assigns()) :: rendered()
 
-  @doc "Handles a terminal or implicit event."
+  @doc "Handles `:input` with a string-keyed payload or a named event with any payload."
   @callback handle_event(event_name(), event(), Breeze.Term.t()) :: reply()
 
   @doc "Handles a message sent to the view process."

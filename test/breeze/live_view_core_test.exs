@@ -244,7 +244,7 @@ defmodule Breeze.LiveView.CoreTest do
     assert {:noreply, "anchor", true} =
              ChildServer.dispatch_input(
                root_pid,
-               wheel_event(:wheel_down, targets["scroll-child::scroll"])
+               wheel_event("wheel_down", targets["scroll-child::scroll"])
              )
 
     assert ChildServer.metadata(root_pid).focused == "anchor"
@@ -283,7 +283,7 @@ defmodule Breeze.LiveView.CoreTest do
       end)
 
     {x, y} = mouse_center(bounds)
-    send(pid, {reader, {:data, "\e[<65;#{x};#{y}M"}})
+    send(pid, {reader, {:data, "\e[<65;#{x + 1};#{y + 1}M"}})
 
     offset_y =
       wait_until(fn ->

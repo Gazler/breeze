@@ -101,8 +101,8 @@ defmodule Breeze.Test do
     ChildServer.dispatch_input(session.pid, key)
   end
 
-  @doc "Dispatches a named event and payload directly to the view."
-  @spec event(t(), term(), map()) :: term()
+  @doc "Dispatches a named event and unrestricted payload directly to the view."
+  @spec event(t(), Breeze.View.event_name(), Breeze.View.named_event_payload()) :: term()
   def event(%__MODULE__{} = session, change, event) do
     ChildServer.dispatch_event(session.pid, change, event)
   end

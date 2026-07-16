@@ -42,7 +42,7 @@ defmodule Breeze.Implicit.Common do
 
   def root_scroll_modifier(state), do: [scroll_y: state.offset]
 
-  def wheel_repeat(%{repeat: repeat}) when is_integer(repeat) and repeat > 0, do: repeat
+  def wheel_repeat(%{"repeat" => repeat}) when is_integer(repeat) and repeat > 0, do: repeat
   def wheel_repeat(_mouse), do: 1
 
   def bool_option(attrs, key, default, opts \\ []) do

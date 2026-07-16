@@ -18,6 +18,8 @@ defmodule Breeze.Server.Input do
     %{state | input: struct!(state.input, Keyword.merge(@pipeline_defaults, overrides))}
   end
 
+  @mouse_modifier_keys ["shiftKey", "altKey", "ctrlKey"]
+
   def enqueue(state, decoded), do: update_in(state.input.queued_input, &:queue.in(decoded, &1))
 
   def schedule_flush(%{input: %{flush_scheduled?: true}} = state, _message), do: state
@@ -56,8 +58,8 @@ defmodule Breeze.Server.Input do
 
   def raw_printable_key?(_key), do: false
 
-  defp process_batched_input({:mouse, %{button: button} = event}, state, handlers)
-       when button in [:wheel_down, :wheel_up] do
+  defp process_batched_input({:mouse, %{"button" => button} = event}, state, handlers)
+       when button in ["wheel_down", "wheel_up"] do
     {event, state} = coalesce_wheel_events_from_queue(event, state, 1)
     handlers.handle_mouse.(event, state)
   end
@@ -107,22 +109,22 @@ defmodule Breeze.Server.Input do
 
   defp coalesce_wheel_events_from_queue(event, state, repeat) do
     case queue_out(state.input.queued_input) do
-      {{:value, {:mouse, %{button: button} = next_event}}, queue} ->
-        if button == event.button and wheel_match?(event, next_event) do
+      {{:value, {:mouse, %{"button" => button} = next_event}}, queue} ->
+        if button == event["button"] and wheel_match?(event, next_event) do
           coalesce_wheel_events_from_queue(
             event,
             put_in(state.input.queued_input, queue),
             repeat + 1
           )
         else
-          {Map.put(event, :repeat, repeat), state}
+          {Map.put(event, "repeat", repeat), state}
         end
 
       {{:value, _next}, _queue} ->
-        {Map.put(event, :repeat, repeat), state}
+        {Map.put(event, "repeat", repeat), state}
 
       {:empty, _queue} ->
-        {Map.put(event, :repeat, repeat), state}
+        {Map.put(event, "repeat", repeat), state}
     end
   end
 
@@ -161,9 +163,17 @@ defmodule Breeze.Server.Input do
   defp printable_key_text(key) when is_binary(key), do: key
 
   defp wheel_match?(left, right) do
-    left.action == right.action and left.x == right.x and left.y == right.y and
-      left.modifiers == right.modifiers
+    left["action"] == right["action"] and left["x"] == right["x"] and
+      left["y"] == right["y"] and mouse_modifiers_match?(left, right)
   end
+
+  defp mouse_modifiers_match?(left, right) do
+    Enum.all?(@mouse_modifier_keys, fn key ->
+      modifier_active?(left, key) == modifier_active?(right, key)
+    end)
+  end
+
+  defp modifier_active?(event, key), do: Map.get(event, key) in [true, "true"]
 
   defp queue_out(queue), do: :queue.out(queue)
 

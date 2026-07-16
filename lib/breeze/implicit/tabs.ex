@@ -76,7 +76,11 @@ defmodule Breeze.Implicit.Tabs do
     {{:delegate, target}, state}
   end
 
-  def handle_event(_, %{"mouse" => %{button: :left, action: :press}, "target" => target}, state)
+  def handle_event(
+        _,
+        %{"mouse" => %{"button" => "left", "action" => "press"}, "target" => target},
+        state
+      )
       when is_binary(target) do
     case clicked_value(state, target) do
       nil ->

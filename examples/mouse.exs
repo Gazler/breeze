@@ -96,19 +96,19 @@ defmodule MouseExample do
     dt = event_delta(term.assigns.last_event_at, now)
     seq = term.assigns.event_seq + 1
     target = Map.get(event, "target", "none")
-    repeat = Map.get(mouse, :repeat, 1)
+    repeat = Map.get(mouse, "repeat", 1)
 
     entry = %{
       seq: pad(seq, 4),
       dt: pad(dt, 4),
-      button_action: "#{mouse.button}/#{mouse.action}",
-      xy: "#{mouse.x},#{mouse.y}",
+      button_action: "#{mouse["button"]}/#{mouse["action"]}",
+      xy: "#{mouse["x"]},#{mouse["y"]}",
       row_col: "#{Map.get(event, "row", "-")},#{Map.get(event, "col", "-")}",
       target: target,
       repeat: to_string(repeat),
-      modifiers: mouse.modifiers |> Enum.map_join("+", &to_string/1) |> blank_dash(),
+      modifiers: mouse_modifiers(mouse),
       summary:
-        "##{seq} +#{dt}ms #{mouse.button}/#{mouse.action} x=#{mouse.x} y=#{mouse.y} target=#{target} repeat=#{repeat}"
+        "##{seq} +#{dt}ms #{mouse["button"]}/#{mouse["action"]} x=#{mouse["x"]} y=#{mouse["y"]} target=#{target} repeat=#{repeat}"
     }
 
     term
@@ -120,19 +120,26 @@ defmodule MouseExample do
     )
   end
 
-  defp update_mouse_counts(term, %{button: :left, action: :press}) do
+  defp update_mouse_counts(term, %{"button" => "left", "action" => "press"}) do
     assign(term, clicks: term.assigns.clicks + 1)
   end
 
-  defp update_mouse_counts(term, %{button: :wheel_up}) do
+  defp update_mouse_counts(term, %{"button" => "wheel_up"}) do
     assign(term, wheel_up: term.assigns.wheel_up + 1)
   end
 
-  defp update_mouse_counts(term, %{button: :wheel_down}) do
+  defp update_mouse_counts(term, %{"button" => "wheel_down"}) do
     assign(term, wheel_down: term.assigns.wheel_down + 1)
   end
 
   defp update_mouse_counts(term, _mouse), do: term
+
+  defp mouse_modifiers(mouse) do
+    [{"shiftKey", "shift"}, {"altKey", "alt"}, {"ctrlKey", "ctrl"}]
+    |> Enum.filter(fn {key, _label} -> Map.get(mouse, key) == true end)
+    |> Enum.map_join("+", &elem(&1, 1))
+    |> blank_dash()
+  end
 
   defp event_delta(nil, _now), do: 0
   defp event_delta(last, now), do: max(now - last, 0)

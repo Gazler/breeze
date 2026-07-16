@@ -622,11 +622,10 @@ defmodule Breeze.Storybook.ScrollInteractionLayoutTest do
     assert {:noreply, "storybook-nav", true} =
              Breeze.ChildServer.dispatch_input(pid, %{
                "mouse" => %{
-                 button: :wheel_down,
-                 action: :press,
-                 x: preview_bounds.left + div(preview_bounds.width, 2) + 1,
-                 y: preview_bounds.top + 3,
-                 modifiers: []
+                 "button" => "wheel_down",
+                 "action" => "press",
+                 "x" => preview_bounds.left + div(preview_bounds.width, 2),
+                 "y" => preview_bounds.top + 2
                }
              })
 
@@ -659,11 +658,10 @@ defmodule Breeze.Storybook.ScrollInteractionLayoutTest do
     assert {:noreply, "storybook-nav", true} =
              Breeze.ChildServer.dispatch_input(pid, %{
                "mouse" => %{
-                 button: :wheel_down,
-                 action: :press,
-                 x: preview_bounds.left + div(preview_bounds.width, 2) + 1,
-                 y: preview_bounds.top + 4,
-                 modifiers: []
+                 "button" => "wheel_down",
+                 "action" => "press",
+                 "x" => preview_bounds.left + div(preview_bounds.width, 2),
+                 "y" => preview_bounds.top + 3
                }
              })
 

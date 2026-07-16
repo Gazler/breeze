@@ -190,7 +190,7 @@ defmodule Breeze.Implicit.ScrollTest do
       assert {:noreply, next_state} =
                Scroll.handle_event(
                  :input,
-                 %{"mouse" => %{button: :wheel_down}, "element" => viewport},
+                 %{"mouse" => %{"button" => "wheel_down"}, "element" => viewport},
                  state
                )
 
@@ -205,7 +205,10 @@ defmodule Breeze.Implicit.ScrollTest do
       assert {:noreply, next_state} =
                Scroll.handle_event(
                  :input,
-                 %{"mouse" => %{button: :wheel_down, repeat: 3}, "element" => viewport},
+                 %{
+                   "mouse" => %{"button" => "wheel_down", "repeat" => 3},
+                   "element" => viewport
+                 },
                  state
                )
 
