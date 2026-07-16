@@ -23,8 +23,8 @@ defmodule Breeze.View do
   ```
 
   `use Breeze.View` declares the `Breeze.View` behaviour. The callbacks are
-  optional because the same module is also used to define component-only
-  modules, but a root view must implement `render/1`.
+  optional, but a root view must implement `render/1`. Modules that only define
+  reusable components can use `Breeze.Component` instead.
 
   ## Initial state
 

@@ -47,6 +47,18 @@ defmodule Breeze.InspectorTest do
     end
   end
 
+  defmodule AppInspectorPage do
+    use Breeze.RemoteInspector.Page
+
+    def page, do: [label: "Runtime tools"]
+
+    def render(assigns) do
+      ~H"""
+      <box>App tools</box>
+      """
+    end
+  end
+
   test "toggle uses configured keys and clears hover state while re-syncing selection" do
     state =
       base_state(%{
@@ -93,6 +105,24 @@ defmodule Breeze.InspectorTest do
     assert snapshot.selected.actual_id == "field"
     assert snapshot.selected.focus_meta == %{group: :form}
     assert snapshot.hovered.actual_id == "nested"
+  end
+
+  test "snapshot publishes pages registered by the app inspector configuration" do
+    snapshot =
+      base_state(%{
+        inspector: [pages: [AppInspectorPage]]
+      })
+      |> Inspector.snapshot()
+
+    page_id = page_id(AppInspectorPage)
+
+    assert [
+             %{
+               id: ^page_id,
+               label: "Runtime tools",
+               module: AppInspectorPage
+             }
+           ] = snapshot.pages
   end
 
   test "snapshot falls back to the first explicit id before anonymous inspector nodes" do
@@ -515,4 +545,6 @@ defmodule Breeze.InspectorTest do
       overrides
     )
   end
+
+  defp page_id(module), do: "page:#{module}"
 end

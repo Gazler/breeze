@@ -5,9 +5,11 @@ defmodule Breeze.RemoteInspector.View do
   import Breeze.Blocks
   import Breeze.RemoteInspector.Logs, only: [logs_tab: 1]
   alias BackBreeze.TextSpan
-  alias Breeze.RemoteInspector.Logs
+  alias Breeze.RemoteInspector.{Logs, PageHost}
 
   @render_tree_limit 600
+  @tab_changed_event {:breeze_remote_inspector, "tab_changed"}
+  @render_tree_changed_event {:breeze_remote_inspector, "render_tree_changed"}
 
   def global_keybindings do
     [
@@ -36,6 +38,7 @@ defmodule Breeze.RemoteInspector.View do
        render_tree_kind: "rendered",
        render_tree_expanded: %{},
        render_trees: %{},
+       custom_page_states: %{},
        screen: term.terminal.size
      )
      |> put_tree_keybindings()
@@ -46,8 +49,8 @@ defmodule Breeze.RemoteInspector.View do
     active = active_entry(assigns)
     active_source = active_source(assigns)
     render_tree_kind = render_tree_kind(assigns)
-    panel_tab = Map.get(assigns, :panel_tab, "overview")
     breeze = assigns |> Map.get(:breeze, %{}) |> Map.put_new(:keybindings, [])
+    assigns = Map.put(assigns, :breeze, breeze)
     now = System.system_time(:millisecond)
     active_render_tree = active_render_tree(assigns, active_source, active, render_tree_kind)
     inspected_screen = if(active, do: Map.get(active.snapshot, :screen), else: nil)
@@ -55,6 +58,10 @@ defmodule Breeze.RemoteInspector.View do
     logs = Map.get(assigns, :logs, %{})
     log_sources = Logs.build_sources(logs, Map.get(assigns, :log_sources, %{}))
     log_source = Logs.source(logs, active_source)
+    custom_pages = PageHost.pages(active)
+    panel_tab = PageHost.normalize_tab(Map.get(assigns, :panel_tab, "overview"), custom_pages)
+    assigns = Map.put(assigns, :panel_tab, panel_tab)
+    custom_page_context = PageHost.context(assigns, active)
 
     assigns =
       Map.merge(assigns, %{
@@ -117,6 +124,8 @@ defmodule Breeze.RemoteInspector.View do
         active_log_status_text: Logs.status_line(logs, log_source, now),
         active_log_count: Logs.count(logs, log_source),
         active_log_content: Logs.content(log_sources, log_source),
+        custom_pages: custom_pages,
+        custom_page_context: custom_page_context,
         render_tree_kind: render_tree_kind,
         breeze: breeze,
         panel_tab: panel_tab
@@ -145,7 +154,7 @@ defmodule Breeze.RemoteInspector.View do
               id="remote-inspector-tabs"
               selected={@panel_tab}
               highlight="primary"
-              br-change="tab_changed"
+              br-change={{:breeze_remote_inspector, "tab_changed"}}
               class="width-full height-full border-rounded bg"
               item_class="width-10"
             >
@@ -214,6 +223,9 @@ defmodule Breeze.RemoteInspector.View do
                   active_implicit_text={@active_implicit_text}
                   active_implicit_detail_text={@active_implicit_detail_text}
                 />
+              </:tab>
+              <:tab :for={page <- @custom_pages} value={page.id} label={page.label}>
+                <.custom_page page={page} context={@custom_page_context}/>
               </:tab>
             </.tabs>
           </box>
@@ -336,7 +348,7 @@ defmodule Breeze.RemoteInspector.View do
         collapsed_prefix="▸"
         expanded_prefix="▾"
         virtual
-        br-change="render_tree_changed"
+        br-change={{:breeze_remote_inspector, "render_tree_changed"}}
         class="width-full height-full bg"
       />
       <box :if={is_nil(@active) or @nodes == []} class="width-full text-muted">
@@ -550,6 +562,13 @@ defmodule Breeze.RemoteInspector.View do
     """
   end
 
+  attr :page, :map, required: true
+  attr :context, :map, required: true
+
+  def custom_page(assigns) do
+    PageHost.render(assigns)
+  end
+
   attr :title, :string, required: true
   slot :inner_block, required: true
 
@@ -614,11 +633,15 @@ defmodule Breeze.RemoteInspector.View do
     {:noreply, assign_logs(term, logs)}
   end
 
+  def handle_info({:remote_inspector_page, page_ref, message}, term) do
+    PageHost.delegate_info(page_ref, message, term)
+  end
+
   def handle_info(:resize, term) do
     {:noreply, assign(term, screen: term.terminal.size)}
   end
 
-  def handle_event("tab_changed", %{value: value}, term) do
+  def handle_event(@tab_changed_event, %{value: value}, term) do
     {:noreply,
      term
      |> assign(panel_tab: value)
@@ -626,7 +649,7 @@ defmodule Breeze.RemoteInspector.View do
      |> refresh_active_render_tree(force: value == "tree")}
   end
 
-  def handle_event("tab_changed", %{"value" => value}, term) do
+  def handle_event(@tab_changed_event, %{"value" => value}, term) do
     {:noreply,
      term
      |> assign(panel_tab: value)
@@ -634,7 +657,7 @@ defmodule Breeze.RemoteInspector.View do
      |> refresh_active_render_tree(force: value == "tree")}
   end
 
-  def handle_event("render_tree_changed", payload, term) do
+  def handle_event(@render_tree_changed_event, payload, term) do
     selected = payload_value(payload, :value)
     expanded = normalize_expanded(payload_value(payload, :expanded))
     active_source = active_source(term.assigns)
@@ -674,7 +697,10 @@ defmodule Breeze.RemoteInspector.View do
   end
 
   def handle_event(_, %{"key" => "q"}, term), do: quit(%{"key" => "q"}, term)
-  def handle_event(_, _, term), do: {:noreply, term}
+
+  def handle_event(event, payload, term) do
+    PageHost.delegate_event(event, payload, term, active_entry(term.assigns))
+  end
 
   defp active_source(assigns),
     do: Map.get(assigns, :active_source) || Map.get(assigns, :latest_source)
@@ -682,6 +708,8 @@ defmodule Breeze.RemoteInspector.View do
   defp active_entry(%{snapshots: snapshots, latest_source: latest_source} = assigns) do
     Map.get(snapshots, active_source(assigns) || latest_source)
   end
+
+  defp active_entry(_assigns), do: nil
 
   defp assign_snapshot_state(term, snapshots, latest_source) do
     active_source = normalize_active_source(term.assigns.active_source, snapshots, latest_source)

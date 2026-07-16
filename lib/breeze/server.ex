@@ -67,6 +67,7 @@ defmodule Breeze.Server do
     :input_router,
     :child_view_supervisor,
     :owns_child_view_supervisor?,
+    :remote_inspector_supervisor,
     :view_pid,
     :view,
     :start_opts,
@@ -222,6 +223,19 @@ defmodule Breeze.Server do
     end
   end
 
+  defp remote_inspector_supervisor(false, _internal_opts), do: nil
+
+  defp remote_inspector_supervisor(true, internal_opts) do
+    case Keyword.get(internal_opts, :remote_inspector_supervisor) do
+      supervisor when is_pid(supervisor) ->
+        supervisor
+
+      _supervisor ->
+        {:ok, supervisor} = Breeze.RemoteInspector.Supervisor.start_link()
+        supervisor
+    end
+  end
+
   defp logger_collector(config, _runtime_opts, _attempts) when config in [false, nil],
     do: {:ok, nil}
 
@@ -276,6 +290,9 @@ defmodule Breeze.Server do
 
     remote_inspector_enabled? =
       inspector_enabled? and Breeze.Inspector.remote?(%{inspector: inspector_config})
+
+    remote_inspector_supervisor =
+      remote_inspector_supervisor(remote_inspector_enabled?, internal_opts)
 
     logger_config =
       if Keyword.has_key?(opts, :logger) do
@@ -346,6 +363,7 @@ defmodule Breeze.Server do
         input_router: Keyword.get(opts, :input_router),
         child_view_supervisor: child_view_supervisor,
         owns_child_view_supervisor?: owns_child_view_supervisor?,
+        remote_inspector_supervisor: remote_inspector_supervisor,
         view_pid: view_pid,
         view: view,
         start_opts: start_opts,
@@ -376,8 +394,15 @@ defmodule Breeze.Server do
 
     state = maybe_start_reloader(state)
 
-    if Breeze.Inspector.enabled?(state) and Breeze.Inspector.remote?(state),
-      do: Breeze.RemoteInspector.register_app(self())
+    if remote_inspector_enabled? do
+      :ok = Breeze.RemoteInspector.register_app(self())
+
+      {:ok, _connector} =
+        Breeze.RemoteInspector.Supervisor.start_connector(
+          state.remote_inspector_supervisor,
+          self()
+        )
+    end
 
     {:ok, render_base(state)}
   end
@@ -1900,6 +1925,8 @@ defmodule Breeze.Server do
 
     if state.owns_child_view_supervisor?,
       do: Breeze.ChildViewSupervisor.stop(state.child_view_supervisor)
+
+    Breeze.RemoteInspector.Supervisor.stop(state.remote_inspector_supervisor)
 
     :ok
   end
