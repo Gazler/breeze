@@ -25,6 +25,7 @@ The project began as the engine for the Snake game included in the
 - Slots
 - Scrollable viewports through implicit modifiers (`scroll_y`, `scroll_x`,
   `scroll`)
+- Minimum-width breakpoints for responsive terminal layouts
 - Built-in blocks for common interface patterns (`list`, `dropdown`, `tabs`,
   `markdown`, `scroll`, `panel`, `modal`)
 

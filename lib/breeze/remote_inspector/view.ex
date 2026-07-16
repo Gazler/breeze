@@ -50,6 +50,8 @@ defmodule Breeze.RemoteInspector.View do
     breeze = assigns |> Map.get(:breeze, %{}) |> Map.put_new(:keybindings, [])
     now = System.system_time(:millisecond)
     active_render_tree = active_render_tree(assigns, active_source, active, render_tree_kind)
+    inspected_screen = if(active, do: Map.get(active.snapshot, :screen), else: nil)
+    inspected_breakpoint = inspected_breakpoint(active, inspected_screen)
     logs = Map.get(assigns, :logs, %{})
     log_sources = Logs.build_sources(logs, Map.get(assigns, :log_sources, %{}))
     log_source = Logs.source(logs, active_source)
@@ -59,7 +61,8 @@ defmodule Breeze.RemoteInspector.View do
         active: active,
         active_source: active_source,
         now: now,
-        screen_text: format_screen(assigns.screen),
+        screen_text: format_screen(inspected_screen),
+        breakpoint_text: inspected_breakpoint,
         latest_source_text: format_source(assigns.latest_source),
         source_entries: source_entries(assigns.snapshots, active_source),
         active_source_text: if(active, do: format_source(active.source), else: "-"),
@@ -126,6 +129,7 @@ defmodule Breeze.RemoteInspector.View do
           <.sidebar
             active={@active}
             screen_text={@screen_text}
+            breakpoint_text={@breakpoint_text}
             snapshots={@snapshots}
             latest_source_text={@latest_source_text}
             active_selected_text={@active_selected_text}
@@ -227,6 +231,7 @@ defmodule Breeze.RemoteInspector.View do
 
   attr :active, :any, required: true
   attr :screen_text, :string, required: true
+  attr :breakpoint_text, :string, required: true
   attr :snapshots, :map, required: true
   attr :latest_source_text, :string, required: true
   attr :active_selected_text, :string, required: true
@@ -242,6 +247,7 @@ defmodule Breeze.RemoteInspector.View do
     <box class="width-32 height-full border-rounded overflow-hidden bg padding-right-1">
       <box class="width-full bold text-primary">Remote Inspector</box>
       <box class="width-full text-muted">screen={@screen_text}</box>
+      <box class="width-full text-muted">breakpoint={@breakpoint_text}</box>
       <box class="width-full text-muted">sources={map_size(@snapshots)}</box>
       <box class="width-full text-muted">latest={@latest_source_text}</box>
       <box class="width-full">
@@ -998,6 +1004,14 @@ defmodule Breeze.RemoteInspector.View do
 
   defp format_screen(%{width: width, height: height}), do: "#{width}x#{height}"
   defp format_screen(_screen), do: "-"
+
+  defp inspected_breakpoint(nil, _screen), do: "-"
+
+  defp inspected_breakpoint(active, screen) do
+    Map.get_lazy(active.snapshot, :breakpoint, fn ->
+      Breeze.Style.breakpoint(if(is_map(screen), do: Map.get(screen, :width), else: nil))
+    end)
+  end
 
   defp theme_rows(nil), do: []
 

@@ -422,6 +422,8 @@ defmodule Breeze.ChildServer do
       |> maybe_put_theme_assign(:actual_theme_mode, theme.mode)
       |> put_breeze_assign(:theme, breeze_theme_assign(term))
       |> put_breeze_assign(:keybindings, active_keybindings(term))
+      |> put_breeze_assign(:terminal, breeze_terminal_assign(term))
+      |> put_breeze_assign(:breakpoint, breeze_breakpoint_assign(term))
       |> put_breeze_assign_new(:flash, [])
 
     %{term | assigns: assigns}
@@ -458,6 +460,18 @@ defmodule Breeze.ChildServer do
     end)
   end
 
+  defp breeze_terminal_assign(%{terminal: %{size: %{width: width, height: height}}}),
+    do: %{width: width, height: height}
+
+  defp breeze_terminal_assign(_term), do: nil
+
+  defp breeze_breakpoint_assign(term) do
+    case breeze_terminal_assign(term) do
+      %{width: width} -> Breeze.Style.breakpoint(width)
+      _terminal -> Breeze.Style.breakpoint(nil)
+    end
+  end
+
   defp breeze_theme_assign(%{theme: theme, assigns: assigns}) do
     current = get_in(assigns, [:breeze, :theme]) || %{}
     name = Map.get(current, :name) || Map.get(current, "name") || theme.name || theme.mode
@@ -482,6 +496,7 @@ defmodule Breeze.ChildServer do
 
     term = %{term | theme: theme}
     term = %{term | focused: Keyword.get(opts, :focused, term.focused)}
+    term = sync_theme_assigns(term)
 
     initial_implicit_state =
       Keyword.get(opts, :implicit_state, %{})

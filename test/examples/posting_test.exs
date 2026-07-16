@@ -4,6 +4,50 @@ defmodule PostingTest do
 
   alias Breeze.Server.Diagnostics
 
+  test "compact layout hides header metadata and the collection panel below md" do
+    compact_terminal = %Termite.Terminal{size: %{width: 59, height: 24}}
+    {:ok, compact_pid} = Breeze.ChildServer.start(view: Posting, terminal: compact_terminal)
+
+    assert {:ok, _acc, compact_box} =
+             Breeze.ChildServer.render(compact_pid, terminal: compact_terminal)
+
+    compact_content = visible(compact_box.content)
+    assert compact_content =~ "Req It Ralph"
+    assert compact_content =~ "Headers  Body  Query  Auth  Info  Options"
+    refute compact_content =~ "gruvbox/"
+    refute compact_content =~ "gazler@gazler-arch"
+    refute compact_content =~ "echo post"
+
+    request_tabs_row =
+      compact_content
+      |> String.split("\n")
+      |> Enum.find_index(&String.contains?(&1, "Headers  Body  Query"))
+
+    assert request_tabs_row < 10
+
+    compact_rows = String.split(compact_content, "\n")
+
+    assert compact_rows
+           |> Enum.at(request_tabs_row - 1)
+           |> String.trim_leading()
+           |> String.starts_with?("╭")
+
+    assert compact_rows
+           |> Enum.at(request_tabs_row + 2)
+           |> String.trim_leading()
+           |> String.starts_with?("│")
+
+    md_terminal = %Termite.Terminal{size: %{width: 60, height: 24}}
+    {:ok, md_pid} = Breeze.ChildServer.start(view: Posting, terminal: md_terminal)
+
+    assert {:ok, _acc, md_box} = Breeze.ChildServer.render(md_pid, terminal: md_terminal)
+
+    md_content = visible(md_box.content)
+    assert md_content =~ "gruvbox/"
+    assert md_content =~ "gazler@"
+    assert md_content =~ "echo post"
+  end
+
   test "F1 opens help modal and focuses it, Escape closes and restores url focus" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)
@@ -445,7 +489,10 @@ defmodule PostingInspectorTest do
         String.starts_with?(key, "__inspector__") and Keyword.get(flags, :id) == nil
       end)
       |> Enum.map(fn {key, _flags} -> {key, state.rendered.mouse_targets[key]} end)
-      |> Enum.reject(fn {_key, bounds} -> is_nil(bounds) end)
+      |> Enum.reject(fn {_key, bounds} ->
+        is_nil(bounds) or
+          bounds.bottom >= terminal.size.height - Breeze.Inspector.panel_height()
+      end)
       |> Enum.min_by(fn {_key, bounds} ->
         (bounds.right - bounds.left + 1) * (bounds.bottom - bounds.top + 1)
       end)

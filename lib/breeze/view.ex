@@ -127,7 +127,9 @@ defmodule Breeze.View do
    * `italic` - make the text italic
    * `inverse` - reverse the foreground-background
    * `reverse` - reverse the foreground-background
+   * `block` - display the element as a block
    * `inline` - display the elements inline (join horizontally)
+   * `hidden` - collapse the element and hide its contents
    * `grid` - lay out child elements in a grid
    * `grid-cols-n` - set the number of grid columns
    * `grid-rows-n` - set the number of grid rows
@@ -155,6 +157,38 @@ defmodule Breeze.View do
     <box>Four</box>
   </box>
   ```
+
+  ### Responsive styles
+
+  Responsive modifiers apply styles at or above a minimum terminal width.
+  Unprefixed styles provide the base layout, and prefixed styles override them
+  as the terminal grows:
+
+  | Modifier | Minimum width |
+  |----------|---------------|
+  | `sm:`    | 40 columns    |
+  | `md:`    | 60 columns    |
+  | `lg:`    | 80 columns    |
+  | `xl:`    | 120 columns   |
+  | `2xl:`   | 160 columns   |
+
+  ```heex
+  <box class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+    <box>Always shown</box>
+    <box class="hidden md:block">Shown from 60 columns</box>
+    <box class="hidden lg:block">Shown from 80 columns</box>
+  </box>
+  ```
+
+  Responsive and state modifiers can be chained. For example,
+  `md:focus:border-primary` requires at least 60 columns and focus. Responsive
+  styles are reevaluated whenever the terminal is resized. Hidden elements do
+  not participate in layout or grid track counting until a display utility such
+  as `md:block` reveals them.
+
+  The current dimensions and active breakpoint are available to templates as
+  `@breeze.terminal.width`, `@breeze.terminal.height`, and
+  `@breeze.breakpoint`.
 
   ### Colors
 

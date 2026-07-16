@@ -29,6 +29,7 @@ defmodule Breeze.Renderer do
       rendered
       |> Breeze.Template.render_to_tree(assigns)
 
+    root_children = prune_hidden_nodes(root_children, opts)
     opts = maybe_attach_live_viewports(root_tag, root_children, opts)
     build_from_tree_nodes(root_tag, root_children, opts)
   end
@@ -58,6 +59,7 @@ defmodule Breeze.Renderer do
         Breeze.Template.render_to_tree(rendered, assigns)
       end)
 
+    root_children = prune_hidden_nodes(root_children, opts)
     opts = maybe_attach_live_viewports(root_tag, root_children, opts)
 
     {acc, box} =
@@ -90,12 +92,18 @@ defmodule Breeze.Renderer do
   defp put_breeze_render_context(assigns, _opts), do: assigns
 
   defp render_context(opts) do
+    terminal = terminal_context(Keyword.get(opts, :terminal))
+
     %{
-      terminal: terminal_context(Keyword.get(opts, :terminal)),
+      terminal: terminal,
+      breakpoint: breakpoint(terminal),
       implicit_state: Keyword.get(opts, :implicit_state, %{}),
       implicit_meta: Keyword.get(opts, :implicit_meta, %{})
     }
   end
+
+  defp breakpoint(%{width: width}), do: Breeze.Style.breakpoint(width)
+  defp breakpoint(_terminal), do: Breeze.Style.breakpoint(nil)
 
   defp terminal_context(%{size: %{width: width, height: height}}) do
     %{width: width, height: height}
@@ -153,6 +161,70 @@ defmodule Breeze.Renderer do
   end
 
   defp render_tree_enabled?(opts), do: Keyword.get(opts, :render_tree?, false) == true
+
+  defp prune_hidden_nodes(nodes, opts) when is_list(nodes) do
+    Enum.flat_map(nodes, fn
+      {tag, metadata, children} when is_atom(tag) and is_list(children) ->
+        if structurally_hidden?(children, opts) do
+          []
+        else
+          [{tag, metadata, prune_hidden_nodes(children, opts)}]
+        end
+
+      node ->
+        [node]
+    end)
+  end
+
+  defp structurally_hidden?(nodes, opts) do
+    class = attribute_value(nodes, "class")
+    style = attribute_value(nodes, "style")
+    tokens = class_tokens(class) ++ class_style_tokens(style)
+
+    hidden_token?(tokens) and not state_dependent_visibility?(tokens) and
+      hidden_element?(class, style, opts)
+  end
+
+  defp attribute_value(nodes, name) do
+    Enum.find_value(nodes, fn
+      {:attribute, [^name, value]} -> value
+      _node -> nil
+    end)
+  end
+
+  defp class_tokens(class) when is_binary(class), do: String.split(class, " ", trim: true)
+
+  defp class_tokens(class) when is_map(class) do
+    class
+    |> Enum.filter(fn {_token, enabled?} -> enabled? end)
+    |> Enum.flat_map(fn {token, _enabled?} -> class_tokens(token) end)
+  end
+
+  defp class_tokens(class) when is_list(class), do: Enum.flat_map(class, &class_tokens/1)
+  defp class_tokens(_class), do: []
+
+  defp class_style_tokens(style) when is_binary(style), do: class_tokens(style)
+  defp class_style_tokens(_style), do: []
+
+  defp hidden_token?(tokens),
+    do: Enum.any?(tokens, &(&1 == "hidden" or String.ends_with?(&1, ":hidden")))
+
+  defp state_dependent_visibility?(tokens) do
+    Enum.any?(tokens, fn token ->
+      modifiers = token |> String.split(":") |> Enum.drop(-1)
+      Enum.any?(modifiers, &(&1 in ["focus", "selected", "placeholder"]))
+    end)
+  end
+
+  defp hidden_element?(class, style, opts) do
+    element =
+      RenderStyle.empty()
+      |> RenderStyle.put_class(class)
+      |> RenderStyle.put_style(style)
+      |> RenderStyle.to_element(terminal: Keyword.get(opts, :terminal))
+
+    match?(%{style: %{width: 0, height: 0, overflow: :hidden}}, element)
+  end
 
   defp put_render_tree_node(%{render_tree?: true} = acc, idx, tag) do
     update_in(acc, [:render_tree_nodes], &Map.put(&1 || %{}, idx, %{idx: idx, tag: tag}))
@@ -689,6 +761,8 @@ defmodule Breeze.Renderer do
         final_box
       end
 
+    final_box = collapse_hidden_box(final_box)
+
     stored_box = storage_box(final_box)
 
     boxes =
@@ -714,6 +788,32 @@ defmodule Breeze.Renderer do
       box
     end
   end
+
+  defp collapse_hidden_box(%Box{style: %{width: 0, height: 0, overflow: :hidden}} = box) do
+    hidden_style = %BackBreeze.Style{width: 0, height: 0, overflow: :hidden}
+
+    %{
+      box
+      | content: "",
+        children: Enum.map(box.children, &collapse_box/1),
+        style: hidden_style
+    }
+  end
+
+  defp collapse_hidden_box(box), do: box
+
+  defp collapse_box(%Box{} = box) do
+    hidden_style = %BackBreeze.Style{width: 0, height: 0, overflow: :hidden}
+
+    %{
+      box
+      | content: "",
+        children: Enum.map(box.children, &collapse_box/1),
+        style: hidden_style
+    }
+  end
+
+  defp collapse_box(_content), do: ""
 
   defp storage_content(%VirtualText{cache?: false}), do: ""
   defp storage_content(content), do: content

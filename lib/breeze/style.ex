@@ -3,10 +3,30 @@ defmodule Breeze.Style do
 
   alias Breeze.Theme
 
+  @width_breakpoints %{
+    "sm" => 40,
+    "md" => 60,
+    "lg" => 80,
+    "xl" => 120,
+    "2xl" => 160
+  }
+
+  @breakpoint_thresholds [{160, "2xl"}, {120, "xl"}, {80, "lg"}, {60, "md"}, {40, "sm"}]
+
   @type state :: %{class: list(), style: list()}
 
   @spec empty() :: state()
   def empty, do: %{class: [], style: []}
+
+  @doc false
+  def breakpoint(width) when is_integer(width) do
+    case Enum.find(@breakpoint_thresholds, fn {minimum, _name} -> width >= minimum end) do
+      {_minimum, name} -> name
+      nil -> "base"
+    end
+  end
+
+  def breakpoint(_width), do: "base"
 
   @spec put_class(state(), term()) :: state()
   def put_class(style_state, value) do
@@ -94,6 +114,7 @@ defmodule Breeze.Style do
       |> maybe_put_default_scrollbar_foreground(attributes)
       |> maybe_adjust_scrollbar_tone(theme, :mute, Map.get(attributes, :scrollbar_mute))
       |> maybe_adjust_scrollbar_tone(theme, :emphasize, Map.get(attributes, :scrollbar_emphasize))
+      |> normalize_hidden_style()
 
     struct(Breeze.Element, %{style: Map.from_struct(bb_style), attributes: attributes})
   end
@@ -108,8 +129,11 @@ defmodule Breeze.Style do
   defp apply_style("reverse", {style, attrs}, _theme),
     do: {BackBreeze.Style.reverse(style), attrs}
 
+  defp apply_style("block", {style, attrs}, _theme),
+    do: {restore_hidden_style(style), Map.put(attrs, :display, :block)}
+
   defp apply_style("inline", {style, attrs}, _theme),
-    do: {style, Map.put(attrs, :display, :inline)}
+    do: {restore_hidden_style(style), Map.put(attrs, :display, :inline)}
 
   defp apply_style("hidden", {style, attrs}, _theme) do
     style =
@@ -131,7 +155,7 @@ defmodule Breeze.Style do
         _ -> %BackBreeze.Grid{columns: 1}
       end
 
-    {style, Map.put(attrs, :display, display)}
+    {restore_hidden_style(style), Map.put(attrs, :display, display)}
   end
 
   defp apply_style("grid-cols-" <> num, {style, attrs}, _theme) do
@@ -944,7 +968,15 @@ defmodule Breeze.Style do
             else: {:halt, {nil, false}}
 
         other, {_token, placeholder?} ->
-          {:halt, {other, placeholder?}}
+          cond do
+            Map.has_key?(@width_breakpoints, other) ->
+              if breakpoint_matches?(opts, :width, @width_breakpoints[other]),
+                do: {:cont, {nil, placeholder?}},
+                else: {:halt, {nil, false}}
+
+            true ->
+              {:halt, {other, placeholder?}}
+          end
       end)
 
     cond do
@@ -953,6 +985,28 @@ defmodule Breeze.Style do
       true -> token
     end
   end
+
+  defp breakpoint_matches?(opts, dimension, minimum) do
+    case Keyword.get(opts, :terminal) do
+      %{size: %{^dimension => value}} when is_integer(value) -> value >= minimum
+      _ -> false
+    end
+  end
+
+  defp restore_hidden_style(%{width: 0, height: 0, overflow: :hidden} = style) do
+    style
+    |> BackBreeze.Style.width(:auto)
+    |> BackBreeze.Style.height(:auto)
+    |> BackBreeze.Style.overflow(:auto)
+  end
+
+  defp restore_hidden_style(style), do: style
+
+  defp normalize_hidden_style(%{width: 0, height: 0, overflow: :hidden}) do
+    %BackBreeze.Style{width: 0, height: 0, overflow: :hidden}
+  end
+
+  defp normalize_hidden_style(style), do: style
 
   defp apply_theme_defaults(style, theme) do
     defaults = Theme.default_style(theme)
