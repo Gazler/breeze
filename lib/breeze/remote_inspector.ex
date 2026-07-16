@@ -321,11 +321,7 @@ defmodule Breeze.RemoteInspector.Server do
     key = source_key(source)
     now = System.system_time(:millisecond)
 
-    log_entry = %{
-      source: source,
-      entries: normalize_log_entries(entries),
-      updated_at: now
-    }
+    log_entry = new_log_buffer(source, normalize_log_entries(entries), now)
 
     state =
       state
@@ -347,11 +343,12 @@ defmodule Breeze.RemoteInspector.Server do
       state
       |> ensure_source_monitor(source_pid, key)
       |> update_in([:logs], fn logs ->
-        current =
-          Map.get(logs, key, %{source: source, entries: [], updated_at: now})
+        current = Map.get(logs, key, new_log_buffer(source, [], now))
 
-        entries = trim_log_entries(current.entries ++ [entry])
-        Map.put(logs, key, %{current | source: source, entries: entries, updated_at: now})
+        current = append_log_entry(current, entry)
+        current = %{current | source: source, updated_at: now}
+
+        Map.put(logs, key, current)
       end)
       |> mark_log_dirty(key)
 
@@ -381,7 +378,7 @@ defmodule Breeze.RemoteInspector.Server do
     state =
       Enum.reduce(state.dirty_logs, state, fn key, acc ->
         case Map.fetch(acc.logs, key) do
-          {:ok, log_entry} -> push_log_event(acc, {:snapshot, key, log_entry})
+          {:ok, log_entry} -> push_log_event(acc, {:snapshot, key, public_log_entry(log_entry)})
           :error -> acc
         end
       end)
@@ -553,7 +550,7 @@ defmodule Breeze.RemoteInspector.Server do
     %{
       snapshots: state.snapshots,
       latest_source: state.latest_source,
-      logs: state.logs
+      logs: Map.new(state.logs, fn {key, entry} -> {key, public_log_entry(entry)} end)
     }
   end
 
@@ -601,4 +598,60 @@ defmodule Breeze.RemoteInspector.Server do
     end)
     |> elem(0)
   end
+
+  defp new_log_buffer(source, entries, updated_at) do
+    %{
+      source: source,
+      entries: :queue.from_list(entries),
+      entry_count: length(entries),
+      entry_bytes: Enum.reduce(entries, 0, &(&2 + byte_size(&1.line))),
+      updated_at: updated_at
+    }
+  end
+
+  defp append_log_entry(buffer, entry) do
+    buffer = ensure_log_buffer(buffer)
+
+    %{
+      buffer
+      | entries: :queue.in(entry, buffer.entries),
+        entry_count: buffer.entry_count + 1,
+        entry_bytes: buffer.entry_bytes + byte_size(entry.line)
+    }
+    |> trim_log_buffer()
+  end
+
+  defp trim_log_buffer(%{entry_count: count, entry_bytes: bytes} = buffer)
+       when count > @max_log_entries or bytes > @max_log_bytes do
+    {{:value, entry}, entries} = :queue.out(buffer.entries)
+
+    %{
+      buffer
+      | entries: entries,
+        entry_count: count - 1,
+        entry_bytes: bytes - byte_size(entry.line)
+    }
+    |> trim_log_buffer()
+  end
+
+  defp trim_log_buffer(buffer), do: buffer
+
+  defp ensure_log_buffer(%{entry_count: count, entry_bytes: bytes} = buffer)
+       when is_integer(count) and is_integer(bytes),
+       do: buffer
+
+  defp ensure_log_buffer(%{source: source, entries: entries, updated_at: updated_at})
+       when is_list(entries) do
+    new_log_buffer(source, trim_log_entries(entries), updated_at)
+  end
+
+  defp public_log_entry(%{entry_count: _count} = buffer) do
+    %{
+      source: buffer.source,
+      entries: :queue.to_list(buffer.entries),
+      updated_at: buffer.updated_at
+    }
+  end
+
+  defp public_log_entry(%{entries: entries} = log_entry) when is_list(entries), do: log_entry
 end

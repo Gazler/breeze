@@ -361,6 +361,12 @@ defmodule Breeze.View do
       Module.register_attribute(__MODULE__, :__slot__, accumulate: false)
       Module.register_attribute(__MODULE__, :__component_specs__, accumulate: true)
       Module.register_attribute(__MODULE__, :__template_helper_captures__, accumulate: true)
+      Module.register_attribute(__MODULE__, :__breeze_template_expressions__, accumulate: true)
+      Module.register_attribute(__MODULE__, :__breeze_template_expression_counter__, [])
+      Module.put_attribute(__MODULE__, :__breeze_template_expression_counter__, 0)
+      Module.register_attribute(__MODULE__, :__breeze_template_patterns__, accumulate: true)
+      Module.register_attribute(__MODULE__, :__breeze_template_pattern_counter__, [])
+      Module.put_attribute(__MODULE__, :__breeze_template_pattern_counter__, 0)
       @on_definition Breeze.View
       @before_compile Breeze.View
     end
@@ -372,7 +378,7 @@ defmodule Breeze.View do
       raise "~H requires a variable named \"assigns\" to exist and be set to a map"
     end
 
-    template = Breeze.Template.compile!(source, __CALLER__)
+    template = Breeze.Template.compile!(source, __CALLER__, module: __CALLER__.module)
 
     template
     |> Breeze.Template.component_names()
@@ -407,6 +413,8 @@ defmodule Breeze.View do
 
     component_specs = pop_component_specs(env)
     helper_captures = pop_template_helper_captures(env)
+    template_expressions = pop_template_expressions(env)
+    template_patterns = pop_template_patterns(env)
     component_spec_names = Enum.map(component_specs, & &1.name)
     local_components = Enum.uniq(component_spec_names ++ local_component_names(env, components))
     public_components = Enum.filter(local_components, &Module.defines?(env.module, {&1, 1}, :def))
@@ -423,6 +431,12 @@ defmodule Breeze.View do
           end
         end
       end)
+
+    expression_definitions =
+      Enum.map(template_expressions, &template_expression_definition/1)
+
+    pattern_definitions =
+      Enum.map(template_patterns, &template_pattern_definition/1)
 
     local_component_definitions =
       Enum.map(local_components, fn component ->
@@ -473,6 +487,18 @@ defmodule Breeze.View do
 
     quote do
       unquote_splicing(helper_definitions)
+      unquote_splicing(expression_definitions)
+
+      def __breeze_eval_expr__(id, _assigns, _vars) do
+        raise ArgumentError, "unknown compiled Breeze template expression: #{inspect(id)}"
+      end
+
+      unquote_splicing(pattern_definitions)
+
+      def __breeze_match_pattern__(id, _value, _vars) do
+        raise ArgumentError, "unknown compiled Breeze template pattern: #{inspect(id)}"
+      end
+
       unquote_splicing(local_component_definitions)
       unquote_splicing(imported_component_definitions)
 
@@ -838,6 +864,73 @@ defmodule Breeze.View do
       |> Module.delete_attribute(:__template_helper_captures__)
       |> List.wrap()
       |> Enum.reverse()
+
+  defp pop_template_expressions(env) do
+    Module.delete_attribute(env.module, :__breeze_template_expression_counter__)
+
+    env.module
+    |> Module.delete_attribute(:__breeze_template_expressions__)
+    |> List.wrap()
+    |> Enum.reverse()
+  end
+
+  defp template_expression_definition({id, expr, vars}) do
+    assigns_var = Macro.var(:assigns, Breeze.Template)
+    vars_var = Macro.var(:vars, Breeze.Template)
+
+    bindings =
+      Enum.map(vars, fn name ->
+        variable = Macro.var(name, nil)
+
+        quote generated: true do
+          unquote(variable) = Map.get(unquote(vars_var), unquote(name))
+        end
+      end)
+
+    quote generated: true do
+      def __breeze_eval_expr__(unquote(id), unquote(assigns_var), unquote(vars_var)) do
+        unquote_splicing(bindings)
+        unquote(expr)
+      end
+    end
+  end
+
+  defp pop_template_patterns(env) do
+    Module.delete_attribute(env.module, :__breeze_template_pattern_counter__)
+
+    env.module
+    |> Module.delete_attribute(:__breeze_template_patterns__)
+    |> List.wrap()
+    |> Enum.reverse()
+  end
+
+  defp template_pattern_definition({id, pattern, vars, pinned_vars}) do
+    value_var = Macro.var(:value, Breeze.Template)
+    vars_var = Macro.var(:_vars, Breeze.Template)
+
+    bindings =
+      Enum.map(pinned_vars, fn name ->
+        variable = Macro.var(name, nil)
+
+        quote generated: true do
+          unquote(variable) = Map.get(unquote(vars_var), unquote(name))
+        end
+      end)
+
+    result =
+      {:%{}, [], Enum.map(vars, fn name -> {name, Macro.var(name, nil)} end)}
+
+    quote generated: true do
+      def __breeze_match_pattern__(unquote(id), unquote(value_var), unquote(vars_var)) do
+        unquote_splicing(bindings)
+
+        case unquote(value_var) do
+          unquote(pattern) -> {:ok, unquote(result)}
+          _ -> :error
+        end
+      end
+    end
+  end
 
   defp local_component_names(env, components) do
     Enum.filter(components, fn component ->

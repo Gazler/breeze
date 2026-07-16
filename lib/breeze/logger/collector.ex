@@ -102,7 +102,8 @@ defmodule Breeze.Logger.Collector do
   def init(opts) do
     {:ok,
      %{
-       entries: [],
+       entries: :queue.new(),
+       entry_count: 0,
        configurations: %{},
        subscribers: %{},
        default_handler_config: nil,
@@ -137,20 +138,20 @@ defmodule Breeze.Logger.Collector do
     {old_subscription, subscribers} = Map.pop(state.subscribers, pid)
     demonitor(old_subscription)
 
-    send(pid, {:logger_snapshot, state.entries})
+    send(pid, {:logger_snapshot, entries_to_list(state)})
     subscription = %{ref: Process.monitor(pid)}
     {:reply, :ok, %{state | subscribers: Map.put(subscribers, pid, subscription)}}
   end
 
   def handle_call(:clear, _from, state) do
     Enum.each(Map.keys(state.subscribers), &send(&1, {:logger_snapshot, []}))
-    state = %{state | entries: []}
+    state = %{state | entries: :queue.new(), entry_count: 0}
     maybe_publish_logs(state)
     {:reply, :ok, state}
   end
 
   def handle_call(:entries, _from, state) do
-    {:reply, state.entries, state}
+    {:reply, entries_to_list(state), state}
   end
 
   def handle_call(:status, _from, state) do
@@ -169,14 +170,12 @@ defmodule Breeze.Logger.Collector do
   def handle_cast({:log, entry}, state) do
     entry = normalize_entry(entry)
 
-    entries =
-      state.entries
-      |> Kernel.++([entry])
-      |> Enum.take(-effective_max_entries(state))
+    {entries, entry_count} =
+      put_entry(state.entries, state.entry_count, entry, effective_max_entries(state))
 
     Enum.each(Map.keys(state.subscribers), &send(&1, {:logger_entry, entry}))
     maybe_publish_log_entry(state, entry)
-    {:noreply, %{state | entries: entries}}
+    {:noreply, %{state | entries: entries, entry_count: entry_count}}
   end
 
   @impl true
@@ -297,6 +296,21 @@ defmodule Breeze.Logger.Collector do
     |> Enum.max(fn -> @default_max_entries end)
   end
 
+  defp put_entry(entries, entry_count, entry, max_entries) do
+    entry
+    |> :queue.in(entries)
+    |> trim_entries(entry_count + 1, max_entries)
+  end
+
+  defp trim_entries(entries, entry_count, max_entries) when entry_count > max_entries do
+    {{:value, _entry}, entries} = :queue.out(entries)
+    trim_entries(entries, entry_count - 1, max_entries)
+  end
+
+  defp trim_entries(entries, entry_count, _max_entries), do: {entries, entry_count}
+
+  defp entries_to_list(%{entries: entries}), do: :queue.to_list(entries)
+
   defp reject_monitor(entries, ref) do
     entries
     |> Enum.reject(fn {_pid, entry} -> entry.ref == ref end)
@@ -347,7 +361,7 @@ defmodule Breeze.Logger.Collector do
   defp maybe_publish_logs(state) do
     case remote_inspector_view(state) do
       nil -> :ok
-      view -> Breeze.RemoteInspector.publish_logs(state.entries, view: view)
+      view -> Breeze.RemoteInspector.publish_logs(entries_to_list(state), view: view)
     end
   end
 

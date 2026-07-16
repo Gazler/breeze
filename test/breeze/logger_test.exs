@@ -132,6 +132,17 @@ defmodule Breeze.LoggerTest do
     assert after_config == before_config
   end
 
+  test "collector retains the newest entries in oldest-first order", %{collector: collector} do
+    assert :ok = Breeze.Logger.Collector.configure(self(), mode: :attach, max_entries: 3)
+
+    for index <- 1..5 do
+      GenServer.cast(collector, {:log, %{level: :info, line: "entry-#{index}"}})
+    end
+
+    assert Enum.map(Breeze.Logger.Collector.entries(), & &1.line) ==
+             ["entry-3", "entry-4", "entry-5"]
+  end
+
   @tag capture_log: true
   test "Breeze.IO.inspect pretty-prints through the logger and returns its input" do
     value = %{alpha: Enum.to_list(1..5), beta: %{enabled: true}}

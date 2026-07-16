@@ -745,6 +745,41 @@ defmodule Breeze.RemoteInspectorSyncTest do
     refute_receive {:remote_inspector_snapshots, _update}, 30
   end
 
+  test "incremental logs retain the newest entries in oldest-first order" do
+    {:ok, pid} = Breeze.RemoteInspector.ensure_server()
+    on_exit(fn -> stop_local_process(pid) end)
+
+    Enum.each(1..1_005, fn index ->
+      Breeze.RemoteInspector.Server.publish_log_entry(pid, self(), %{
+        level: :info,
+        line: "entry-#{index}"
+      })
+    end)
+
+    key = {node(), inspect(self())}
+    entries = Breeze.RemoteInspector.Server.snapshot(pid).logs[key].entries
+
+    assert length(entries) == 1_000
+    assert hd(entries).line == "entry-6"
+    assert List.last(entries).line == "entry-1005"
+  end
+
+  test "incremental logs remain bounded by total bytes" do
+    {:ok, pid} = Breeze.RemoteInspector.ensure_server()
+    on_exit(fn -> stop_local_process(pid) end)
+
+    Enum.each(1..21, fn index ->
+      line = Integer.to_string(rem(index, 10)) <> String.duplicate("x", 99_999)
+      Breeze.RemoteInspector.Server.publish_log_entry(pid, self(), %{level: :info, line: line})
+    end)
+
+    key = {node(), inspect(self())}
+    entries = Breeze.RemoteInspector.Server.snapshot(pid).logs[key].entries
+
+    assert length(entries) == 20
+    assert String.starts_with?(hd(entries).line, "2")
+  end
+
   test "disconnecting a logs-only source sends an incremental deletion" do
     {:ok, pid} = Breeze.RemoteInspector.ensure_server()
     source_pid = spawn(fn -> Process.sleep(:infinity) end)

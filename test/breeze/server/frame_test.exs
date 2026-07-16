@@ -29,4 +29,20 @@ defmodule Breeze.Server.FrameTest do
     assert payload =~ "\e[4;1Hchanged"
     assert payload =~ "\e[3;5Himage-command"
   end
+
+  test "rows missing from the previous frame compare as empty" do
+    assert Frame.build_payload(["same"], ["same", "new"], [], [], 10) ==
+             "\e[2;1Hnew\e[2;4H\e[K"
+  end
+
+  test "rows beyond the current frame remain ignored" do
+    assert Frame.build_payload(["same", "stale"], ["same"], [], [], 10) == ""
+  end
+
+  test "overlay repairs outside the current frame use an empty row" do
+    previous_overlay = %{x: 0, y: 3, height: 1, content: "old"}
+
+    assert Frame.build_payload(["only"], ["only"], [previous_overlay], [], 10) ==
+             "\e[4;1H\e[4;1H\e[K"
+  end
 end

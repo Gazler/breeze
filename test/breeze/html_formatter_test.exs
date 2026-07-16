@@ -69,6 +69,26 @@ defmodule Breeze.HTMLFormatterTest do
              """
   end
 
+  test "keeps complex expressions separate from runtime compiler instructions" do
+    source =
+      ~S|<box :if={not is_nil(@value) and @value > 1} label={"value-#{@value * 2}"}>{String.upcase(@name)}:{inspect({@value, [@name], %{ok: true}})}</box>|
+
+    formatted =
+      HTMLFormatter.format(source,
+        sigil: :H,
+        opening_delimiter: "\"\"\""
+      )
+
+    assert formatted =~ "String.upcase(@name)"
+    assert formatted =~ "@value * 2"
+    refute formatted =~ "__breeze_"
+
+    assert HTMLFormatter.format(formatted,
+             sigil: :H,
+             opening_delimiter: "\"\"\""
+           ) == formatted
+  end
+
   test "formats boolean and spread attributes" do
     source = "<box focusable id={@id} {@rest}>x</box>"
 

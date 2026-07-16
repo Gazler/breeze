@@ -217,25 +217,35 @@ defmodule Breeze.Implicit.Textarea do
     width = max(width, 1)
     indexed_graphemes = Enum.with_index(String.graphemes(content))
 
-    {lines, current_line, column, cursor_row, cursor_x} =
-      wrap_graphemes(indexed_graphemes, cursor, width, [], [], 0, nil, nil)
+    {reversed_lines, current_line, column, line_count, cursor_row, cursor_x} =
+      wrap_graphemes(indexed_graphemes, cursor, width, [], [], 0, 0, nil, nil)
 
     {lines, cursor_row, cursor_x} =
       if cursor == String.length(content) do
         if column >= width and current_line != "" do
-          {lines ++ [current_line, ""], length(lines) + 1, 0}
+          {Enum.reverse(["", current_line | reversed_lines]), line_count + 1, 0}
         else
-          {lines ++ [current_line], length(lines), column}
+          {Enum.reverse([current_line | reversed_lines]), line_count, column}
         end
       else
-        {lines ++ [current_line], cursor_row, cursor_x}
+        {Enum.reverse([current_line | reversed_lines]), cursor_row, cursor_x}
       end
 
     {lines, cursor_row, cursor_x}
   end
 
-  defp wrap_graphemes([], _cursor, _width, lines, current_items, column, cursor_row, cursor_x) do
-    {lines, items_to_string(current_items), column, cursor_row || 0, cursor_x || 0}
+  defp wrap_graphemes(
+         [],
+         _cursor,
+         _width,
+         lines,
+         current_items,
+         column,
+         line_count,
+         cursor_row,
+         cursor_x
+       ) do
+    {lines, items_to_string(current_items), column, line_count, cursor_row || 0, cursor_x || 0}
   end
 
   defp wrap_graphemes(
@@ -245,12 +255,13 @@ defmodule Breeze.Implicit.Textarea do
          lines,
          current_items,
          column,
+         line_count,
          cursor_row,
          cursor_x
        ) do
     {cursor_row, cursor_x} =
       if grapheme_index == cursor do
-        {length(lines), column}
+        {line_count, column}
       else
         {cursor_row, cursor_x}
       end
@@ -263,9 +274,10 @@ defmodule Breeze.Implicit.Textarea do
           rest,
           cursor,
           width,
-          lines ++ [items_to_string(current_items)],
+          [items_to_string(current_items) | lines],
           [],
           0,
+          line_count + 1,
           cursor_row,
           cursor_x
         )
@@ -276,8 +288,9 @@ defmodule Breeze.Implicit.Textarea do
           cursor,
           width,
           lines,
-          current_items ++ [{grapheme, grapheme_width}],
+          [{grapheme, grapheme_width} | current_items],
           column + grapheme_width,
+          line_count,
           cursor_row,
           cursor_x
         )
@@ -289,9 +302,10 @@ defmodule Breeze.Implicit.Textarea do
               [{grapheme, grapheme_index} | rest],
               cursor,
               width,
-              lines ++ [items_to_string(current_items)],
+              [items_to_string(current_items) | lines],
               [],
               0,
+              line_count + 1,
               cursor_row,
               cursor_x
             )
@@ -301,9 +315,10 @@ defmodule Breeze.Implicit.Textarea do
               [{grapheme, grapheme_index} | rest],
               cursor,
               width,
-              lines ++ [items_to_string(line_items)],
+              [items_to_string(line_items) | lines],
               carry_items,
               items_width(carry_items),
+              line_count + 1,
               cursor_row,
               cursor_x
             )
@@ -312,18 +327,19 @@ defmodule Breeze.Implicit.Textarea do
   end
 
   defp split_at_last_whitespace(items) do
-    case Enum.find_index(Enum.reverse(items), fn {grapheme, _width} -> whitespace?(grapheme) end) do
+    case Enum.find_index(items, fn {grapheme, _width} -> whitespace?(grapheme) end) do
       nil ->
         nil
 
       reverse_index ->
-        split_index = length(items) - reverse_index
-        Enum.split(items, split_index)
+        {carry_items, line_items} = Enum.split(items, reverse_index)
+        {line_items, carry_items}
     end
   end
 
   defp items_to_string(items) do
     items
+    |> Enum.reverse()
     |> Enum.map_join("", fn {grapheme, _width} -> grapheme end)
   end
 

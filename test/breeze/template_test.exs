@@ -1,6 +1,10 @@
 defmodule Breeze.TemplateTest do
   use ExUnit.Case, async: true
 
+  defmodule ExpressionHelpers do
+    def decorate(value), do: "*#{value}*"
+  end
+
   defmodule InterpolationView do
     use Breeze.View
 
@@ -106,6 +110,36 @@ defmodule Breeze.TemplateTest do
     defp format_name(name), do: String.upcase(name)
   end
 
+  defmodule CompiledExpressionView do
+    use Breeze.View
+
+    alias String, as: Text
+    import ExpressionHelpers
+
+    def render(assigns) do
+      ~H|<box :if={@enabled and length(@items) > 0} data-count={length(@items)}>
+  {Enum.join(
+    [decorate(format_name(Text.upcase(@name))), Enum.join(Enum.map(@items, &(&1 * @factor)), ",")],
+    ":"
+  )}
+  <box :for={item <- @items}>{item * @factor}</box>
+  <box :for={binary <- @binaries}>{String.upcase(binary)}</box>
+</box>|
+    end
+
+    defp format_name(name), do: "[#{name}]"
+  end
+
+  defmodule PinnedPatternView do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H|<box :for={expected <- @expected}>
+  <box :for={^expected <- @values}>{expected}</box>
+</box>|
+    end
+  end
+
   defmodule SlotView do
     use Breeze.View
 
@@ -181,9 +215,25 @@ defmodule Breeze.TemplateTest do
                "<box><box>a123</box><box>b123</box></box>"
     end
 
-    test "falls back to eval for unsupported :for patterns" do
+    test "compiles complex :for patterns into view matcher functions" do
       assert render(MapPatternForView, %{items: [%{label: "a"}, %{label: "b"}]}) ==
                "<box><box>a</box><box>b</box></box>"
+
+      {template, _assigns} = MapPatternForView.render(%{items: []})
+
+      assert [
+               {:element, "box", [], _outer_directives,
+                [
+                  {:element, "box", [],
+                   %{
+                     for:
+                       {"%{label: label}", {:__breeze_compiled_pattern__, MapPatternForView, _id},
+                        {:__breeze_assign__, :items}}
+                   }, _children}
+                ]}
+             ] = template.nodes
+
+      assert function_exported?(MapPatternForView, :__breeze_match_pattern__, 3)
     end
 
     test "supports dynamic/boolean/spread attributes" do
@@ -204,6 +254,29 @@ defmodule Breeze.TemplateTest do
 
     test "supports private helper calls inside templates" do
       assert render(PrivateHelperView, %{name: "ada"}) == "<box>ADA</box>"
+    end
+
+    test "executes non-trivial expressions as compiled view functions" do
+      assigns = %{enabled: true, items: [1, 2], factor: 2, name: "ada", binaries: ["a"]}
+
+      assert render(CompiledExpressionView, assigns) ==
+               ~s(<box data-count="2">*[ADA]*:2,4<box>2</box><box>4</box><box>A</box></box>)
+
+      assert render(CompiledExpressionView, %{assigns | enabled: false}) == ""
+
+      {template, _assigns} = CompiledExpressionView.render(assigns)
+
+      assert [
+               {:element, "box", _attrs,
+                %{if: {:__breeze_compiled__, CompiledExpressionView, _id, _helpers}}, _children}
+             ] = template.nodes
+
+      assert function_exported?(CompiledExpressionView, :__breeze_eval_expr__, 3)
+    end
+
+    test "compiled pattern matchers can use bindings from an outer directive" do
+      assert render(PinnedPatternView, %{expected: [2], values: [1, 2, 3]}) ==
+               "<box><box>2</box></box>"
     end
 
     test "supports named slots, :for on slots, and render_slot assigns" do

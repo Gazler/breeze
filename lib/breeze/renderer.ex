@@ -131,7 +131,8 @@ defmodule Breeze.Renderer do
 
     acc = %{acc | elements: Map.put(acc.elements, acc.id, acc.flags)}
     ids = Enum.reverse(acc.ids)
-    focusables = Enum.reverse(acc.focusables) |> then(&Enum.filter(ids, fn id -> id in &1 end))
+    focusable_ids = MapSet.new(acc.focusables)
+    focusables = Enum.filter(ids, &MapSet.member?(focusable_ids, &1))
     acc = %{acc | ids: ids, focusables: focusables}
 
     acc =
@@ -161,7 +162,7 @@ defmodule Breeze.Renderer do
 
   defp put_render_tree_child(%{render_tree?: true} = acc, parent_id, child_ref) do
     update_in(acc, [:render_tree_children], fn children ->
-      Map.update(children || %{}, parent_id, [child_ref], &(&1 ++ [child_ref]))
+      Map.update(children || %{}, parent_id, [child_ref], &[child_ref | &1])
     end)
   end
 
@@ -180,6 +181,7 @@ defmodule Breeze.Renderer do
         child_nodes =
           children
           |> Map.get(idx, [])
+          |> Enum.reverse()
           |> Enum.flat_map(fn
             {:id, child_id} ->
               case assemble_render_tree(child_id, nodes, children) do
@@ -417,7 +419,7 @@ defmodule Breeze.Renderer do
       box = %{box | content: content}
       build_tree(rest, box, children, style_state, flags, acc, opts, current_id, tag)
     else
-      children = children ++ [content]
+      children = [content | children]
       build_tree(rest, box, children, style_state, flags, acc, opts, current_id, tag)
     end
   end
@@ -428,7 +430,7 @@ defmodule Breeze.Renderer do
       box = %{box | content: content}
       build_tree(rest, box, children, style_state, flags, acc, opts, current_id, tag)
     else
-      children = children ++ [content]
+      children = [content | children]
       build_tree(rest, box, children, style_state, flags, acc, opts, current_id, tag)
     end
   end
