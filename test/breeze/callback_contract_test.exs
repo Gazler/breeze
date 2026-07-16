@@ -7,6 +7,15 @@ defmodule Breeze.CallbackContractTest do
     def render(assigns), do: ~H"<box>contract</box>"
   end
 
+  defmodule ContractComponent do
+    use Breeze.Component
+
+    attr :label, :string, default: "component"
+
+    def badge(assigns), do: ~H"<box>{@label}</box>"
+    def render(assigns), do: ~H"<.badge/>"
+  end
+
   defmodule ContractStory do
     use Breeze.Storybook.Story
 
@@ -33,6 +42,13 @@ defmodule Breeze.CallbackContractTest do
     assert {:render, 1} in Breeze.View.behaviour_info(:callbacks)
     assert {:handle_event, 3} in Breeze.View.behaviour_info(:callbacks)
     assert {:handle_info, 2} in Breeze.View.behaviour_info(:callbacks)
+  end
+
+  test "using Breeze.Component provides templates without the view lifecycle" do
+    refute Breeze.View in behaviours(ContractComponent)
+    assert ContractComponent.__breeze_components__() == [:badge]
+
+    assert Breeze.Renderer.render_to_string(ContractComponent, %{}) =~ "component"
   end
 
   test "a story is also a view and only adds its story callback" do

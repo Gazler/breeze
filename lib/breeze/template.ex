@@ -483,10 +483,10 @@ defmodule Breeze.Template do
       {:render_slot, _meta, [slot_arg]} ->
         slot_arg
         |> eval_expr(ctx)
-        |> Breeze.View.render_slot()
+        |> Breeze.Component.render_slot()
 
       {:render_slot, _meta, [slot_arg, assigns_arg]} ->
-        Breeze.View.render_slot(eval_expr(slot_arg, ctx), eval_expr(assigns_arg, ctx))
+        Breeze.Component.render_slot(eval_expr(slot_arg, ctx), eval_expr(assigns_arg, ctx))
 
       _ ->
         expr

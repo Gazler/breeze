@@ -79,6 +79,7 @@ defmodule Breeze.MixProject do
           Breeze.Term
         ],
         "Components and styling": [
+          Breeze.Component,
           Breeze.Blocks,
           Breeze.Implicit,
           Breeze.Theme,

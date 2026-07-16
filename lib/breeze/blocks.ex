@@ -25,7 +25,7 @@ defmodule Breeze.Blocks do
   prefixes).
   """
 
-  use Breeze.View
+  use Breeze.Component
   alias BackBreeze.Ucwidth
 
   attr :keybindings, :list, default: []
