@@ -130,7 +130,7 @@ defmodule Breeze.RemoteInspectorTest do
   defmodule CustomInspectorPage do
     use Breeze.RemoteInspector.Page
 
-    def page,
+    def page(_opts),
       do: [label: "Debugger", assigns: [note: "configured", static: "extra"]]
 
     def render(assigns) do
@@ -167,10 +167,24 @@ defmodule Breeze.RemoteInspectorTest do
     defp tree_selected(_tree), do: "-"
   end
 
+  defmodule ConfigurableInspectorPage do
+    use Breeze.RemoteInspector.Page
+
+    def page(opts) do
+      [
+        label: Keyword.get(opts, :label, "Configured"),
+        assigns: [mode: Keyword.get(opts, :mode, :default)],
+        runtime_hooks: Keyword.get(opts, :runtime_hooks, [])
+      ]
+    end
+
+    def render(assigns), do: ~H"<box>Configured</box>"
+  end
+
   defmodule InteractiveInspectorPage do
     use Breeze.RemoteInspector.Page
 
-    def page, do: [label: "Chat"]
+    def page(_opts), do: [label: "Chat"]
 
     def render(assigns) do
       assigns = Map.merge(%{prompt: "-", info: "-", count: 0}, assigns)
@@ -218,7 +232,7 @@ defmodule Breeze.RemoteInspectorTest do
   defmodule FailingInspectorPage do
     use Breeze.RemoteInspector.Page
 
-    def page, do: [label: "Failure"]
+    def page(_opts), do: [label: "Failure"]
 
     def render(_assigns), do: raise("render exploded")
 
@@ -228,7 +242,7 @@ defmodule Breeze.RemoteInspectorTest do
   defmodule InvalidInspectorPage do
     use Breeze.RemoteInspector.Page
 
-    def page, do: [label: "Invalid", unknown: true]
+    def page(_opts), do: [label: "Invalid", unknown: true]
     def render(assigns), do: ~H"<box>Invalid</box>"
   end
 
@@ -241,7 +255,7 @@ defmodule Breeze.RemoteInspectorTest do
   defmodule MissingPageLabel do
     use Breeze.RemoteInspector.Page
 
-    def page, do: [assigns: %{ready?: true}]
+    def page(_opts), do: [assigns: %{ready?: true}]
     def render(assigns), do: ~H"<box>Missing label</box>"
   end
 
@@ -262,24 +276,37 @@ defmodule Breeze.RemoteInspectorTest do
              ])
   end
 
+  test "configured pages contribute runtime hooks without publishing them" do
+    configured = [
+      {ConfigurableInspectorPage,
+       label: "Timeline", mode: :compact, runtime_hooks: [ExampleRuntimeHook]}
+    ]
+
+    assert [
+             %{
+               label: "Timeline",
+               module: ConfigurableInspectorPage,
+               assigns: %{mode: :compact}
+             }
+           ] = Breeze.RemoteInspector.Pages.build(configured)
+
+    assert [ExampleRuntimeHook] = Breeze.RemoteInspector.Pages.runtime_hooks(configured)
+  end
+
   test "remote inspector page declarations reject unsupported shapes" do
     assert_raise ArgumentError, ~r/expected :pages to be a list/, fn ->
       Breeze.RemoteInspector.Pages.build(CustomInspectorPage)
     end
 
-    assert_raise ArgumentError, ~r/unknown .*\.page\/0 keys: \[:unknown\]/, fn ->
+    assert_raise ArgumentError, ~r/unknown .*\.page\/1 keys: \[:unknown\]/, fn ->
       Breeze.RemoteInspector.Pages.build([InvalidInspectorPage])
     end
 
-    assert_raise ArgumentError, ~r/expected a page module/, fn ->
-      Breeze.RemoteInspector.Pages.build([{CustomInspectorPage, assigns: %{}}])
-    end
-
-    assert_raise ArgumentError, ~r/expected .* to define page\/0/, fn ->
+    assert_raise ArgumentError, ~r/expected .* to define page\/1/, fn ->
       Breeze.RemoteInspector.Pages.build([MissingPageDeclaration])
     end
 
-    assert_raise ArgumentError, ~r/page\/0 to define a non-empty :label/, fn ->
+    assert_raise ArgumentError, ~r/page\/1 to define a non-empty :label/, fn ->
       Breeze.RemoteInspector.Pages.build([MissingPageLabel])
     end
   end

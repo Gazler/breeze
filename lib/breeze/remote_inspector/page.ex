@@ -24,10 +24,22 @@ defmodule Breeze.RemoteInspector.Page do
       ]
 
   Each page defines its display label and optional initial assigns through
-  `page/0`. Assigns accept a map or keyword list:
+  `page/1`. A page registered as a bare module receives an empty keyword list.
+  Assigns accept a map or keyword list:
 
-      def page do
+      def page(_opts) do
         [label: "Runtime tools", assigns: %{mode: :compact, limit: 200}]
+      end
+
+  Register a page as `{module, options}` to pass per-registration options. A
+  page may contribute generic runtime hooks; hook declarations remain inside
+  the source application and are not published to the remote inspector:
+
+      def page(opts) do
+        [
+          label: "Runtime tools",
+          runtime_hooks: [{MyApp.RuntimeHook, opts}]
+        ]
       end
 
   `render/1` receives the standard `:breeze` assigns, the active source server
@@ -57,7 +69,7 @@ defmodule Breeze.RemoteInspector.Page do
       defmodule MyApp.TimelinePage do
         use Breeze.RemoteInspector.Page
 
-        def page, do: [label: "Timeline"]
+        def page(_opts), do: [label: "Timeline"]
 
         def render(assigns) do
           ~H"<box>Timeline</box>"
@@ -65,7 +77,7 @@ defmodule Breeze.RemoteInspector.Page do
       end
   """
 
-  @callback page() :: keyword() | map()
+  @callback page(keyword()) :: keyword() | map()
   @callback render(map()) :: any()
   @callback handle_event(term(), map(), map()) :: {:noreply, map()} | :noreply
   @callback handle_info(term(), map()) :: {:noreply, map()} | :noreply

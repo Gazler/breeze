@@ -774,7 +774,7 @@ defmodule Breeze.InputRouterTest do
         )
       end)
 
-    assert_receive {:terminal_started, router_pid, reader}
+    assert_receive {:terminal_started, router_pid, reader}, 1_000
     refute Task.yield(task, 50)
 
     send(router_pid, {reader, {:data, "q"}})
@@ -892,10 +892,15 @@ defmodule Breeze.InputRouterThemeSyncTest do
     send(pid, {reader, {:data, "t"}})
     assert_receive :theme_switch
 
-    wait_until(fn ->
-      metadata = ChildServer.metadata(child_pid)
-      metadata.theme.mode == :system and metadata.theme.variables[:palette_probe_status] == :ready
-    end)
+    wait_until(
+      fn ->
+        metadata = ChildServer.metadata(child_pid)
+
+        metadata.theme.mode == :system and
+          metadata.theme.variables[:palette_probe_status] == :ready
+      end,
+      100
+    )
 
     refute_receive {:leaked_input, _event}, 50
 

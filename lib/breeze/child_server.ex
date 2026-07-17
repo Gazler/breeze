@@ -17,6 +17,14 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, {:metadata, opts})
   end
 
+  def runtime_state(pid, timeout \\ 5_000) do
+    GenServer.call(pid, :runtime_state, timeout)
+  end
+
+  def runtime_pids(pid, timeout \\ 1_000) do
+    GenServer.call(pid, :runtime_pids, timeout)
+  end
+
   def layout_snapshot(pid) do
     GenServer.call(pid, :layout_snapshot)
   end
@@ -49,8 +57,8 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, {:update_assigns, assigns})
   end
 
-  def dispatch_info(pid, message, terminal \\ nil) do
-    GenServer.call(pid, {:info, message, terminal})
+  def dispatch_info(pid, message, terminal \\ nil, opts \\ []) do
+    GenServer.call(pid, {:info, message, terminal, opts})
   end
 
   def put_global_keybindings(pid, keybindings) do
@@ -78,6 +86,8 @@ defmodule Breeze.ChildServer do
       )
 
     start_opts = Keyword.get(opts, :start_opts, [])
+    runtime_state = Keyword.get(opts, :runtime_state)
+    restore_state_theme? = Keyword.get(opts, :restore_state_theme?, true)
     invalidate = Keyword.get(opts, :invalidate)
     global_keybindings = Keyword.get(opts, :global_keybindings, [])
 
@@ -108,13 +118,15 @@ defmodule Breeze.ChildServer do
     }
 
     term =
-      if Code.ensure_loaded?(view) and function_exported?(view, :mount, 2) do
+      if is_nil(runtime_state) and Code.ensure_loaded?(view) and
+           function_exported?(view, :mount, 2) do
         {:ok, mounted_term} = view.mount(start_opts, term)
         mounted_term
       else
         term
       end
 
+    term = maybe_restore_state(term, runtime_state, restore_state_theme?)
     maybe_probe_system_theme(term.theme, term.terminal, term.server)
     term = sync_theme_assigns(term)
     {:ok, term}
@@ -155,6 +167,14 @@ defmodule Breeze.ChildServer do
        implicit_state: metadata_term.implicit_state,
        implicit_meta: metadata_term.implicit_meta
      }, term}
+  end
+
+  def handle_call(:runtime_state, _from, term) do
+    {:reply, Breeze.Runtime.State.capture_view(term), term}
+  end
+
+  def handle_call(:runtime_pids, _from, term) do
+    {:reply, child_runtime_pids(term), term}
   end
 
   def handle_call(:layout_snapshot, _from, term) do
@@ -207,9 +227,9 @@ defmodule Breeze.ChildServer do
     {:reply, {:noreply, next_term.focused, next_term != term}, next_term}
   end
 
-  def handle_call({:info, message, terminal}, _from, term) do
+  def handle_call({:info, message, terminal, opts}, _from, term) do
     term = maybe_put_terminal(term, terminal)
-    reply_from_result(handle_view_info(term.view, message, term), term)
+    reply_from_result(handle_view_info(term.view, message, term), term, opts)
   end
 
   def handle_call({:put_global_keybindings, keybindings}, _from, term) do
@@ -271,7 +291,7 @@ defmodule Breeze.ChildServer do
         |> sync_theme_assigns()
         |> cascade_theme_if_changed(term)
 
-      notify_invalidate(next_term)
+      if next_term != term, do: notify_invalidate(next_term)
       {:noreply, next_term}
     else
       {:noreply, term}
@@ -321,23 +341,7 @@ defmodule Breeze.ChildServer do
     :ok
   end
 
-  defp reply_from_result({:noreply, next_term}, term) do
-    next_term =
-      term
-      |> apply_focus_transitions(next_term)
-
-    maybe_probe_system_theme(next_term.theme, next_term.terminal, next_term.server)
-
-    next_term =
-      next_term
-      |> sync_theme_assigns()
-      |> cascade_theme_if_changed(term)
-
-    notify_invalidate(next_term)
-    {:reply, {:noreply, next_term.focused}, next_term}
-  end
-
-  defp reply_from_result({:noreply, next_term, opts}, term) do
+  defp reply_from_result({:noreply, next_term}, term, opts) do
     next_term =
       term
       |> apply_focus_transitions(next_term)
@@ -353,30 +357,101 @@ defmodule Breeze.ChildServer do
     {:reply, {:noreply, next_term.focused}, next_term}
   end
 
-  defp reply_from_result({:stop, next_term}, term) do
+  defp reply_from_result({:noreply, next_term, result_opts}, term, opts) do
+    next_term =
+      term
+      |> apply_focus_transitions(next_term)
+
+    maybe_probe_system_theme(next_term.theme, next_term.terminal, next_term.server)
+
+    next_term =
+      next_term
+      |> sync_theme_assigns()
+      |> cascade_theme_if_changed(term)
+
+    maybe_notify_invalidate(next_term, merge_invalidation_opt(result_opts, opts))
+    {:reply, {:noreply, next_term.focused}, next_term}
+  end
+
+  defp reply_from_result({:stop, next_term}, term, opts) do
     next_term =
       term
       |> apply_focus_transitions(next_term)
       |> sync_theme_assigns()
       |> cascade_theme_if_changed(term)
 
-    notify_invalidate(next_term)
+    maybe_notify_invalidate(next_term, opts)
     {:stop, :normal, {:stop, next_term.focused}, next_term}
   end
 
-  defp reply_from_result({:stop, next_term, opts}, term) do
+  defp reply_from_result({:stop, next_term, result_opts}, term, opts) do
     next_term =
       term
       |> apply_focus_transitions(next_term)
       |> sync_theme_assigns()
       |> cascade_theme_if_changed(term)
 
-    maybe_notify_invalidate(next_term, opts)
+    maybe_notify_invalidate(next_term, merge_invalidation_opt(result_opts, opts))
     {:stop, :normal, {:stop, next_term.focused}, next_term}
   end
 
   defp maybe_put_terminal(term, nil), do: term
   defp maybe_put_terminal(term, terminal), do: %{term | terminal: terminal}
+
+  defp maybe_restore_state(term, nil, _restore_state_theme?), do: term
+
+  defp maybe_restore_state(
+         %Breeze.Term{view: view} = term,
+         %Breeze.Runtime.State.View{
+           term: %Breeze.Term{view: view} = state_term,
+           children: children
+         },
+         restore_state_theme?
+       ) do
+    invalidate = Map.get(term.assigns, :__invalidate__)
+
+    assigns =
+      case state_term.assigns do
+        assigns when is_map(assigns) -> Map.put(assigns, :__invalidate__, invalidate)
+        _assigns -> term.assigns
+      end
+
+    {theme_source, theme, apply_theme_defaults?} =
+      if restore_state_theme? do
+        theme_source = state_term.theme_source
+
+        {
+          theme_source,
+          Breeze.Theme.new(theme_source || state_term.theme, terminal: term.terminal),
+          state_term.apply_theme_defaults?
+        }
+      else
+        {term.theme_source, term.theme, term.apply_theme_defaults?}
+      end
+
+    restored =
+      %{
+        state_term
+        | server: term.server,
+          terminal: term.terminal,
+          reader: term.reader,
+          theme: theme,
+          theme_source: theme_source,
+          apply_theme_defaults?: apply_theme_defaults?,
+          assigns: assigns,
+          children: %{},
+          render_timer: nil,
+          render_tree?: term.render_tree?
+      }
+      |> sync_theme_assigns()
+
+    restore_state_children(restored, children, restore_state_theme?)
+  end
+
+  defp maybe_restore_state(%Breeze.Term{view: view}, runtime_state, _restore_state_theme?) do
+    raise ArgumentError,
+          "runtime state view does not match #{inspect(view)}: #{inspect(runtime_state)}"
+  end
 
   defp handle_view_info(view, message, term) do
     if view_callback_exported?(view, :handle_info, 2) do
@@ -399,7 +474,7 @@ defmodule Breeze.ChildServer do
   end
 
   defp maybe_probe_system_theme(theme, terminal, server) do
-    if requested_system_theme?(theme) do
+    if requested_system_theme?(theme) and Breeze.Theme.probe_status(theme) != :ready do
       if is_pid(server), do: send(server, {:ensure_runtime_palette, :system})
       ThemeProbe.ensure_runtime_palette_async(terminal, self())
     else
@@ -838,7 +913,7 @@ defmodule Breeze.ChildServer do
         event = put_mouse_target_fields(term, target, event)
         live_children = Keyword.get(opts, :live_children, term.children)
 
-        case dispatch_live_mouse_target(term, target, event, live_children) do
+        case dispatch_live_mouse_target(term, target, event, live_children, opts) do
           {:ok, reply} ->
             reply
 
@@ -1266,6 +1341,76 @@ defmodule Breeze.ChildServer do
     }
   end
 
+  defp restore_state_children(term, children, restore_state_theme?) do
+    term =
+      if map_size(children) == 0 do
+        term
+      else
+        ensure_child_view_supervisor(term, Map.to_list(children))
+      end
+
+    Enum.reduce(children, term, fn {id, child}, acc ->
+      put_in(
+        acc.children[id],
+        start_state_child!(id, child, acc, restore_state_theme?)
+      )
+    end)
+  end
+
+  defp start_state_child!(
+         id,
+         %{
+           view: view,
+           start_opts: start_opts,
+           assigns: assigns,
+           state: runtime_state
+         } = child,
+         term,
+         restore_state_theme?
+       ) do
+    parent = self()
+    persistent = Map.get(child, :persistent, false)
+
+    invalidate = fn
+      nil -> send(parent, {:child_invalidated, id})
+      child_id -> send(parent, {:child_invalidated, live_id(id, child_id)})
+    end
+
+    {:ok, pid} =
+      Breeze.ChildViewSupervisor.start_child(
+        term.child_view_supervisor,
+        view: view,
+        start_opts: start_opts,
+        assigns: assigns,
+        runtime_state: runtime_state,
+        restore_state_theme?: restore_state_theme?,
+        server: term.server,
+        terminal: term.terminal,
+        theme: term.theme,
+        theme_source: term.theme_source,
+        global_keybindings: term.global_keybindings,
+        apply_theme_defaults?: term.apply_theme_defaults?,
+        render_tree?: term.render_tree?,
+        invalidate: invalidate
+      )
+
+    %{
+      pid: pid,
+      ref: Process.monitor(pid),
+      view: view,
+      start_opts: start_opts,
+      assigns: assigns,
+      attrs: [
+        id: id,
+        view: view,
+        start_opts: start_opts,
+        assigns: assigns,
+        persistent: persistent
+      ],
+      persistent: persistent
+    }
+  end
+
   defp render_live_child(attrs, child_opts, term) do
     id = fetch_live_attr!(attrs, :id)
     terminal = Keyword.get(child_opts, :live_terminal, term.terminal)
@@ -1316,6 +1461,25 @@ defmodule Breeze.ChildServer do
     %{term | children: alive_children}
   end
 
+  defp child_runtime_pids(term) do
+    descendants =
+      term.children
+      |> Map.values()
+      |> Enum.flat_map(fn
+        %{pid: pid} when is_pid(pid) ->
+          Breeze.ChildServer.runtime_pids(pid)
+
+        _child ->
+          []
+      end)
+
+    [self() | descendants]
+    |> Enum.filter(&(is_pid(&1) and Process.alive?(&1)))
+    |> Enum.uniq()
+  catch
+    :exit, _reason -> [self()]
+  end
+
   defp shutdown_child(supervisor, child) do
     Breeze.ChildViewSupervisor.terminate_child(supervisor, Map.get(child, :pid))
 
@@ -1355,7 +1519,7 @@ defmodule Breeze.ChildServer do
   defp namespace_child_focus(nil, _child_id), do: nil
   defp namespace_child_focus(focused, child_id), do: child_id <> "::" <> focused
 
-  defp dispatch_live_mouse_target(term, target, event, live_children) do
+  defp dispatch_live_mouse_target(term, target, event, live_children, opts) do
     case live_child_for_target(live_children, target) do
       nil ->
         :not_live
@@ -1364,7 +1528,8 @@ defmodule Breeze.ChildServer do
         reply =
           pid
           |> Breeze.ChildServer.dispatch_input(
-            translate_mouse_event_for_child(term, child_id, event)
+            translate_mouse_event_for_child(term, child_id, event),
+            Keyword.take(opts, [:invalidate])
           )
           |> namespace_mouse_child_reply(child_id, term.focused, live_mouse_focus_event?(event))
 
@@ -1682,7 +1847,7 @@ defmodule Breeze.ChildServer do
     {:reply, {:noreply, next_term.focused, next_term != term}, next_term}
   end
 
-  defp reply_from_input_result({:noreply, next_term, result_opts}, term, _opts)
+  defp reply_from_input_result({:noreply, next_term, result_opts}, term, opts)
        when is_list(result_opts) do
     next_term =
       term
@@ -1696,7 +1861,7 @@ defmodule Breeze.ChildServer do
       |> cascade_theme_if_changed(term)
 
     invalidate? = Keyword.get(result_opts, :invalidate, true)
-    maybe_notify_invalidate(next_term, result_opts)
+    maybe_notify_invalidate(next_term, merge_invalidation_opt(result_opts, opts))
     {:reply, {:noreply, next_term.focused, invalidate? and next_term != term}, next_term}
   end
 
@@ -1717,7 +1882,7 @@ defmodule Breeze.ChildServer do
     {:stop, :normal, {:stop, next_term.focused, true}, next_term}
   end
 
-  defp reply_from_input_result({:stop, next_term, result_opts}, term, _opts)
+  defp reply_from_input_result({:stop, next_term, result_opts}, term, opts)
        when is_list(result_opts) do
     next_term =
       term
@@ -1726,7 +1891,7 @@ defmodule Breeze.ChildServer do
       |> cascade_theme_if_changed(term)
 
     invalidate? = Keyword.get(result_opts, :invalidate, true)
-    maybe_notify_invalidate(next_term, result_opts)
+    maybe_notify_invalidate(next_term, merge_invalidation_opt(result_opts, opts))
     {:stop, :normal, {:stop, next_term.focused, invalidate?}, next_term}
   end
 
@@ -1799,6 +1964,14 @@ defmodule Breeze.ChildServer do
       notify_invalidate(term)
     else
       :ok
+    end
+  end
+
+  defp merge_invalidation_opt(result_opts, call_opts) do
+    if Keyword.get(call_opts, :invalidate, true) do
+      result_opts
+    else
+      Keyword.put(result_opts, :invalidate, false)
     end
   end
 

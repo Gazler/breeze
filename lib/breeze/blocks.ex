@@ -506,7 +506,7 @@ defmodule Breeze.Blocks do
       |> assign(render_rows: render_rows)
       |> assign(top_spacer: top_spacer)
       |> assign(bottom_spacer: bottom_spacer)
-      |> assign(tree_offset: if(windowed?, do: top_spacer, else: assigns.offset))
+      |> assign(tree_offset: if(windowed?, do: top_spacer, else: Map.get(assigns, :offset)))
 
     ~H"""
     <box
@@ -709,7 +709,7 @@ defmodule Breeze.Blocks do
   defp normalize_tree_window_offset(_offset, _total), do: nil
 
   defp explicit_or_implicit_tree_offset(assigns) do
-    case assigns.offset do
+    case Map.get(assigns, :offset) do
       nil -> get_in(tree_implicit_state(assigns), [:offset])
       offset -> offset
     end

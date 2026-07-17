@@ -25,9 +25,15 @@ defmodule Breeze.Inspector do
 
       inspector: [toggle_key: "F9", move_key: "F10", remote: false]
 
-  Applications can also register custom pages for the remote inspector:
+  Applications can also register custom pages for the remote inspector. A
+  configurable page accepts a keyword list in its `{module, options}` entry:
 
-      inspector: [pages: [MyApp.InspectorPage]]
+      inspector: [
+        pages: [
+          MyApp.InspectorPage,
+          {MyApp.ConfigurablePage, sample_every: 5}
+        ]
+      ]
 
   The supported options are:
 
@@ -36,7 +42,9 @@ defmodule Breeze.Inspector do
     * `:move_key` - key used to move the local panel. Defaults to `"PageUp"`.
     * `:remote` - publishes snapshots for the remote inspector. Defaults to
       `true`.
-    * `:pages` - a list of page modules published to the remote inspector.
+    * `:pages` - page modules or `{module, options}` tuples published to the
+      remote inspector. Pages can contribute runtime hooks from their page
+      declaration.
 
   ## Available information
 
@@ -108,6 +116,16 @@ defmodule Breeze.Inspector do
     |> config()
     |> Keyword.get(:pages, [])
     |> Breeze.RemoteInspector.Pages.build()
+  end
+
+  @doc false
+  def page_runtime_hooks(config) do
+    config
+    |> case do
+      value when is_list(value) -> Keyword.get(value, :pages, [])
+      _value -> []
+    end
+    |> Breeze.RemoteInspector.Pages.runtime_hooks()
   end
 
   @doc false

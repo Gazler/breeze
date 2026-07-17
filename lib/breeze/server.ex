@@ -26,6 +26,11 @@ defmodule Breeze.Server do
       silence the default handler, a keyword list with `:mode` and
       `:max_entries`, or `false` to disable capture. Inspector-enabled servers
       default to `:attach`; other servers default to `false`.
+    * `:runtime_hooks` - opt-in lifecycle hooks used by external development
+      tooling. Pass a list of hook modules or `{module, options}` tuples. Hooks
+      can lazily read runtime state and diagnostics from their event context.
+      Periodic animation passes are excluded unless that hook sets
+      `notify_animation?: true`.
     * `:alt_screen` - enters the terminal alternate screen. Defaults
       to `true`.
     * `:hide_cursor` - hides the terminal cursor while the app runs.
@@ -56,7 +61,20 @@ defmodule Breeze.Server do
 
   use GenServer
 
-  alias Breeze.Server.{Debug, Dimensions, Error, Frame, Input, Inspector, RenderTracking}
+  alias Breeze.Runtime.Hook
+
+  alias Breeze.Server.{
+    StateReplacement,
+    Debug,
+    Dimensions,
+    Error,
+    Frame,
+    FrameDisplay,
+    Input,
+    Inspector,
+    RenderTracking
+  }
+
   alias Breeze.Server.State
 
   @flush_input_batch :flush_input_batch
@@ -95,6 +113,8 @@ defmodule Breeze.Server do
     rendered: %State.Rendered{}
   ]
 
+  @type runtime_hook_config :: Breeze.Runtime.Hook.config()
+
   @typedoc "A public Breeze server startup option."
   @type option ::
           {:view, module()}
@@ -111,6 +131,7 @@ defmodule Breeze.Server do
           | {:global_keybindings, list()}
           | {:inspector, boolean() | keyword()}
           | {:logger, false | :attach | :replace | keyword()}
+          | {:runtime_hooks, [runtime_hook_config()]}
           | {:render_errors, keyword()}
 
   @doc """
@@ -165,6 +186,29 @@ defmodule Breeze.Server do
   end
 
   @doc false
+  @spec runtime_state(pid(), keyword()) ::
+          {:ok, Breeze.Runtime.State.t()} | {:error, term()}
+  def runtime_state(pid, opts \\ []) when is_pid(pid) and is_list(opts) do
+    GenServer.call(pid, {:runtime_state, opts}, Keyword.get(opts, :call_timeout, :infinity))
+  end
+
+  @doc false
+  def display_frame(pid, frame, opts \\ [])
+      when is_pid(pid) and (frame == :live or is_map(frame)) and is_list(opts) do
+    GenServer.call(pid, {:display_frame, frame, opts}, :infinity)
+  end
+
+  @doc false
+  def pause_runtime(pid) when is_pid(pid) do
+    GenServer.call(pid, :pause_runtime, :infinity)
+  end
+
+  @doc false
+  def replace_state(pid, %Breeze.Runtime.State{} = runtime_state) when is_pid(pid) do
+    GenServer.call(pid, {:replace_state, runtime_state}, :infinity)
+  end
+
+  @doc false
   def dispatch_live_input(pid, child_id, input, opts \\ [])
       when is_pid(pid) and is_binary(child_id) do
     GenServer.call(pid, {:live_input, child_id, input, opts})
@@ -209,6 +253,13 @@ defmodule Breeze.Server do
     case Keyword.get(opts, key, []) do
       group when is_list(group) -> group
       _other -> []
+    end
+  end
+
+  defp runtime_hook_configs(opts) do
+    case Keyword.get(opts, :runtime_hooks, []) do
+      configs when is_list(configs) -> configs
+      other -> raise ArgumentError, ":runtime_hooks must be a list, got: #{inspect(other)}"
     end
   end
 
@@ -301,6 +352,16 @@ defmodule Breeze.Server do
         if remote_inspector_enabled?, do: :attach, else: false
       end
 
+    runtime_hooks =
+      Hook.init(
+        runtime_hook_configs(opts) ++ Breeze.Inspector.page_runtime_hooks(inspector_config),
+        %{
+          server_pid: self(),
+          view: view,
+          screen: terminal.size
+        }
+      )
+
     if remote_inspector_enabled? do
       _ = Breeze.RemoteInspector.ensure_app_distribution(view: view)
     end
@@ -389,7 +450,10 @@ defmodule Breeze.Server do
         frame: %State.Frame{last_render_at: System.monotonic_time(:millisecond)},
         debug: %State.Debug{},
         inspector_state: %State.Inspector{config: Keyword.get(opts, :inspector, false)},
-        rendered: %State.Rendered{tracking_table: RenderTracking.new_table()}
+        rendered: %State.Rendered{
+          tracking_table: RenderTracking.new_table(),
+          runtime_hooks: runtime_hooks
+        }
       }
 
     state = maybe_start_reloader(state)
@@ -412,9 +476,81 @@ defmodule Breeze.Server do
     {:reply, Debug.snapshot(state), state}
   end
 
+  def handle_call({:display_frame, :live, _opts}, _from, state) do
+    {:reply, :ok, restore_live_frame(state, :frame_display_restore)}
+  end
+
+  def handle_call({:display_frame, _frame, _opts}, _from, %{crash: crash} = state)
+      when not is_nil(crash) do
+    {:reply, {:error, :crash_active}, state}
+  end
+
+  def handle_call({:display_frame, frame, opts}, _from, state) do
+    case FrameDisplay.normalize(frame) do
+      {:ok, frame} ->
+        state =
+          state
+          |> FrameDisplay.activate(frame, Keyword.get(opts, :owner))
+          |> render_frame()
+
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(:pause_runtime, _from, %{crash: crash} = state) when not is_nil(crash) do
+    {:reply, {:error, :crash_active}, state}
+  end
+
+  def handle_call(:pause_runtime, _from, state) do
+    {:reply, :ok, FrameDisplay.pause_current(state)}
+  end
+
+  def handle_call(
+        {:replace_state, %Breeze.Runtime.State{} = runtime_state},
+        _from,
+        state
+      ) do
+    case replace_runtime_state(state, runtime_state) do
+      {:ok, state} -> {:reply, :ok, state}
+      {:error, reason, state} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:runtime_state, _opts}, _from, state)
+      when not is_nil(state.frame.display) do
+    {:reply, {:error, :frame_display_active}, state}
+  end
+
+  def handle_call({:runtime_state, opts}, _from, state) do
+    {:reply, Breeze.Runtime.State.capture_server(state, opts), state}
+  end
+
+  def handle_call({:live_snapshot, _child_id, _opts}, _from, state)
+      when not is_nil(state.frame.display) do
+    {:reply, {:error, :frame_display_active}, state}
+  end
+
   def handle_call({:live_snapshot, child_id, opts}, _from, state) do
     {reply, state} = render_live_snapshot(state, child_id, opts)
     {:reply, reply, state}
+  end
+
+  def handle_call(
+        {:live_input, child_id, input, opts},
+        _from,
+        %{frame: %{resume_on_input?: true}} = state
+      ) do
+    state = resume_frame_for_interaction(state)
+    {reply, state} = dispatch_live_child_input(state, child_id, input, opts)
+    {:reply, reply, state}
+  end
+
+  def handle_call({:live_input, _child_id, _input, _opts}, _from, state)
+      when not is_nil(state.frame.display) do
+    {:reply, {:error, :frame_display_active}, state}
   end
 
   def handle_call({:live_input, child_id, input, opts}, _from, state) do
@@ -431,10 +567,23 @@ defmodule Breeze.Server do
   end
 
   def handle_call(:focused_implicit_meta, _from, state) do
-    {:reply, focused_implicit_meta(state), state}
+    metadata = if is_nil(state.frame.display), do: focused_implicit_meta(state), else: %{}
+    {:reply, metadata, state}
   end
 
   @impl true
+  def handle_cast({:live_snapshot, child_id, recipient, ref, _opts}, state)
+      when not is_nil(state.frame.display) do
+    if is_pid(recipient) do
+      send(
+        recipient,
+        {:breeze_live_snapshot, ref, child_id, {:error, :frame_display_active}}
+      )
+    end
+
+    {:noreply, state}
+  end
+
   def handle_cast({:live_snapshot, child_id, recipient, ref, opts}, state) do
     if is_pid(recipient) do
       {reply, state} = render_live_snapshot(state, child_id, opts)
@@ -492,16 +641,25 @@ defmodule Breeze.Server do
   end
 
   @impl true
+  def handle_info(
+        {reader, {:data, data}},
+        %{reader: reader, frame: %{resume_on_input?: true}} = state
+      ) do
+    {:noreply, state |> resume_frame_for_interaction() |> enqueue_reader_data(data)}
+  end
+
+  def handle_info({reader, {:data, _data}}, %{reader: reader, frame: %{display: display}} = state)
+      when not is_nil(display) do
+    {:noreply,
+     update_input(state,
+       queued_input: :queue.new(),
+       flush_scheduled?: false,
+       render_after_flush?: false
+     )}
+  end
+
   def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
-    started_at = System.monotonic_time(:microsecond)
-
-    state =
-      state
-      |> Input.enqueue(Breeze.Input.decode(data))
-      |> Debug.put_stat(:last_input_us, System.monotonic_time(:microsecond) - started_at)
-      |> schedule_input_flush()
-
-    {:noreply, state}
+    {:noreply, enqueue_reader_data(state, data)}
   end
 
   def handle_info({reader, {:signal, :winch}}, %{reader: reader, crash: crash} = state)
@@ -510,12 +668,26 @@ defmodule Breeze.Server do
     {:noreply, render_crash(%{state | terminal: terminal}, force_full_redraw?: true)}
   end
 
+  def handle_info(
+        {reader, {:signal, :winch}},
+        %{reader: reader, frame: %{display: display}} = state
+      )
+      when not is_nil(display) do
+    state =
+      state
+      |> Map.put(:terminal, resize_terminal(state))
+      |> update_frame(last_payload: nil, last_lines: nil, last_overlays: [])
+      |> render_frame()
+
+    {:noreply, state}
+  end
+
   def handle_info({reader, {:signal, :winch}}, %{reader: reader} = state) do
     terminal = resize_terminal(state)
     state = %{state | terminal: terminal}
 
     case safe_call(fn ->
-           Breeze.ChildServer.dispatch_info(state.view_pid, :resize, terminal)
+           Breeze.ChildServer.dispatch_info(state.view_pid, :resize, terminal, invalidate: false)
          end) do
       {:ok, {:stop, _focused}} ->
         stop(state)
@@ -545,6 +717,11 @@ defmodule Breeze.Server do
     {:noreply, state}
   end
 
+  def handle_info(:child_invalidated, %{frame: %{display: display}} = state)
+      when not is_nil(display) do
+    {:noreply, render_frame(Debug.increment_stat(state, :child_invalidated_count))}
+  end
+
   def handle_info(:child_invalidated, state) do
     state = Debug.increment_stat(state, :child_invalidated_count)
     {:noreply, maybe_render_base(state, :child_invalidated)}
@@ -553,6 +730,18 @@ defmodule Breeze.Server do
   def handle_info({:child_invalidated, _child_id}, %{crash: crash} = state)
       when not is_nil(crash) do
     {:noreply, state}
+  end
+
+  def handle_info({:child_invalidated, child_id}, %{frame: %{display: display}} = state)
+      when not is_nil(display) do
+    state =
+      if debug_child_id?(child_id) do
+        state
+      else
+        Debug.increment_stat(state, :child_invalidated_count)
+      end
+
+    {:noreply, render_frame(state)}
   end
 
   def handle_info({:child_invalidated, child_id}, state) do
@@ -564,6 +753,21 @@ defmodule Breeze.Server do
       end
 
     {:noreply, maybe_render_invalidated_child(state, child_id)}
+  end
+
+  def handle_info(@flush_input_batch, %{frame: %{display: display}} = state)
+      when not is_nil(display) do
+    state =
+      state
+      |> Debug.increment_stat(:flush_input_batch_count)
+      |> update_input(
+        flush_scheduled?: false,
+        queued_input: :queue.new(),
+        render_after_flush?: false
+      )
+      |> render_frame()
+
+    {:noreply, state}
   end
 
   def handle_info(@flush_input_batch, state) do
@@ -584,25 +788,55 @@ defmodule Breeze.Server do
     end
   end
 
-  def handle_info(:animation_tick, %{frame: %{decorations: []}} = state) do
+  def handle_info(
+        {:animation_tick, generation},
+        %{frame: %{animation_generation: generation, display: display}} = state
+      )
+      when not is_nil(display) do
     state = Debug.increment_stat(state, :animation_tick_count)
-    {:noreply, %{state | frame: %{state.frame | animation_timer: nil, next_tick_at: nil}}}
+
+    {:noreply,
+     update_frame(state,
+       animation_timer: nil,
+       animation_generation: nil,
+       next_tick_at: nil
+     )}
   end
 
-  def handle_info(:animation_tick, state) do
+  def handle_info(
+        {:animation_tick, generation},
+        %{frame: %{animation_generation: generation, decorations: []}} = state
+      ) do
+    state = Debug.increment_stat(state, :animation_tick_count)
+
+    {:noreply,
+     update_frame(state,
+       animation_timer: nil,
+       animation_generation: nil,
+       next_tick_at: nil
+     )}
+  end
+
+  def handle_info(
+        {:animation_tick, generation},
+        %{frame: %{animation_generation: generation}} = state
+      ) do
     started_at = System.monotonic_time(:microsecond)
     state = Debug.increment_stat(state, :animation_tick_count)
 
     state =
       state
-      |> update_frame(animation_timer: nil, next_tick_at: nil)
+      |> update_frame(animation_timer: nil, animation_generation: nil, next_tick_at: nil)
       |> advance_decorations()
       |> render_frame()
       |> Debug.put_stat(:last_animation_us, System.monotonic_time(:microsecond) - started_at)
       |> schedule_animation()
+      |> notify_runtime_hooks(:rendered, %{cause: :animation_tick, mode: :animation})
 
     {:noreply, state}
   end
+
+  def handle_info({:animation_tick, _stale_generation}, state), do: {:noreply, state}
 
   def handle_info(:debug_push, state) do
     state =
@@ -614,12 +848,21 @@ defmodule Breeze.Server do
   end
 
   def handle_info({:reload, :code_changed, _files}, state) do
-    {:noreply, reload_after_code_change(state)}
+    {:noreply, state |> FrameDisplay.clear() |> reload_after_code_change()}
   end
 
   def handle_info({:reload, :compile_error, reason, _files}, state) do
+    state = FrameDisplay.clear(state)
     shutdown_view_processes(state)
     {:noreply, enter_crash_state(state, crash_info(:error, reason, []))}
+  end
+
+  def handle_info(
+        {:event_reply, ref, _reply},
+        %{input: %{pending_ref: ref}, frame: %{display: display}} = state
+      )
+      when not is_nil(display) do
+    {:noreply, update_input(state, pending_ref: nil, pending_started_at: nil)}
   end
 
   def handle_info({:event_reply, ref, reply}, %{input: %{pending_ref: ref}} = state) do
@@ -630,6 +873,14 @@ defmodule Breeze.Server do
   end
 
   def handle_info({:event_reply, _ref, _reply}, state), do: {:noreply, state}
+
+  def handle_info(
+        {:DOWN, ref, :process, _pid, _reason},
+        %{frame: %{display_owner_ref: ref}} = state
+      )
+      when is_reference(ref) do
+    {:noreply, restore_live_frame(state, :frame_display_owner_down)}
+  end
 
   def handle_info({:DOWN, _ref, :process, pid, reason}, %{view_pid: pid} = state) do
     handle_root_view_down(reason, state)
@@ -679,6 +930,98 @@ defmodule Breeze.Server do
   defp inspector_enabled?(config), do: config not in [false, nil]
 
   defp update_rendered(state, updates), do: %{state | rendered: struct!(state.rendered, updates)}
+
+  defp runtime_hooks(state), do: state.rendered.runtime_hooks
+
+  defp put_runtime_hooks(state, hooks) when is_list(hooks),
+    do: update_rendered(state, runtime_hooks: hooks)
+
+  defp notify_runtime_hooks(state, event, metadata) do
+    case runtime_hooks(state) do
+      [] ->
+        state
+
+      hooks ->
+        put_runtime_hooks(state, Hook.notify(state, hooks, event, metadata))
+    end
+  end
+
+  defp resume_frame_for_interaction(state) do
+    state
+    |> FrameDisplay.release()
+    |> schedule_animation()
+  end
+
+  defp restore_live_frame(%{frame: %{display: nil}} = state, _cause), do: state
+
+  defp restore_live_frame(state, cause) do
+    state = FrameDisplay.clear(state)
+
+    if is_nil(state.crash) do
+      maybe_render_base(state, cause)
+    else
+      render_crash(state, force_full_redraw?: true)
+    end
+  end
+
+  defp enqueue_reader_data(state, data) do
+    started_at = System.monotonic_time(:microsecond)
+
+    state
+    |> Input.enqueue(Breeze.Input.decode(data))
+    |> Debug.put_stat(:last_input_us, System.monotonic_time(:microsecond) - started_at)
+    |> schedule_input_flush()
+  end
+
+  defp replace_runtime_state(
+         %{view: view} = state,
+         %Breeze.Runtime.State{
+           view: view,
+           root: %Breeze.Runtime.State.View{}
+         } = runtime_state
+       ) do
+    {state, replacement} = StateReplacement.prepare(state, runtime_state)
+
+    with {:ok, pid, focused, theme} <- start_root_view(state, replacement.root_state),
+         state <-
+           state
+           |> Map.put(:view_pid, pid)
+           |> Map.put(:focused, focused)
+           |> Map.put(:theme, theme),
+         {:ok, state} <- StateReplacement.start_children(state, replacement.children) do
+      state = maybe_render_base(state, :runtime_state_replaced)
+
+      if is_nil(state.crash) do
+        state = StateReplacement.restore_hooks(state, replacement.hooks)
+
+        {:ok, state}
+      else
+        failed_state =
+          state
+          |> StateReplacement.cleanup()
+          |> StateReplacement.restore_hooks(replacement.hooks)
+
+        {:error, :state_replacement_render_failed, failed_state}
+      end
+    else
+      {:error, reason, partial_state} ->
+        {:error, reason, failed_replacement_state(partial_state, replacement.hooks, reason)}
+
+      {:error, reason} ->
+        {:error, reason, failed_replacement_state(state, replacement.hooks, reason)}
+    end
+  end
+
+  defp replace_runtime_state(state, %Breeze.Runtime.State{view: view}) do
+    {:error, {:view_mismatch, state.view, view}, state}
+  end
+
+  defp failed_replacement_state(state, hooks, reason) do
+    state
+    |> StateReplacement.cleanup()
+    |> StateReplacement.restore_hooks(hooks)
+    |> enter_crash_state(Error.crash_info(:error, StateReplacement.error(reason), []))
+  end
 
   defp flush_input_batch(state) do
     Input.flush_batch(state, input_handlers())
@@ -939,7 +1282,8 @@ defmodule Breeze.Server do
     |> touch_interaction()
     |> safe_apply_input_reply(fn state ->
       Breeze.ChildServer.dispatch_input(state.view_pid, %{"mouse" => event},
-        live_children: state.children
+        live_children: state.children,
+        invalidate: false
       )
     end)
   end
@@ -1078,43 +1422,54 @@ defmodule Breeze.Server do
     debug_live_child_us = Debug.debug_live_child_us(result.child_timings)
     app_live_children = Debug.non_debug_child_timings(result.child_timings)
 
-    state
-    |> Debug.increment_stat(:render_base_count)
-    |> update_frame(base_output: base_output)
-    |> update_rendered(elements: viewports_from_acc(result.acc), boxes: result.acc.boxes)
-    |> Inspector.merge_render_data(result.acc, safe_root_metadata(state))
-    |> update_frame(decorations: decorations)
-    |> Map.put(:focused, result.focused)
-    |> update_frame(last_render_at: System.monotonic_time(:millisecond))
-    |> Debug.put_stat(:last_render_cause, result.cause)
-    |> Debug.put_stat(:last_root_snapshot_us, result.root_snapshot_us)
-    |> Debug.put_stat(
-      :last_root_snapshot_app_us,
-      max(result.root_snapshot_us - debug_live_child_us, 0)
-    )
-    |> Debug.put_stat(:last_live_children_us, Debug.sum_timing_us(result.child_timings))
-    |> Debug.put_stat(:last_live_children_app_us, Debug.sum_timing_us(app_live_children))
-    |> Debug.put_stat(:last_live_children, Debug.normalize_child_timings(app_live_children))
-    |> Debug.put_stat(:last_render_profile, Debug.summarize_profile(result.profile_entries))
-    |> Debug.put_stat(:last_reconcile_passes, 0)
-    |> Debug.put_stat(:last_reconcile_changed_ids, nil)
-    |> Debug.put_stat(:last_prepare_decorations_us, prepare_decorations_us)
-    |> Debug.put_stat(:last_render_base_us, render_base_us)
-    |> Debug.put_stat(
-      :last_render_base_app_us,
-      max(render_base_us - debug_live_child_us, 0)
-    )
-    |> render_frame()
-    |> schedule_animation()
+    state =
+      state
+      |> Debug.increment_stat(:render_base_count)
+      |> update_frame(base_output: base_output)
+      |> update_rendered(elements: viewports_from_acc(result.acc), boxes: result.acc.boxes)
+      |> Inspector.merge_render_data(result.acc, safe_root_metadata(state))
+      |> update_frame(decorations: decorations)
+      |> Map.put(:focused, result.focused)
+      |> update_frame(last_render_at: System.monotonic_time(:millisecond))
+      |> Debug.put_stat(:last_render_cause, result.cause)
+      |> Debug.put_stat(:last_root_snapshot_us, result.root_snapshot_us)
+      |> Debug.put_stat(
+        :last_root_snapshot_app_us,
+        max(result.root_snapshot_us - debug_live_child_us, 0)
+      )
+      |> Debug.put_stat(:last_live_children_us, Debug.sum_timing_us(result.child_timings))
+      |> Debug.put_stat(:last_live_children_app_us, Debug.sum_timing_us(app_live_children))
+      |> Debug.put_stat(:last_live_children, Debug.normalize_child_timings(app_live_children))
+      |> Debug.put_stat(:last_render_profile, Debug.summarize_profile(result.profile_entries))
+      |> Debug.put_stat(:last_reconcile_passes, 0)
+      |> Debug.put_stat(:last_reconcile_changed_ids, nil)
+      |> Debug.put_stat(:last_prepare_decorations_us, prepare_decorations_us)
+      |> Debug.put_stat(:last_render_base_us, render_base_us)
+      |> Debug.put_stat(
+        :last_render_base_app_us,
+        max(render_base_us - debug_live_child_us, 0)
+      )
+      |> render_frame()
+      |> schedule_animation()
+
+    notify_runtime_hooks(state, :rendered, %{cause: result.cause, mode: :full})
   end
 
   defp maybe_render_base(%{crash: crash} = state, _cause) when not is_nil(crash), do: state
+
+  defp maybe_render_base(%{frame: %{display: display}} = state, _cause)
+       when not is_nil(display),
+       do: render_frame(state)
 
   defp maybe_render_base(%{view_pid: pid} = state, cause) do
     state = prune_dead_children(state)
 
     if Process.alive?(pid), do: render_base(state, cause), else: state
   end
+
+  defp maybe_render_invalidated_child(%{frame: %{display: display}} = state, _child_id)
+       when not is_nil(display),
+       do: render_frame(state)
 
   defp maybe_render_invalidated_child(state, child_id) do
     case render_invalidated_child(state, child_id) do
@@ -1400,6 +1755,8 @@ defmodule Breeze.Server do
     with true <- patchable_live_child?(child_id),
          %{pid: pid} when is_pid(pid) <- Map.get(state.children, child_id),
          true <- Process.alive?(pid) do
+      opts = Keyword.put(opts, :invalidate, false)
+
       case safe_call(fn -> Breeze.ChildServer.dispatch_input(pid, input, opts) end) do
         {:ok, reply} ->
           reply = namespace_child_reply(reply, child_id)
@@ -1512,7 +1869,51 @@ defmodule Breeze.Server do
     {:error, {:decorations_present, %{child: child_decorations, tracked: tracked_decorations}}}
   end
 
-  defp validate_child_patch_render(_ctx), do: :ok
+  defp validate_child_patch_render(%{state: state, viewport: viewport}) do
+    decorations = state.frame.decorations
+    overlays = state.frame.last_overlays || []
+
+    cond do
+      Enum.any?(decorations, &decoration_intersects_viewport?(&1, viewport)) ->
+        {:error, :decoration_intersects_patch}
+
+      Enum.any?(overlays, &overlay_intersects_viewport?(&1, viewport)) ->
+        {:error, :overlay_intersects_patch}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp decoration_intersects_viewport?(%{layout: layout}, viewport),
+    do: rectangles_intersect?(layout, viewport)
+
+  defp decoration_intersects_viewport?(_decoration, _viewport), do: true
+
+  defp overlay_intersects_viewport?(%{y: y} = overlay, %{top: top, height: height})
+       when is_integer(y) and is_integer(top) and is_integer(height) and height > 0 do
+    overlay_height = Map.get(overlay, :height, 1)
+
+    overlay_height =
+      if is_integer(overlay_height) and overlay_height > 0, do: overlay_height, else: 1
+
+    y < top + height and top < y + overlay_height
+  end
+
+  defp overlay_intersects_viewport?(_overlay, _viewport), do: true
+
+  defp rectangles_intersect?(
+         %{left: left_a, top: top_a, width: width_a, height: height_a},
+         %{left: left_b, top: top_b, width: width_b, height: height_b}
+       )
+       when is_integer(left_a) and is_integer(top_a) and is_integer(width_a) and width_a > 0 and
+              is_integer(height_a) and height_a > 0 and is_integer(left_b) and is_integer(top_b) and
+              is_integer(width_b) and width_b > 0 and is_integer(height_b) and height_b > 0 do
+    left_a < left_b + width_b and left_b < left_a + width_a and top_a < top_b + height_b and
+      top_b < top_a + height_a
+  end
+
+  defp rectangles_intersect?(_left, _right), do: true
 
   defp write_invalidated_child_patch(ctx) do
     fragment = invalidated_child_fragment(ctx)
@@ -1520,14 +1921,31 @@ defmodule Breeze.Server do
     payload = Frame.child_patch_payload(fragment, ctx.viewport)
     terminal = Termite.Terminal.write(ctx.state.terminal, payload)
     written_at = System.monotonic_time(:microsecond)
+    screen_width = ctx.state.terminal.size.width
 
-    ctx.state
-    |> Map.put(:terminal, terminal)
-    |> update_frame(
-      last_payload: nil,
-      last_lines: Frame.invalidate_patched_rows(ctx.state.frame.last_lines, ctx.viewport)
-    )
-    |> Debug.put_child_patch_stats(ctx, fragment, composed_at, written_at)
+    last_lines =
+      (ctx.state.frame.last_lines ||
+         Frame.normalize_lines(ctx.state.frame.base_output, ctx.state.terminal.size.height))
+      |> Frame.patch_lines(fragment, ctx.viewport, screen_width)
+
+    base_output =
+      Frame.patch_output(ctx.state.frame.base_output, fragment, ctx.viewport, screen_width)
+
+    state =
+      ctx.state
+      |> Map.put(:terminal, terminal)
+      |> update_frame(
+        base_output: base_output,
+        last_payload: nil,
+        last_lines: last_lines
+      )
+      |> Debug.put_child_patch_stats(ctx, fragment, composed_at, written_at)
+
+    notify_runtime_hooks(state, :rendered, %{
+      cause: :child_patch,
+      mode: :patch,
+      child_id: ctx.child_id
+    })
   end
 
   defp invalidated_child_fragment(ctx) do
@@ -1546,11 +1964,13 @@ defmodule Breeze.Server do
     {output, decorations} =
       apply_decorations(state.frame.base_output, state.frame.decorations, state)
 
-    overlays = terminal_overlays(decorations, state)
+    live_overlays = terminal_overlays(decorations, state)
 
-    lines =
+    live_lines =
       output
       |> Frame.normalize_lines(state.terminal.size.height)
+
+    {lines, overlays} = FrameDisplay.resolve(state, live_lines, live_overlays)
 
     frame_payload =
       Frame.build_payload(
@@ -1702,6 +2122,9 @@ defmodule Breeze.Server do
 
   defp render_fragment_terminal(terminal, _layout), do: terminal
 
+  defp schedule_animation(%{frame: %{display: display}} = state) when not is_nil(display),
+    do: state
+
   defp schedule_animation(%{frame: %{decorations: []}} = state), do: state
 
   defp schedule_animation(state) do
@@ -1732,13 +2155,15 @@ defmodule Breeze.Server do
   end
 
   defp put_animation_timer(state, next_tick_at, delay) do
-    timer = Process.send_after(self(), :animation_tick, delay)
+    generation = make_ref()
+    timer = Process.send_after(self(), {:animation_tick, generation}, delay)
 
     %{
       state
       | frame: %{
           state.frame
           | animation_timer: timer,
+            animation_generation: generation,
             next_tick_at: next_tick_at
         }
     }
@@ -1915,6 +2340,7 @@ defmodule Breeze.Server do
   defp live_placeholder_style(_child, _state, _terminal), do: %{}
 
   defp stop(state) do
+    state = FrameDisplay.clear(state)
     shutdown_root_view(state.child_view_supervisor, state.view_pid)
 
     terminal =
@@ -1930,6 +2356,7 @@ defmodule Breeze.Server do
 
   @impl true
   def terminate(_reason, state) do
+    state = FrameDisplay.clear(state)
     shutdown_view_processes(state)
 
     if state.logger_collector do
@@ -2012,57 +2439,11 @@ defmodule Breeze.Server do
 
   defp live_child_id_for_focus(_state, _focused), do: nil
 
-  defp safe_call(fun) when is_function(fun, 0) do
-    try do
-      {:ok, fun.()}
-    rescue
-      exception ->
-        {:crash, crash_info(:error, exception, __STACKTRACE__)}
-    catch
-      :exit, reason ->
-        {:crash, crash_info(:exit, reason, __STACKTRACE__)}
-
-      kind, reason ->
-        {:crash, crash_info(kind, reason, __STACKTRACE__)}
-    end
-  end
-
-  defp crash_info(kind, reason, stacktrace) do
-    {kind, reason, stacktrace} = normalize_crash_info(kind, reason, stacktrace)
-
-    %{
-      kind: kind,
-      reason: reason,
-      stacktrace: stacktrace,
-      selected_index: nil,
-      focused: "error-stacktrace",
-      implicit_state: %{}
-    }
-  end
-
-  defp normalize_crash_info(:exit, {{%_exception{} = exception, stacktrace}, _call}, _stacktrace)
-       when is_list(stacktrace) do
-    {:error, exception, stacktrace}
-  end
-
-  defp normalize_crash_info(:exit, {%_exception{} = exception, stacktrace}, _stacktrace)
-       when is_list(stacktrace) do
-    {:error, exception, stacktrace}
-  end
-
-  defp normalize_crash_info(:exit, {{{kind, reason, stacktrace}, _location}, _call}, _stacktrace)
-       when is_list(stacktrace) do
-    {kind, reason, stacktrace}
-  end
-
-  defp normalize_crash_info(:exit, {kind, reason, stacktrace}, _stacktrace)
-       when is_list(stacktrace) do
-    {kind, reason, stacktrace}
-  end
-
-  defp normalize_crash_info(kind, reason, stacktrace), do: {kind, reason, stacktrace}
+  defp safe_call(fun), do: Error.safe_call(fun)
+  defp crash_info(kind, reason, stacktrace), do: Error.crash_info(kind, reason, stacktrace)
 
   defp enter_crash_state(state, crash) do
+    state = FrameDisplay.clear(state)
     cancel_timer(state.frame.animation_timer)
     terminal = apply_mouse_mode(state.terminal, false)
     crash = Error.prepare_crash(state.render_errors, state.view, crash, terminal.size)
@@ -2076,7 +2457,12 @@ defmodule Breeze.Server do
       flush_scheduled?: false,
       queued_input: :queue.new()
     )
-    |> update_frame(animation_timer: nil, next_tick_at: nil, decorations: [])
+    |> update_frame(
+      animation_timer: nil,
+      animation_generation: nil,
+      next_tick_at: nil,
+      decorations: []
+    )
     |> Debug.put_stat(:last_render_cause, :crash)
     |> render_crash(force_full_redraw?: true)
   end
@@ -2211,6 +2597,7 @@ defmodule Breeze.Server do
   defp restart_root(state, cause) do
     state =
       state
+      |> FrameDisplay.clear()
       |> restore_terminal_after_crash_scrollback()
       |> then(&%{&1 | terminal: apply_mouse_mode(&1.terminal, &1.mouse_mode)})
 
@@ -2252,21 +2639,27 @@ defmodule Breeze.Server do
   defp apply_mouse_mode(terminal, opts) when is_list(opts),
     do: Termite.Screen.enable_mouse(terminal, opts)
 
-  defp start_root_view(state) do
+  defp start_root_view(state, runtime_state \\ nil) do
     session = self()
+
+    child_opts =
+      [
+        view: state.view,
+        start_opts: state.start_opts || [],
+        terminal: state.terminal,
+        theme: state.theme,
+        process_flags: state.child_process_flags || [],
+        server: self(),
+        render_tree?: Breeze.Inspector.enabled?(state),
+        global_keybindings: state.input.global_keybindings || [],
+        invalidate: fn -> send(session, :child_invalidated) end
+      ]
+      |> maybe_put_runtime_state(runtime_state)
 
     case safe_call(fn ->
            Breeze.ChildViewSupervisor.start_child(
              state.child_view_supervisor,
-             view: state.view,
-             start_opts: state.start_opts || [],
-             terminal: state.terminal,
-             theme: state.theme,
-             process_flags: state.child_process_flags || [],
-             server: self(),
-             render_tree?: Breeze.Inspector.enabled?(state),
-             global_keybindings: state.input.global_keybindings || [],
-             invalidate: fn -> send(session, :child_invalidated) end
+             child_opts
            )
          end) do
       {:ok, {:ok, pid}} ->
@@ -2293,6 +2686,11 @@ defmodule Breeze.Server do
         {:error, crash}
     end
   end
+
+  defp maybe_put_runtime_state(opts, nil), do: opts
+
+  defp maybe_put_runtime_state(opts, runtime_state),
+    do: Keyword.put(opts, :runtime_state, runtime_state)
 
   defp shutdown_root_view(_supervisor, nil), do: :ok
 
@@ -2660,7 +3058,9 @@ defmodule Breeze.Server do
         nil
       else
         case safe_call(fn ->
-               Breeze.ChildServer.dispatch_global_keybindings(state.view_pid, key)
+               Breeze.ChildServer.dispatch_global_keybindings(state.view_pid, key,
+                 invalidate: false
+               )
              end) do
           {:ok, {:noreply, _focused, false}} -> nil
           {:ok, reply} -> reply
@@ -2680,7 +3080,7 @@ defmodule Breeze.Server do
       state
       |> focused_child_chain()
       |> Enum.reduce_while(nil, fn {child_id, %{pid: pid}}, _acc ->
-        case safe_call(fn -> Breeze.ChildServer.dispatch_input(pid, key) end) do
+        case safe_call(fn -> Breeze.ChildServer.dispatch_input(pid, key, invalidate: false) end) do
           {:ok, reply} ->
             reply = namespace_child_reply(reply, child_id)
 
@@ -2704,7 +3104,8 @@ defmodule Breeze.Server do
                if state.focused, do: Breeze.ChildServer.set_focus(state.view_pid, state.focused)
 
                Breeze.ChildServer.dispatch_input(state.view_pid, key,
-                 skip_global: focused_implicit_captures_key?(state, key)
+                 skip_global: focused_implicit_captures_key?(state, key),
+                 invalidate: false
                )
              end) do
           {:ok, reply} -> reply

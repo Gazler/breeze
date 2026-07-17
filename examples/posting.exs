@@ -275,7 +275,7 @@ defmodule Posting do
           <box>{@breeze.theme.name}</box>
         </box>
       </.modal>
-      <box :if={@show_debug} style="fixed right-0 bottom-0 width-42 height-24">
+      <box :if={@show_debug} style="fixed right-0 bottom-0 width-42 height-24 layer-50">
         <live id="debug" view={Breeze.Debug} start_opts={[width: 42, height: 24]}>
         </live>
       </box>
