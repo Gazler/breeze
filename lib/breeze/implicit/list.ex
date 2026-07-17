@@ -51,7 +51,7 @@ defmodule Breeze.Implicit.List do
        values: values,
        selected: selected,
        selected_index: selected_index,
-       offset: list_offset(root_attrs, last_state, cache),
+       offset: list_offset(root_attrs, last_state, cache, selected_index),
        loop: loop,
        scroll_padding: scroll_padding,
        width: width
@@ -197,12 +197,27 @@ defmodule Breeze.Implicit.List do
     |> Enum.map(& &1.value)
   end
 
-  defp list_offset(root_attrs, last_state, cache) do
-    root_attrs
-    |> Map.get(:"list-offset")
-    |> Common.normalize_int(Map.get(last_state, :offset, 0))
-    |> min(max(cache.total_rows - 1, 0))
+  defp list_offset(root_attrs, last_state, cache, selected_index) do
+    offset =
+      if controlled_selection_changed?(root_attrs, last_state) do
+        if is_integer(selected_index), do: row_start(cache, selected_index), else: 0
+      else
+        root_attrs
+        |> Map.get(:"list-offset")
+        |> Common.normalize_int(Map.get(last_state, :offset, 0))
+      end
+
+    min(offset, max(cache.total_rows - 1, 0))
   end
+
+  defp controlled_selection_changed?(
+         %{:"list-selected" => selected},
+         %{selected: previous_selected}
+       )
+       when not is_nil(selected) and not is_nil(previous_selected),
+       do: selected != previous_selected
+
+  defp controlled_selection_changed?(_root_attrs, _last_state), do: false
 
   defp pick_selected_index(_values, last_state, root_attrs, cache) do
     selected = Map.get(last_state, :selected)

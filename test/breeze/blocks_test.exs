@@ -1143,6 +1143,26 @@ defmodule Breeze.BlocksTest do
     refute box.content =~ "Item 7"
   end
 
+  test "list virtual window scrolls to a changed controlled selection" do
+    {:ok, pid} = ChildServer.start(view: VirtualListExample, start_opts: [])
+
+    {:ok, _acc, _box} = ChildServer.render(pid, focused: "items", implicit_state: %{})
+
+    assert {Breeze.Implicit.List, %{selected: "item-5", offset: 4}} =
+             ChildServer.metadata(pid).implicit_state["items"]
+
+    assert :ok = ChildServer.update_assigns(pid, selected: "item-0")
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "items", implicit_state: %{})
+
+    assert box.content =~ "Item 0"
+    assert box.content =~ "Item 1"
+    assert box.content =~ "Item 2"
+    refute box.content =~ "Item 3"
+
+    assert {Breeze.Implicit.List, %{selected: "item-0", offset: 0}} =
+             ChildServer.metadata(pid).implicit_state["items"]
+  end
+
   test "tree renders visible rows with collapsed and expanded prefixes" do
     {:ok, pid} = ChildServer.start(view: TreeExample, start_opts: [])
 
