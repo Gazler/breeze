@@ -32,9 +32,13 @@ defmodule Breeze.Implicit.Tree do
     selected = Common.selected_value(values, selected_index)
 
     offset =
-      root_attrs
-      |> Map.get(:"tree-offset")
-      |> Common.normalize_int(Map.get(last_state, :offset, 0))
+      if controlled_selection_changed?(root_attrs, last_state) do
+        selected_index || 0
+      else
+        root_attrs
+        |> Map.get(:"tree-offset")
+        |> Common.normalize_int(Map.get(last_state, :offset, 0))
+      end
       |> min(max(length(values) - 1, 0))
 
     {:ok,
@@ -274,6 +278,15 @@ defmodule Breeze.Implicit.Tree do
   end
 
   defp selected_index_source(_root_attrs, _last_state), do: nil
+
+  defp controlled_selection_changed?(
+         %{:"tree-selected" => selected},
+         %{selected: previous_selected}
+       )
+       when not is_nil(selected) and not is_nil(previous_selected),
+       do: selected != previous_selected
+
+  defp controlled_selection_changed?(_root_attrs, _last_state), do: false
 
   defp selected_index_from_source({:value, value}, values, rows, expanded) do
     index_or_visible_ancestor(values, rows, expanded, value)

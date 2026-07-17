@@ -1181,6 +1181,25 @@ defmodule Breeze.BlocksTest do
     refute box.content =~ "file-5"
   end
 
+  test "tree virtual window scrolls to a changed controlled selection" do
+    {:ok, pid} = ChildServer.start(view: VirtualTreeExample, start_opts: [])
+
+    {:ok, _acc, _box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    assert {Breeze.Implicit.Tree, %{selected: "file-3", offset: 2}} =
+             ChildServer.metadata(pid).implicit_state["files"]
+
+    assert :ok = ChildServer.update_assigns(pid, selected: "file-0")
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
+
+    assert box.content =~ "file-0"
+    assert box.content =~ "file-1"
+    refute box.content =~ "file-2"
+
+    assert {Breeze.Implicit.Tree, %{selected: "file-0", offset: 0}} =
+             ChildServer.metadata(pid).implicit_state["files"]
+  end
+
   test "tree virtual window can use implicit-owned expanded state" do
     {:ok, pid} = ChildServer.start(view: VirtualUncontrolledTreeExample, start_opts: [])
 
