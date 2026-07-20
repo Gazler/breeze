@@ -25,6 +25,10 @@ defmodule Breeze.Inspector do
 
       inspector: [toggle_key: "F9", move_key: "F10", remote: false]
 
+  Applications can also register custom pages for the remote inspector:
+
+      inspector: [pages: [MyApp.InspectorPage]]
+
   The supported options are:
 
     * `:toggle_key` - key used to show or hide the inspector. Defaults to
@@ -32,6 +36,7 @@ defmodule Breeze.Inspector do
     * `:move_key` - key used to move the local panel. Defaults to `"PageUp"`.
     * `:remote` - publishes snapshots for the remote inspector. Defaults to
       `true`.
+    * `:pages` - a list of page modules published to the remote inspector.
 
   ## Available information
 
@@ -96,6 +101,14 @@ defmodule Breeze.Inspector do
 
   @doc false
   def remote?(state), do: Keyword.get(config(state), :remote, true)
+
+  @doc false
+  def pages(state) do
+    state
+    |> config()
+    |> Keyword.get(:pages, [])
+    |> Breeze.RemoteInspector.Pages.build()
+  end
 
   @doc false
   def panel_position(state),
@@ -221,6 +234,7 @@ defmodule Breeze.Inspector do
       },
       render_tree?: not is_nil(rendered_field(state, :render_tree, :rendered_render_tree)),
       render_tree_kinds: render_tree_kinds(state),
+      pages: pages(state),
       toggle_key: toggle_key(state),
       move_key: move_key(state),
       panel_position: panel_position(state),

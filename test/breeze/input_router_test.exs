@@ -333,6 +333,8 @@ defmodule Breeze.InputRouterTest do
     server = router_state.server_pid
     supervisor = router_state.child_view_supervisor
 
+    assert is_nil(router_state.remote_inspector_supervisor)
+
     server_state =
       wait_until(fn ->
         state = :sys.get_state(server)
@@ -344,6 +346,7 @@ defmodule Breeze.InputRouterTest do
 
     assert server_state.child_view_supervisor == supervisor
     refute server_state.owns_child_view_supervisor?
+    assert is_nil(server_state.remote_inspector_supervisor)
 
     supervised_pids =
       supervisor

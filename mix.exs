@@ -88,6 +88,7 @@ defmodule Breeze.MixProject do
         "Development tools": [
           Breeze.IO,
           Breeze.Inspector,
+          Breeze.RemoteInspector.Page,
           Breeze.Server.Diagnostics,
           Breeze.Logger,
           Breeze.Logger.Collector,

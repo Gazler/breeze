@@ -79,7 +79,7 @@ defmodule Breeze.RemoteInspector do
 
   def register_app(pid) when is_pid(pid) do
     ensure_registry_started()
-    :pg.join(@app_group, pid)
+    :ok = :pg.join(@app_group, pid)
   end
 
   def app_members do
@@ -160,6 +160,23 @@ defmodule Breeze.RemoteInspector do
         true -> remote_server_pid()
         _ -> nil
       end
+  end
+
+  @doc false
+  def connect_app_to_inspector do
+    case default_inspector_node(node()) do
+      nil ->
+        :disabled
+
+      target when target == node() ->
+        :disabled
+
+      _target ->
+        case ensure_remote_server_pid() do
+          pid when is_pid(pid) -> {:ok, pid}
+          _ -> :retry
+        end
+    end
   end
 
   defp maybe_connect_default_inspector_node do

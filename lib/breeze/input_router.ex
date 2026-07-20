@@ -14,6 +14,7 @@ defmodule Breeze.InputRouter do
     :reader,
     :server_pid,
     :child_view_supervisor,
+    :remote_inspector_supervisor,
     :halt_fun,
     :theme_probe,
     :iex_shell_proxy,
@@ -56,12 +57,14 @@ defmodule Breeze.InputRouter do
       maybe_complete_initial_theme_probe(terminal, Keyword.get(opts, :theme))
 
     {:ok, child_view_supervisor} = Breeze.ChildViewSupervisor.start_link()
+    remote_inspector_supervisor = maybe_start_remote_inspector_supervisor(opts)
 
     server_opts =
       opts
       |> Keyword.put(:terminal, terminal)
       |> Keyword.put(:input_router, self())
       |> put_internal(:child_view_supervisor, child_view_supervisor)
+      |> put_internal(:remote_inspector_supervisor, remote_inspector_supervisor)
 
     {:ok, server_pid} = Breeze.Server.start_app_link(server_opts)
     Process.monitor(server_pid)
@@ -71,6 +74,7 @@ defmodule Breeze.InputRouter do
       reader: reader,
       server_pid: server_pid,
       child_view_supervisor: child_view_supervisor,
+      remote_inspector_supervisor: remote_inspector_supervisor,
       halt_fun: Keyword.get_lazy(opts, :halt_fun, &default_halt_fun/0),
       alt_screen?: alt_screen?,
       enhanced_keyboard?: enhanced_keyboard?,
@@ -146,11 +150,21 @@ defmodule Breeze.InputRouter do
 
   @impl true
   def terminate(_reason, state) do
+    Breeze.RemoteInspector.Supervisor.stop(state.remote_inspector_supervisor)
     Breeze.ChildViewSupervisor.stop(state.child_view_supervisor)
     IExShellProxy.stop(state.iex_shell_proxy)
     SilentGroupLeader.stop(state.silent_group_leader)
     state.halt_fun.()
     :ok
+  end
+
+  defp maybe_start_remote_inspector_supervisor(opts) do
+    inspector = %{inspector: Keyword.get(opts, :inspector, false)}
+
+    if Breeze.Inspector.enabled?(inspector) and Breeze.Inspector.remote?(inspector) do
+      {:ok, supervisor} = Breeze.RemoteInspector.Supervisor.start_link()
+      supervisor
+    end
   end
 
   defp stop_global_key?(key, state),
