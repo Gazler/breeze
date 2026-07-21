@@ -1867,6 +1867,7 @@ defmodule Breeze.Server do
 
   defp wrap_child_fragment(child_box, viewport, fill_style) do
     fill_style = fill_style || %{}
+    child_box = disable_rendered_child_cache(child_box)
 
     BackBreeze.Box.new(
       style:
@@ -1878,6 +1879,18 @@ defmodule Breeze.Server do
       children: [child_box]
     )
   end
+
+  defp disable_rendered_child_cache(%BackBreeze.Box{state: :rendered} = box) do
+    # BackBreeze's cache key for an already-rendered box does not include its
+    # layer map. Mark this snapshot as volatile so overlays cannot reuse the
+    # previous child patch while leaving its materialized content unchanged.
+    cache_marker =
+      BackBreeze.Box.new(content: %{BackBreeze.VirtualText.new("") | cache?: false})
+
+    %{box | children: [cache_marker | box.children]}
+  end
+
+  defp disable_rendered_child_cache(box), do: box
 
   defp live_placeholder_style(%{attrs: attrs}, state, terminal)
        when is_list(attrs) or is_map(attrs) do

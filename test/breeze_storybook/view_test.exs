@@ -914,6 +914,62 @@ defmodule Breeze.Storybook.ServerRenderingTest do
            end)
   end
 
+  test "storybook preview child patches dropdown highlight changes" do
+    {terminal, pid} = start_storybook_server!("dropdown.story.exs")
+
+    {preview_pid, viewport} = wait_for_preview_child(pid, "dropdown")
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)
+
+    assert {:noreply, "storybook-dropdown", _changed?} =
+             Breeze.ChildServer.set_focus(preview_pid, "storybook-dropdown")
+
+    :sys.replace_state(pid, fn state ->
+      %{state | focused: "storybook-preview::storybook-dropdown"}
+    end)
+
+    drain_terminal_writes()
+
+    assert {:noreply, "storybook-dropdown", true} =
+             Breeze.ChildServer.dispatch_input(preview_pid, "Enter")
+
+    wait_until(fn ->
+      match?(
+        {Breeze.Implicit.Dropdown, %{open?: true, highlighted_index: 1}},
+        Breeze.ChildServer.metadata(preview_pid).implicit_state["storybook-dropdown"]
+      )
+    end)
+
+    _writes = await_terminal_writes()
+    drain_terminal_writes()
+
+    assert {:noreply, "storybook-dropdown", true} =
+             Breeze.ChildServer.dispatch_input(preview_pid, "ArrowDown")
+
+    wait_until(fn ->
+      match?(
+        {Breeze.Implicit.Dropdown, %{open?: true, highlighted_index: 2}},
+        Breeze.ChildServer.metadata(preview_pid).implicit_state["storybook-dropdown"]
+      )
+    end)
+
+    writes =
+      wait_until(
+        fn ->
+          writes = drain_terminal_writes()
+          payload = IO.iodata_to_binary(writes)
+
+          if payload =~ ~r/\e\[7(?:;[0-9]+)*mPUT/, do: writes, else: false
+        end,
+        100
+      )
+
+    assert redraw_or_full_viewport_patch?(writes, viewport)
+    payload = IO.iodata_to_binary(writes)
+    assert payload =~ ~r/\e\[7(?:;[0-9]+)*mPUT/
+    refute payload =~ ~r/\e\[7(?:;[0-9]+)*mPOST/
+  end
+
   test "storybook preview child patches clear the full viewport height when preview tabs switch" do
     {terminal, pid} = start_storybook_server!("tabs.story.exs")
 
