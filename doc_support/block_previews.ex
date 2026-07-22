@@ -517,7 +517,7 @@ defmodule Breeze.Docs.BlockPreviews do
       assigns = Map.put(assigns, :value, "breeze@example.com")
 
       ~H"""
-      <.input id="preview-input" input-value={@value} style="width-34">{@value}</.input>
+      <.input id="preview-input" input-value={@value} class="w-34">{@value}</.input>
       """
     end
   end
@@ -549,7 +549,7 @@ defmodule Breeze.Docs.BlockPreviews do
       assigns = Map.put(assigns, :value, "Release notes\n\nAdd theme-aware component previews.")
 
       ~H"""
-      <.textarea id="preview-textarea" textarea-value={@value} style="width-40 height-6"/>
+      <.textarea id="preview-textarea" textarea-value={@value} class="w-40 h-6"/>
       """
     end
   end
@@ -565,13 +565,7 @@ defmodule Breeze.Docs.BlockPreviews do
       assigns = Map.put(assigns, :nodes, Breeze.Docs.BlockPreviews.tree_nodes())
 
       ~H"""
-      <.tree
-        id="preview-tree"
-        nodes={@nodes}
-        selected="blocks"
-        expanded={["lib"]}
-        style="width-30 height-9"
-      />
+      <.tree id="preview-tree" nodes={@nodes} selected="blocks" expanded={["lib"]} class="w-30 h-9"/>
       """
     end
   end
@@ -587,7 +581,7 @@ defmodule Breeze.Docs.BlockPreviews do
       assigns = Map.put(assigns, :items, Breeze.Docs.BlockPreviews.list_items())
 
       ~H"""
-      <.list id="preview-list" style="width-28 height-10" item_style="width-28">
+      <.list id="preview-list" class="w-28 h-10" item_class="w-28">
         <:item :for={{value, label} <- @items} value={value}>{label}</:item>
       </.list>
       """
@@ -605,7 +599,7 @@ defmodule Breeze.Docs.BlockPreviews do
       assigns = Map.put(assigns, :items, Breeze.Docs.BlockPreviews.list_items())
 
       ~H"""
-      <.list id="preview-list" style="width-28 height-10" item_style="width-28" list-selected="beta">
+      <.list id="preview-list" class="w-28 h-10" item_class="w-28" list-selected="beta">
         <:item :for={{value, label} <- @items} value={value}>{label}</:item>
       </.list>
       """
@@ -683,9 +677,9 @@ defmodule Breeze.Docs.BlockPreviews do
       assigns = Map.put(assigns, :tabs, Breeze.Docs.BlockPreviews.tabs_items())
 
       ~H"""
-      <.tabs id="preview-tabs" selected="logs" style="width-42 height-8">
+      <.tabs id="preview-tabs" selected="logs" class="w-42 h-8">
         <:tab :for={{value, label, body} <- @tabs} value={value} label={label}>
-          <box id={"preview-tabs-panel-#{value}"} style="padding-1">{body}</box>
+          <box id={"preview-tabs-panel-#{value}"} class="p-1">{body}</box>
         </:tab>
       </.tabs>
       """
@@ -703,9 +697,9 @@ defmodule Breeze.Docs.BlockPreviews do
       assigns = Map.put(assigns, :tabs, Breeze.Docs.BlockPreviews.tabs_items())
 
       ~H"""
-      <.tabs id="preview-tabs-underline" selected="logs" variant="underline" style="width-42 height-8">
+      <.tabs id="preview-tabs-underline" selected="logs" variant="underline" class="w-42 h-8">
         <:tab :for={{value, label, body} <- @tabs} value={value} label={label}>
-          <box id={"preview-tabs-underline-panel-#{value}"} style="padding-1">{body}</box>
+          <box id={"preview-tabs-underline-panel-#{value}"} class="p-1">{body}</box>
         </:tab>
       </.tabs>
       """
@@ -723,7 +717,7 @@ defmodule Breeze.Docs.BlockPreviews do
       assigns = Map.put(assigns, :content, Breeze.Docs.BlockPreviews.markdown_content())
 
       ~H"""
-      <.markdown id="preview-markdown" content={@content} width={36} style="width-40 height-8"/>
+      <.markdown id="preview-markdown" content={@content} width={36} class="w-40 h-8"/>
       """
     end
   end
@@ -739,7 +733,7 @@ defmodule Breeze.Docs.BlockPreviews do
       assigns = Map.put(assigns, :rows, Breeze.Docs.BlockPreviews.scroll_rows())
 
       ~H"""
-      <.scroll id="preview-scroll" style="width-26 height-8 border">
+      <.scroll id="preview-scroll" class="w-26 h-8 border">
         <box :for={row <- @rows}>{row}</box>
       </.scroll>
       """
@@ -763,7 +757,7 @@ defmodule Breeze.Docs.BlockPreviews do
       ~H"""
       <.panel width={30} height={7} id="preview-panel">
         <:title>{@title}</:title>
-        <box style="padding-1">{@body}</box>
+        <box class="p-1">{@body}</box>
       </.panel>
       """
     end
@@ -786,7 +780,7 @@ defmodule Breeze.Docs.BlockPreviews do
       ~H"""
       <.panel width={30} height={7} id="preview-panel">
         <:title>{@title}</:title>
-        <box id="preview-panel-focus" focusable style="padding-1">{@body}</box>
+        <box id="preview-panel-focus" focusable class="p-1">{@body}</box>
       </.panel>
       """
     end
@@ -809,7 +803,7 @@ defmodule Breeze.Docs.BlockPreviews do
       ~H"""
       <.modal id="preview-modal" width={24} height={6}>
         <:title>{@title}</:title>
-        <box style="padding-1">{@body}</box>
+        <box class="p-1">{@body}</box>
       </.modal>
       """
     end
@@ -832,7 +826,7 @@ defmodule Breeze.Docs.BlockPreviews do
       ~H"""
       <.modal id="preview-danger-modal" width={24} height={6}>
         <:title>{@title}</:title>
-        <box style="padding-1">{@body}</box>
+        <box class="p-1">{@body}</box>
       </.modal>
       """
     end

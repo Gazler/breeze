@@ -160,12 +160,12 @@ def render(assigns) do
     )
 
   ~H"""
-  <box class="grid grid-cols-1 grid-rows-2 width-screen height-screen bg">
-    <box class="height-4 padding-left-2 padding-right-2 padding-top-1">
-      <box class="inline width-full">
-        <box class="bold text-primary">Task Pad</box>
+  <box class="grid grid-cols-1 grid-rows-2 w-screen h-screen bg">
+    <box class="h-4 pl-2 pr-2 pt-1">
+      <box class="inline w-full">
+        <box class="font-bold text-primary">Task Pad</box>
         <box class="text-muted">  A small Breeze app</box>
-        <box class="width-full text-right text-muted">
+        <box class="w-full text-right text-muted">
           {TaskPad.InMemoryTasks.status_text(@tasks_state)}
         </box>
       </box>
@@ -175,7 +175,7 @@ def render(assigns) do
         br-change="filter_changed"
         panel={false}
         variant="underline"
-        class="width-full padding-top-1"
+        class="w-full pt-1"
       >
         <:tab value="all" label="All"/>
         <:tab value="open" label="Open"/>
@@ -183,35 +183,35 @@ def render(assigns) do
       </.tabs>
     </box>
 
-    <box class="height-full padding-left-2 padding-right-2">
-      <box class="height-3">
+    <box class="h-full pl-2 pr-2">
+      <box class="h-3">
         <box class="text-muted">New task</box>
         <.input
           id="new-task"
           input-value={@new_task}
           input-placeholder="Type a task and press Enter"
           br-change="new_task_changed"
-          class="width-full"
+          class="w-full"
         >
           {@new_task}
         </.input>
       </box>
 
-      <box class="height-full padding-top-1">
+      <box class="h-full pt-1">
         <.list
           :if={@visible_tasks != []}
           id="tasks"
           br-change="task_selected"
           list-selected={selected_visible_id(@selected_task_id, @visible_tasks)}
-          class="height-full width-full"
-          item_class="width-full"
+          class="h-full w-full"
+          item_class="w-full"
         >
           <:item :for={task <- @visible_tasks} value={task.id}>
             {task_label(task)}
           </:item>
         </.list>
 
-        <box :if={@visible_tasks == []} class="border height-full width-full text-muted">
+        <box :if={@visible_tasks == []} class="border h-full w-full text-muted">
           {@empty_message}
         </box>
       </box>
@@ -352,10 +352,10 @@ Local keybindings describe actions that belong to this view. Breeze merges them
 into `@breeze.keybindings`, which we can render with the built-in keybinding bar:
 
 ```heex
-<box class="grid grid-cols-1 grid-rows-3 width-screen height-screen bg">
+<box class="grid grid-cols-1 grid-rows-3 w-screen h-screen bg">
   ...
 
-  <box class="height-1 width-full bg-panel overflow-hidden">
+  <box class="h-1 w-full bg-panel overflow-hidden">
     <.keybinding_bar keybindings={@breeze.keybindings}/>
   </box>
 </box>

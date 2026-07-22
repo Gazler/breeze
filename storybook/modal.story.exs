@@ -45,13 +45,13 @@ defmodule Breeze.Storybook.Stories.Blocks.ModalStory do
     assigns = assign(assigns, dim?: Map.get(assigns, :__breeze_story_variant__, "dim") == "dim")
 
     ~H"""
-    <box class="width-full height-full bg">
+    <box class="w-full h-full bg">
       <box
         id="storybook-modal-trigger"
-        class="absolute left-2 top-1 width-20 height-3 border-rounded focus:border-primary"
+        class="absolute left-2 top-1 w-20 h-3 rounded focus:border-primary"
         focusable
       >
-        <box class="bold text-center">Open Modal</box>
+        <box class="font-bold text-center">Open Modal</box>
       </box>
       <.modal
         :if={@show_modal}
@@ -62,17 +62,17 @@ defmodule Breeze.Storybook.Stories.Blocks.ModalStory do
         br-change="storybook_close_modal"
       >
         <:title>Confirm Action</:title>
-        <box class="width-full">Interactive modal inside the preview.</box>
-        <box class="width-full">Escape closes it normally.</box>
+        <box class="w-full">Interactive modal inside the preview.</box>
+        <box class="w-full">Escape closes it normally.</box>
         <box>
         </box>
         <box
           id="storybook-modal-close"
           focusable
           default-focus
-          class="width-16 height-3 border-rounded focus:border-primary"
+          class="w-16 h-3 rounded focus:border-primary"
         >
-          <box class="bold text-center">Close</box>
+          <box class="font-bold text-center">Close</box>
         </box>
       </.modal>
     </box>

@@ -33,26 +33,26 @@ defmodule Breeze.Storybook.Stories.Blocks.TextareaStory do
       )
 
     ~H"""
-    <box class="width-full bg-panel">
+    <box class="w-full bg-panel">
       <box class="text-muted">Default</box>
       <.textarea
         id="storybook-textarea-active"
         textarea-value={@message}
         textarea-placeholder="Ask anything"
         br-change="storybook_textarea_active_changed"
-        class={"width-40 height-#{@message_height}"}
+        class={"w-40 h-#{@message_height}"}
       />
-      <box class="padding-top-1 text-muted">
+      <box class="pt-1 text-muted">
         height={@message_height} lines={@message_line_count} cursor={String.length(@message)}
       </box>
-      <box class="padding-top-1 text-muted">Prompt Style</box>
+      <box class="pt-1 text-muted">Prompt Style</box>
       <.textarea
         id="storybook-textarea-placeholder"
         textarea-value={@placeholder_message}
         textarea-placeholder="Ask anything"
         textarea-prefix="› "
         br-change="storybook_textarea_placeholder_changed"
-        class="width-full bg-surface padding-left-0 padding-top-1 padding-bottom-1 border-none"
+        class="w-full bg-surface pl-0 pt-1 pb-1 border-none"
       />
     </box>
     """

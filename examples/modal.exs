@@ -17,62 +17,49 @@ defmodule ModalExample do
 
   def render(assigns) do
     ~H"""
-    <box style="width-screen height-screen bg">
-      <box style="bold">Modal example</box>
+    <box class="w-screen h-screen bg">
+      <box class="font-bold">Modal example</box>
       <box>Press Enter, m, or 1-7 to open an example.</box>
       <box>Modal variants trap Tab; the screen-dim example does not.</box>
       <box>Escape closes the active example. q quits the example.</box>
       <box>
       </box>
-      <box style="bold">Normal</box>
-      <box style="grid grid-cols-3 width-60">
-        <box id="open-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
-          <box style="bold text-center">Centered</box>
+      <box class="font-bold">Normal</box>
+      <box class="grid grid-cols-3 w-60">
+        <box id="open-modal" focusable class="rounded w-20 h-5 focus:border-4">
+          <box class="font-bold text-center">Centered</box>
         </box>
-        <box id="open-wide-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
-          <box style="bold text-center">Wide</box>
+        <box id="open-wide-modal" focusable class="rounded w-20 h-5 focus:border-4">
+          <box class="font-bold text-center">Wide</box>
         </box>
-        <box id="open-inset-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
-          <box style="bold text-center">Inset</box>
-        </box>
-      </box>
-      <box>
-      </box>
-      <box style="bold">Dimmed</box>
-      <box style="grid grid-cols-3 width-60">
-        <box id="open-dim-modal" focusable style="border-rounded width-20 height-5 focus:border-4">
-          <box style="bold text-center">Centered</box>
-        </box>
-        <box
-          id="open-dim-wide-modal"
-          focusable
-          style="border-rounded width-20 height-5 focus:border-4"
-        >
-          <box style="bold text-center">Wide</box>
-        </box>
-        <box
-          id="open-dim-inset-modal"
-          focusable
-          style="border-rounded width-20 height-5 focus:border-4"
-        >
-          <box style="bold text-center">Inset</box>
+        <box id="open-inset-modal" focusable class="rounded w-20 h-5 focus:border-4">
+          <box class="font-bold text-center">Inset</box>
         </box>
       </box>
       <box>
       </box>
-      <box style="bold">Non-modal screen dim</box>
-      <box
-        id="spotlight"
-        screen-dim={@spotlight}
-        focusable
-        style="border-rounded width-20 height-5 focus:border-4"
-      >
-        <box style="bold text-center">Spotlight</box>
+      <box class="font-bold">Dimmed</box>
+      <box class="grid grid-cols-3 w-60">
+        <box id="open-dim-modal" focusable class="rounded w-20 h-5 focus:border-4">
+          <box class="font-bold text-center">Centered</box>
+        </box>
+        <box id="open-dim-wide-modal" focusable class="rounded w-20 h-5 focus:border-4">
+          <box class="font-bold text-center">Wide</box>
+        </box>
+        <box id="open-dim-inset-modal" focusable class="rounded w-20 h-5 focus:border-4">
+          <box class="font-bold text-center">Inset</box>
+        </box>
       </box>
       <box>
       </box>
-      <box id="other-panel" focusable style="border-rounded width-28 height-6 focus:border-4">
-        <box style="bold">Background panel</box>
+      <box class="font-bold">Non-modal screen dim</box>
+      <box id="spotlight" screen-dim={@spotlight} focusable class="rounded w-20 h-5 focus:border-4">
+        <box class="font-bold text-center">Spotlight</box>
+      </box>
+      <box>
+      </box>
+      <box id="other-panel" focusable class="rounded w-28 h-6 focus:border-4">
+        <box class="font-bold">Background panel</box>
         <box>Last action: {@selected_action}</box>
       </box>
       <.modal
@@ -88,32 +75,27 @@ defmodule ModalExample do
         <box>Use it for help, palettes, and overlays.</box>
         <box>
         </box>
-        <box style="bold">Controls</box>
-        <box style="inline">
-          <box style="width-10">Tab</box>
+        <box class="font-bold">Controls</box>
+        <box class="inline">
+          <box class="w-10">Tab</box>
           <box>Move between actions</box>
         </box>
-        <box style="inline">
-          <box style="width-10">Escape</box>
+        <box class="inline">
+          <box class="w-10">Escape</box>
           <box>Dismiss the modal</box>
         </box>
-        <box style="inline">
-          <box style="width-10">Enter</box>
+        <box class="inline">
+          <box class="w-10">Enter</box>
           <box>Activate focused action</box>
         </box>
-        <box style="inline">
-          <box
-            id="confirm"
-            focusable
-            default-focus
-            style="border-rounded width-16 height-3 focus:border-4"
-          >
-            <box style="bold">Confirm</box>
+        <box class="inline">
+          <box id="confirm" focusable default-focus class="rounded w-16 h-3 focus:border-4">
+            <box class="font-bold">Confirm</box>
           </box>
           <box>
           </box>
-          <box id="cancel" focusable style="border-rounded width-16 height-3 focus:border-4">
-            <box style="bold">Dismiss</box>
+          <box id="cancel" focusable class="rounded w-16 h-3 focus:border-4">
+            <box class="font-bold">Dismiss</box>
           </box>
         </box>
       </.modal>
@@ -130,24 +112,19 @@ defmodule ModalExample do
         <box>Use larger explicit dimensions for palettes and editors.</box>
         <box>
         </box>
-        <box style="bold">Controls</box>
-        <box style="inline">
-          <box style="width-10">Enter</box>
+        <box class="font-bold">Controls</box>
+        <box class="inline">
+          <box class="w-10">Enter</box>
           <box>Confirm the current action</box>
         </box>
-        <box style="inline">
-          <box style="width-10">Escape</box>
+        <box class="inline">
+          <box class="w-10">Escape</box>
           <box>Dismiss the modal</box>
         </box>
         <box>
         </box>
-        <box
-          id="wide-close"
-          focusable
-          default-focus
-          style="border-rounded width-20 height-3 focus:border-4"
-        >
-          <box style="bold text-center">Close</box>
+        <box id="wide-close" focusable default-focus class="rounded w-20 h-3 focus:border-4">
+          <box class="font-bold text-center">Close</box>
         </box>
       </.modal>
       <.modal
@@ -159,37 +136,32 @@ defmodule ModalExample do
         br-change="close_modal"
       >
         <:title>Inset Modal</:title>
-        <box>This modal uses fixed inset-x-4 inset-y-2 width-screen height-screen.</box>
+        <box>This modal uses fixed inset-x-4 inset-y-2 w-screen h-screen.</box>
         <box>It is useful for fullscreen dialogs that still leave a gutter.</box>
         <box>
         </box>
-        <box style="bold">Controls</box>
-        <box style="inline">
-          <box style="width-10">Tab</box>
+        <box class="font-bold">Controls</box>
+        <box class="inline">
+          <box class="w-10">Tab</box>
           <box>Move between actions</box>
         </box>
-        <box style="inline">
-          <box style="width-10">Escape</box>
+        <box class="inline">
+          <box class="w-10">Escape</box>
           <box>Dismiss the modal</box>
         </box>
         <box>
         </box>
-        <box
-          id="inset-close"
-          focusable
-          default-focus
-          style="border-rounded width-20 height-3 focus:border-4"
-        >
-          <box style="bold text-center">Close</box>
+        <box id="inset-close" focusable default-focus class="rounded w-20 h-3 focus:border-4">
+          <box class="font-bold text-center">Close</box>
         </box>
       </.modal>
       <box
         :if={@show_modal and @modal_variant == :spotlight}
         id="screen-dim-demo"
         screen-dim
-        class="fixed left-18 top-6 width-44 height-8 bg layer-50 border-rounded border-stroke"
+        class="fixed left-18 top-6 w-44 h-8 bg z-50 rounded border-stroke"
       >
-        <box class="absolute left-2 top-0 bold text">Screen dim only</box>
+        <box class="absolute left-2 top-0 font-bold text">Screen dim only</box>
         <box>This is a plain box using screen-dim.</box>
         <box>Background focus still works outside it.</box>
         <box>Press Escape or 7 to dismiss.</box>

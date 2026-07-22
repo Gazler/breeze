@@ -8,12 +8,12 @@ defmodule Scroll do
   def render(assigns) do
     ~H"""
     <box>
-      <box style="inline">
+      <box class="inline">
         <.viewport :for={id <- [1, 2, 3]} id={id}>
           Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
         </.viewport>
       </box>
-      <box style="border focus:border-3 height-2 overflow-hidden width-15" id="hello" focusable>
+      <box class="border focus:border-3 h-2 overflow-hidden w-15" id="hello" focusable>
         I don't scroll even though I am long
       </box>
     </box>
@@ -28,7 +28,7 @@ defmodule Scroll do
   def viewport(assigns) do
     ~H"""
     <box
-      style={"width-15 height-#{6 + @id} overflow-scroll border focus:border-3"}
+      class={"w-15 h-#{6 + @id} overflow-scroll border focus:border-3"}
       id={"content-#{@id}"}
       implicit={Breeze.Implicit.Scroll}
       focusable

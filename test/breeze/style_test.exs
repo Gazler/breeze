@@ -84,6 +84,84 @@ defmodule Breeze.StyleTest do
     assert element.style.overflow == :hidden
   end
 
+  describe "Tailwind-compatible utilities" do
+    test "supports width, height, and size utilities" do
+      assert Style.resolve_dimensions("w-12 h-4") == %{width: 12, height: 4}
+      assert Style.resolve_dimensions("w-full h-screen") == %{width: :full, height: :screen}
+      assert Style.resolve_dimensions("size-6") == %{width: 6, height: 6}
+    end
+
+    test "supports padding utilities, including axis shorthands" do
+      element =
+        Style.empty()
+        |> Style.put_class("p-1 px-2 py-3 pl-4")
+        |> Style.to_element([])
+
+      assert element.style.padding == 1
+      assert element.style.padding_top == 3
+      assert element.style.padding_right == 2
+      assert element.style.padding_bottom == 3
+      assert element.style.padding_left == 4
+    end
+
+    test "supports typography, border radius, layer, and gap utilities" do
+      element =
+        Style.empty()
+        |> Style.put_class("grid gap-1 gap-x-2 gap-y-3 rounded font-bold italic z-10")
+        |> Style.to_element([])
+
+      assert element.style.bold
+      assert element.style.italic
+      assert element.style.border == BackBreeze.Border.rounded()
+      assert element.attributes.layer == 10
+      assert element.attributes.display.gap_x == 2
+      assert element.attributes.display.gap_y == 3
+    end
+
+    test "supports individual border side utilities" do
+      element =
+        Style.empty()
+        |> Style.put_class("border-t border-r border-b border-l")
+        |> Style.to_element([])
+
+      assert element.style.border == BackBreeze.Border.line()
+    end
+
+    test "supports Tailwind reset utilities" do
+      element =
+        Style.empty()
+        |> Style.put_class("font-bold italic font-normal not-italic")
+        |> Style.to_element([])
+
+      refute element.style.bold
+      refute element.style.italic
+    end
+
+    test "supports Tailwind utilities behind responsive and state modifiers" do
+      narrow = responsive_element("w-10 md:w-full focus:font-bold", {59, 24}, focus: true)
+      wide = responsive_element("w-10 md:w-full focus:font-bold", {60, 24}, focus: true)
+
+      assert narrow.style.width == 10
+      assert wide.style.width == :full
+      assert narrow.style.bold
+      assert wide.style.bold
+    end
+
+    test "ignores unsupported Tailwind values" do
+      element =
+        Style.empty()
+        |> Style.put_class(
+          "w-fit h-min p-auto z-auto gap-auto w-px h-px size-px p-px px-px py-px pt-px pr-px pb-px pl-px gap-px inset-px"
+        )
+        |> Style.to_element([])
+
+      assert element.style.width == :auto
+      assert element.style.height == 0
+      assert element.style.padding == 0
+      refute Map.has_key?(element.attributes, :layer)
+    end
+  end
+
   describe "responsive modifiers" do
     test "applies width breakpoints at their minimum width" do
       class =

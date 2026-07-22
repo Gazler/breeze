@@ -19,10 +19,10 @@ defmodule Snake do
     ~H"""
     <.panel width={@size.width * 2} height={@size.height + 1}>
       <:title>
-        <box style="text-3">{score_label(@path, @stopped?)}</box>
+        <box class="text-3">{score_label(@path, @stopped?)}</box>
       </:title>
-      <box :for={{x, y} <- @path} style={"bg-7 absolute left-#{x * 2 - 1} top-#{y + 1}"}>██</box>
-      <box style={"absolute left-#{@food.x * 2 - 1} top-#{@food.y + 1}"}>{@food.glyph}</box>
+      <box :for={{x, y} <- @path} class={"bg-7 absolute left-#{x * 2 - 1} top-#{y + 1}"}>██</box>
+      <box class={"absolute left-#{@food.x * 2 - 1} top-#{@food.y + 1}"}>{@food.glyph}</box>
     </.panel>
     """
   end
@@ -35,8 +35,8 @@ defmodule Snake do
 
   def panel(assigns) do
     ~H"""
-    <box style={"border width-#{@width + 2} height-#{@height + 2}"}>
-      <box :if={assigns[:title]} style="absolute left-1 top-0">{render_slot(@title)}</box>
+    <box class={"border w-#{@width + 2} h-#{@height + 2}"}>
+      <box :if={assigns[:title]} class="absolute left-1 top-0">{render_slot(@title)}</box>
       {render_slot(@inner_block)}
     </box>
     """

@@ -19,10 +19,9 @@ defmodule Breeze.Blocks do
 
   All components expose a `class` attribute (and where applicable an
   `item_class` attribute) that are merged with the component's defaults using
-  `merge_class/2`. Style tokens are grouped by their *property key*, everything
-  before the last `-` segment, so an override of `"width-32"` replaces the
-  default `"width-24"` while leaving other properties intact (including `focus:`
-  prefixes).
+  `merge_class/2`. Utilities are grouped by the property they affect, so an
+  override of `"w-32"` replaces the default `"w-24"` while leaving other
+  properties intact (including `focus:` prefixes).
   """
 
   use Breeze.Component
@@ -1691,7 +1690,10 @@ defmodule Breeze.Blocks do
   defp panel_title_wrapper_token?(token) do
     token in ["inline", "absolute", "fixed"] or
       String.starts_with?(token, "width-") or
+      String.starts_with?(token, "w-") or
       String.starts_with?(token, "height-") or
+      String.starts_with?(token, "h-") or
+      String.starts_with?(token, "size-") or
       String.starts_with?(token, "left-") or
       String.starts_with?(token, "right-") or
       String.starts_with?(token, "top-") or
@@ -1699,7 +1701,8 @@ defmodule Breeze.Blocks do
       String.starts_with?(token, "inset-") or
       String.starts_with?(token, "inset-x-") or
       String.starts_with?(token, "inset-y-") or
-      String.starts_with?(token, "layer-")
+      String.starts_with?(token, "layer-") or
+      String.starts_with?(token, "z-")
   end
 
   defp panel_title_wrapper_style(%BackBreeze.Style{} = style) do
@@ -2195,19 +2198,18 @@ defmodule Breeze.Blocks do
   Merge two class strings, with `override` taking precedence over `default` for
   matching style properties.
 
-  The *property key* for each style token is everything before its final `-`
-  segment, so tokens that share the same prefix override one another:
+  Utilities that affect the same property override one another:
 
-      iex> Breeze.Blocks.merge_class("border width-24 height-8", "width-32")
-      "border width-32 height-8"
+      iex> Breeze.Blocks.merge_class("border w-24 h-8", "w-32")
+      "border w-32 h-8"
 
       iex> Breeze.Blocks.merge_class("overflow-scroll", "overflow-hidden")
       "overflow-hidden"
 
   Tokens from `override` that do not match any default key are appended:
 
-      iex> Breeze.Blocks.merge_class("border width-24", "bg-4")
-      "border width-24 bg-4"
+      iex> Breeze.Blocks.merge_class("border w-24", "bg-4")
+      "border w-24 bg-4"
 
   `nil` or an empty string override returns the default unchanged.
   """
@@ -2251,6 +2253,41 @@ defmodule Breeze.Blocks do
   end
 
   defp style_key(token) do
+    parts = String.split(token, ":")
+    utility = List.last(parts)
+    modifiers = Enum.drop(parts, -1)
+
+    Enum.join(modifiers ++ [utility_style_key(utility)], ":")
+  end
+
+  defp utility_style_key("width-" <> _value), do: "w"
+  defp utility_style_key("w-" <> _value), do: "w"
+  defp utility_style_key("height-" <> _value), do: "h"
+  defp utility_style_key("h-" <> _value), do: "h"
+  defp utility_style_key("padding-left-" <> _value), do: "pl"
+  defp utility_style_key("pl-" <> _value), do: "pl"
+  defp utility_style_key("padding-right-" <> _value), do: "pr"
+  defp utility_style_key("pr-" <> _value), do: "pr"
+  defp utility_style_key("padding-top-" <> _value), do: "pt"
+  defp utility_style_key("pt-" <> _value), do: "pt"
+  defp utility_style_key("padding-bottom-" <> _value), do: "pb"
+  defp utility_style_key("pb-" <> _value), do: "pb"
+  defp utility_style_key("padding-" <> _value), do: "p"
+  defp utility_style_key("p-" <> _value), do: "p"
+  defp utility_style_key("layer-" <> _value), do: "z"
+  defp utility_style_key("z-" <> _value), do: "z"
+  defp utility_style_key("bold"), do: "font-weight"
+  defp utility_style_key("font-" <> weight) when weight in ["normal", "bold"], do: "font-weight"
+  defp utility_style_key("italic"), do: "font-style"
+  defp utility_style_key("not-italic"), do: "font-style"
+
+  defp utility_style_key(token) when token in ["border-rounded", "border-square"],
+    do: "border-shape"
+
+  defp utility_style_key("rounded"), do: "border-shape"
+  defp utility_style_key("rounded-" <> _value), do: "border-shape"
+
+  defp utility_style_key(token) do
     case String.split(token, "-") do
       [_only] -> token
       parts -> parts |> Enum.drop(-1) |> Enum.join("-")
@@ -2352,6 +2389,8 @@ defmodule Breeze.Blocks do
           case token do
             "border-none" -> false
             "border" -> true
+            "rounded" -> true
+            "rounded-none" -> true
             "border-rounded" -> true
             "border-square" -> true
             "border-invisible" -> true
@@ -2377,17 +2416,32 @@ defmodule Breeze.Blocks do
     Enum.reduce(tokens, nil, fn token, padding ->
       case side do
         :left ->
-          parse_padding_token(token, ~r/^padding-left-(\d+)$/, ~r/^padding-(\d+)$/) || padding
+          parse_padding_token(
+            token,
+            [
+              ~r/^(?:pl|padding-left)-(\d+)$/,
+              ~r/^px-(\d+)$/,
+              ~r/^(?:p|padding)-(\d+)$/
+            ]
+          ) || padding
 
         :top ->
-          parse_padding_token(token, ~r/^padding-top-(\d+)$/, ~r/^padding-(\d+)$/) || padding
+          parse_padding_token(
+            token,
+            [
+              ~r/^(?:pt|padding-top)-(\d+)$/,
+              ~r/^py-(\d+)$/,
+              ~r/^(?:p|padding)-(\d+)$/
+            ]
+          ) || padding
       end
     end)
   end
 
-  defp parse_padding_token(token, specific_pattern, generic_pattern) do
-    case Regex.run(specific_pattern, token, capture: :all_but_first) ||
-           Regex.run(generic_pattern, token, capture: :all_but_first) do
+  defp parse_padding_token(token, patterns) do
+    match = Enum.find_value(patterns, &Regex.run(&1, token, capture: :all_but_first))
+
+    case match do
       [value] -> String.to_integer(value)
       _ -> nil
     end

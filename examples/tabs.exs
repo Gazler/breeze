@@ -16,15 +16,15 @@ defmodule TabsExample do
 
   def render(assigns) do
     ~H"""
-    <box style="width-screen height-screen overflow-hidden">
-      <box style="bold">Tabs example</box>
+    <box class="w-screen h-screen overflow-hidden">
+      <box class="font-bold">Tabs example</box>
       <box>Use left/right arrows while the tabs are focused.</box>
       <box>The tab bar should scroll horizontally to keep the selected tab visible.</box>
       <.tabs
         id="tabs"
         selected={@selected_tab}
         br-change="select_tab"
-        style={"width-#{@tabs_width} height-#{@tabs_height} border-rounded focus:border-4"}
+        class={"w-#{@tabs_width} h-#{@tabs_height} rounded focus:border-4"}
       >
         <:tab value="overview" label="Overview">
           <.tab_panel label="Overview" value="overview" height={@panel_height}/>
@@ -69,8 +69,8 @@ defmodule TabsExample do
     assigns = assign(assigns, lines: panel_lines(assigns.label))
 
     ~H"""
-    <.scroll id={"tabs-panel-#{@value}"} style={"width-full height-#{@height} overflow-scroll"}>
-      <box style="bold">{@label}</box>
+    <.scroll id={"tabs-panel-#{@value}"} class={"w-full h-#{@height} overflow-scroll"}>
+      <box class="font-bold">{@label}</box>
       <box>Selected tab value: {@value}</box>
       <box>
       </box>

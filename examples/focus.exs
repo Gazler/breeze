@@ -52,14 +52,14 @@ defmodule Focus do
   def render(assigns) do
     ~H"""
     <box id="lol">
-      <box style="inline border focus:border-3" focusable id="base">
+      <box class="inline border focus:border-3" focusable id="base">
         <.list :for={id <- ["l1", "l2", "l3", "l4", "l5"]} br-change="change" id={id}>
           <:item value="hello">Hello</:item>
           <:item value="world">World</:item>
           <:item value="foo">Foo</:item>
         </.list>
       </box>
-      <box style="inline border focus:border-3" focusable id="basel">
+      <box class="inline border focus:border-3" focusable id="basel">
         <.list :for={id <- ["ll1", "ll2", "ll3", "ll4", "ll5"]} id={id}>
           <:item value="hello">Hello</:item>
           <:item value="world">World</:item>
@@ -81,11 +81,11 @@ defmodule Focus do
 
   def list(assigns) do
     ~H"""
-    <box focusable style="border focus:border-3" implicit={Breeze.List} id={@id} {@rest}>
+    <box focusable class="border focus:border-3" implicit={Breeze.List} id={@id} {@rest}>
       <box
         :for={item <- @item}
         value={item.value}
-        style="selected:bg-24 selected:text-0 focus:selected:text-7 focus:selected:bg-4"
+        class="selected:bg-24 selected:text-0 focus:selected:text-7 focus:selected:bg-4"
       >
         {render_slot(item, %{})}
       </box>

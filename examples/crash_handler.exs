@@ -16,19 +16,19 @@ defmodule CrashHandlerExample do
 
   def render(assigns) do
     ~H"""
-    <box style="width-screen height-screen">
-      <box style="height-1 bold">Crash Handler Demo</box>
-      <box style="height-1">
+    <box class="w-screen h-screen">
+      <box class="h-1 font-bold">Crash Handler Demo</box>
+      <box class="h-1">
       </box>
       <box>
-        <box id="boom" focusable style="border-rounded width-32 height-5 focus:border-4">
+        <box id="boom" focusable class="rounded w-32 h-5 focus:border-4">
           <box>Press c to raise</box>
           <box>Counter {@counter}</box>
         </box>
-        <box style="height-1">
+        <box class="h-1">
         </box>
         <box>q quits, r restarts after a crash</box>
-        <box style="height-1">
+        <box class="h-1">
         </box>
         <live
           id="logs"

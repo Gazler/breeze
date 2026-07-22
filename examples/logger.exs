@@ -18,28 +18,28 @@ defmodule LoggerExample do
 
   def render(assigns) do
     ~H"""
-    <box class="grid grid-cols-1 grid-rows-2 width-screen height-screen bg">
-      <box :if={!@show_logs} class="width-full height-full padding-2">
-        <box class="width-full bold text-primary">Logger inspector example</box>
-        <box class="width-full">
+    <box class="grid grid-cols-1 grid-rows-2 w-screen h-screen bg">
+      <box :if={!@show_logs} class="w-full h-full p-2">
+        <box class="w-full font-bold text-primary">Logger inspector example</box>
+        <box class="w-full">
         </box>
-        <box class="width-full">This application emits output every second.</box>
-        <box class="width-full">It rotates through Logger, IO.puts, and IO.inspect calls.</box>
-        <box class="width-full">IO.inspect uses IEx-style pretty printing and syntax colors.</box>
-        <box class="width-full">Press l to emit another entry immediately.</box>
-        <box class="width-full">
+        <box class="w-full">This application emits output every second.</box>
+        <box class="w-full">It rotates through Logger, IO.puts, and IO.inspect calls.</box>
+        <box class="w-full">IO.inspect uses IEx-style pretty printing and syntax colors.</box>
+        <box class="w-full">Press l to emit another entry immediately.</box>
+        <box class="w-full">
         </box>
-        <box class="width-full text-muted">Run the remote inspector in another shell:</box>
-        <box class="width-full">mix breeze.inspector</box>
-        <box class="width-full text-muted">The Logs tab shows this node's captured output.</box>
-        <box class="width-full">
+        <box class="w-full text-muted">Run the remote inspector in another shell:</box>
+        <box class="w-full">mix breeze.inspector</box>
+        <box class="w-full text-muted">The Logs tab shows this node's captured output.</box>
+        <box class="w-full">
         </box>
-        <box class="inline width-full">
-          <box class="width-14 text-muted">entries</box>
+        <box class="inline w-full">
+          <box class="w-14 text-muted">entries</box>
           <box>{@log_count}</box>
         </box>
-        <box class="inline width-full">
-          <box class="width-14 text-muted">last call</box>
+        <box class="inline w-full">
+          <box class="w-14 text-muted">last call</box>
           <box>{@last_level}</box>
         </box>
       </box>
@@ -48,13 +48,13 @@ defmodule LoggerExample do
         id="local-logs"
         view={Breeze.Logger}
         start_opts={[title: "Local application logs", width: :screen, height: :full, max_lines: 1000]}
-        class="width-full height-full"
+        class="w-full h-full"
       >
       </live>
-      <box class="height-1 width-full overflow-hidden bg-emphasize-12">
+      <box class="h-1 w-full overflow-hidden bg-emphasize-12">
         <.keybinding_bar
           keybindings={@breeze.keybindings}
-          class="inline width-full height-1 overflow-hidden bg-emphasize-12 padding-left-1 padding-right-1"
+          class="inline w-full h-1 overflow-hidden bg-emphasize-12 pl-1 pr-1"
         />
       </box>
     </box>

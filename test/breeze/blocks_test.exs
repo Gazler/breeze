@@ -749,6 +749,21 @@ defmodule Breeze.BlocksTest do
       assert Blocks.merge_class("border width-24 height-8", "width-32 bg-4") ==
                "border width-32 height-8 bg-4"
     end
+
+    test "matches Tailwind utilities with their legacy aliases" do
+      assert Blocks.merge_class(
+               "width-full height-8 padding-left-1 bold border-rounded layer-1",
+               "w-32 h-4 pl-2 font-normal rounded-none z-2"
+             ) == "w-32 h-4 pl-2 font-normal rounded-none z-2"
+
+      assert Blocks.merge_class("w-full h-8", "width-32 height-4") ==
+               "width-32 height-4"
+    end
+
+    test "keeps border shape and color utilities independent" do
+      assert Blocks.merge_class("rounded border-stroke", "border-primary") ==
+               "rounded border-primary"
+    end
   end
 
   describe "merge_style/2" do

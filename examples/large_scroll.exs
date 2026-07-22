@@ -21,15 +21,15 @@ defmodule LargeScroll do
 
   def render(assigns) do
     ~H"""
-    <box class="grid grid-cols-1 grid-rows-2 width-screen height-screen bg-panel">
-      <box class="height-4 border-bottom bg-panel" style="bold">{@header_content}</box>
-      <box class="grid grid-cols-2 width-full height-full bg-panel">
-        <box class="width-20 border-right bg-panel">{@sidebar_content}</box>
+    <box class="grid grid-cols-1 grid-rows-2 w-screen h-screen bg-panel">
+      <box class="h-4 border-b bg-panel font-bold">{@header_content}</box>
+      <box class="grid grid-cols-2 w-full h-full bg-panel">
+        <box class="w-20 border-r bg-panel">{@sidebar_content}</box>
         <box
           id="large-scroll-content"
           implicit={Breeze.Implicit.Scroll}
           focusable
-          class="width-full height-full bg-panel overflow-scroll"
+          class="w-full h-full bg-panel overflow-scroll"
           style={%{scrollbar: %{arrows: true}}}
         >
           {@content}

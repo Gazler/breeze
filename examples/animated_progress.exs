@@ -28,8 +28,8 @@ defmodule AnimatedProgressBar do
       )
 
     ~H"""
-    <box id="progress" focusable style="border-rounded width-30 height-5 focus:border-4">
-      <box style="bold">{@label}</box>
+    <box id="progress" focusable class="rounded w-30 h-5 focus:border-4">
+      <box class="font-bold">{@label}</box>
       <box>[{@filled}{@empty}]</box>
       <box>{@value}/{@width}</box>
     </box>
@@ -67,20 +67,20 @@ defmodule AnimatedProgressExample do
 
   def render(assigns) do
     ~H"""
-    <box style="width-screen height-screen">
-      <box style="bold">Animated child views</box>
+    <box class="w-screen h-screen">
+      <box class="font-bold">Animated child views</box>
       <box>Each progress bar below is a separate child view with its own tick interval.</box>
       <box>Press tab to focus them. Press q to quit.</box>
-      <box style="height-1">
+      <box class="h-1">
       </box>
-      <box style="inline">
+      <box class="inline">
         <live
           id="progress_slow"
           view={AnimatedProgressBar}
           start_opts={[label: "Slow", width: 20, interval: 140, animate?: @animate?]}
         >
         </live>
-        <box style="width-2">
+        <box class="w-2">
         </box>
         <live
           id="progress_medium"
@@ -88,7 +88,7 @@ defmodule AnimatedProgressExample do
           start_opts={[label: "Medium", width: 16, interval: 85, animate?: @animate?]}
         >
         </live>
-        <box style="width-2">
+        <box class="w-2">
         </box>
         <live
           id="progress_fast"

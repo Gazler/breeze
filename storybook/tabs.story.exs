@@ -20,15 +20,15 @@ defmodule Breeze.Storybook.Stories.Blocks.TabsStory do
 
   def render(assigns) do
     ~H"""
-    <box class="width-full bg-panel">
+    <box class="w-full bg-panel">
       <box class="text-muted">Use left/right arrows while the tabs are focused.</box>
-      <box class="padding-top-1">
+      <box class="pt-1">
         <.tabs
           id="storybook-tabs"
           selected={@selected_tab}
           variant="underline"
           br-change="storybook_tabs_changed"
-          class="width-40 height-8"
+          class="w-40 h-8"
         >
           <:tab value="headers" label="Headers">
             <box class="text-muted">Request headers preview</box>

@@ -67,12 +67,12 @@ defmodule Breeze.Storybook.Stories.Blocks.FlashStory do
     }
 
     ~H"""
-    <box class="width-full height-full bg">
-      <box class="width-full bold">Flash Preview</box>
-      <box class="width-50 text-muted">
+    <box class="w-full h-full bg">
+      <box class="w-full font-bold">Flash Preview</box>
+      <box class="w-50 text-muted">
         The flash stack is fixed to the bottom-right corner and does not affect layout.
       </box>
-      <box class="padding-top-1 width-42">
+      <box class="pt-1 w-42">
         <box>Status: Ready</box>
         <box>Queue: 3 jobs</box>
         <box>Region: eu-west</box>

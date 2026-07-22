@@ -59,28 +59,28 @@ defmodule Posting do
 
   def render(assigns) do
     ~H"""
-    <box class="grid grid-cols-1 grid-rows-2 width-screen height-screen bg">
-      <box class="width-full height-full padding-left-2 padding-right-2">
-        <box class="grid grid-cols-1 width-full height-full">
-          <box class="height-3 padding-top-1 padding-bottom-1">
-            <box class="inline width-full height-1">
-              <box class="bold text-primary">Req It Ralph</box>
+    <box class="grid grid-cols-1 grid-rows-2 w-screen h-screen bg">
+      <box class="w-full h-full pl-2 pr-2">
+        <box class="grid grid-cols-1 w-full h-full">
+          <box class="h-3 pt-1 pb-1">
+            <box class="inline w-full h-1">
+              <box class="font-bold text-primary">Req It Ralph</box>
               <box class="text-muted"> 0.0.1</box>
               <box class="hidden md:block text-muted">
                 {" "}{@breeze.theme.name}/{@breeze.theme.actual_mode} ({@breeze.theme.status})
               </box>
-              <box class="hidden md:block md:width-full text-right text-muted">{@user_host}</box>
+              <box class="hidden md:block md:w-full text-right text-muted">{@user_host}</box>
             </box>
           </box>
-          <box style="grid grid-cols-5 height-2 padding-bottom-1">
-            <box style="text-primary width-1">▐</box>
+          <box class="grid grid-cols-5 h-2 pb-1">
+            <box class="text-primary w-1">▐</box>
             <.dropdown
               id="method"
               selected={@method}
               br-change="method_changed"
-              class="width-10"
-              item_style="bg-panel text"
-              menu_style="bg-panel text"
+              class="w-10"
+              item_class="bg-panel text"
+              menu_class="bg-panel text"
             >
               <:item :for={method <- @methods} value={method}>{method}</:item>
             </.dropdown>
@@ -89,81 +89,76 @@ defmodule Posting do
               input-value={@url}
               input-placeholder="Enter URL"
               br-change="url_changed"
-              style="width-full"
+              class="w-full"
             />
-            <.button class="width-8 padding-left-2" focusable="false">Send</.button>
-            <box style="bg-primary text-bg width-1">▐</box>
+            <.button class="w-8 pl-2" focusable="false">Send</.button>
+            <box class="bg-primary text-bg w-1">▐</box>
           </box>
-          <box style="grid grid-cols-1 grid-rows-2 height-full">
-            <box class="grid grid-cols-1 md:grid-cols-2 height-full">
+          <box class="grid grid-cols-1 grid-rows-2 h-full">
+            <box class="grid grid-cols-1 md:grid-cols-2 h-full">
               <box class="hidden md:block">
-                <.panel id="collection-panel" class="height-full width-full overflow-hidden bg">
-                  <box
-                    class="width-full height-full padding-right-1 padding-bottom-1 overflow-hidden"
-                  >
+                <.panel id="collection-panel" class="h-full w-full overflow-hidden bg">
+                  <box class="w-full h-full pr-1 pb-1 overflow-hidden">
                     <.list
                       id="collection"
                       variant="muted"
                       list-scroll-padding={1}
-                      class="bg height-full width-full overflow-scroll border-0 focus:border-0"
-                      item_style="width-full"
+                      class="bg h-full w-full overflow-scroll border-0 focus:border-0"
+                      item_class="w-full"
                     >
                       <:item :for={{val, label} <- @collection} value={val}>{label}</:item>
                     </.list>
                   </box>
                 </.panel>
               </box>
-              <box class="grid grid-cols-1 grid-rows-2 height-full">
-                <.panel id="request-panel" class="height-full overflow-hidden bg focus:border-accent">
+              <box class="grid grid-cols-1 grid-rows-2 h-full">
+                <.panel id="request-panel" class="h-full overflow-hidden bg focus:border-accent">
                   <.tabs
                     id="request-tabs"
                     selected={@request_tab}
                     variant="underline"
                     br-change="request_tab"
-                    class="width-full height-full"
+                    class="w-full h-full"
                   >
                     <:tab value="headers" label="Headers">
-                      <box style="grid grid-cols-1 grid-rows-2 height-full">
+                      <box class="grid grid-cols-1 grid-rows-2 h-full">
                         <.scroll
                           id="request-tabs-panel-headers"
                           scroll-autoscroll="bottom"
-                          class="height-full overflow-scroll bg"
+                          class="h-full overflow-scroll bg"
                           style={%{scrollbar: %{arrows: true}}}
                         >
-                          <box
-                            :if={@request_headers == []}
-                            class="width-full height-full bg overflow-hidden"
-                          >
+                          <box :if={@request_headers == []} class="w-full h-full bg overflow-hidden">
                             <box
-                              class="absolute left-0 top-0 width-full height-full text-mute-70 overflow-hidden content-repeat"
+                              class="absolute left-0 top-0 w-full h-full text-mute-70 overflow-hidden content-repeat"
                             >
                               ╱
                             </box>
-                            <box class="absolute center text-center bold text-mute-40">
+                            <box class="absolute center text-center font-bold text-mute-40">
                               No Headers
                             </box>
                           </box>
-                          <box :for={{name, value} <- @request_headers} class="inline width-full">
-                            <box class="text-primary width-18">{name}</box>
+                          <box :for={{name, value} <- @request_headers} class="inline w-full">
+                            <box class="text-primary w-18">{name}</box>
                             <box>{value}</box>
                           </box>
                         </.scroll>
-                        <box style="grid grid-cols-3 gap-x-1 height-1">
+                        <box class="grid grid-cols-3 gap-x-1 h-1">
                           <.input
                             id="request-header-name"
                             input-value={@request_header_name}
                             input-placeholder="Header name"
                             br-change="request_header_name_changed"
-                            style="width-20"
+                            class="w-20"
                           />
                           <.input
                             id="request-header-value"
                             input-value={@request_header_value}
                             input-placeholder="Header value"
                             br-change="request_header_value_changed"
-                            style="width-full"
+                            class="w-full"
                           />
-                          <.button id="request-header-add" class="width-7">Add</.button>
+                          <.button id="request-header-add" class="w-7">Add</.button>
                         </box>
                       </box>
                     </:tab>
@@ -184,16 +179,13 @@ defmodule Posting do
                     </:tab>
                   </.tabs>
                 </.panel>
-                <.panel
-                  id="response-panel"
-                  class="height-full overflow-hidden bg focus:border-accent"
-                >
+                <.panel id="response-panel" class="h-full overflow-hidden bg focus:border-accent">
                   <.tabs
                     id="response-tabs"
                     selected={@response_tab}
                     variant="underline"
                     br-change="response_tab"
-                    class="width-full height-full"
+                    class="w-full h-full"
                   >
                     <:tab value="body" label="Body">
                       <box>{"  1  {"}</box>
@@ -219,7 +211,7 @@ defmodule Posting do
           </box>
         </box>
       </box>
-      <box style="height-1 width-full bg-panel overflow-hidden">
+      <box class="h-1 w-full bg-panel overflow-hidden">
         <.keybinding_bar keybindings={@breeze.keybindings}/>
       </box>
       <.modal :if={@show_help} screen-dim id="help" width={56} height={15} br-change="help_closed">
@@ -227,55 +219,55 @@ defmodule Posting do
         <box>
         </box>
         <box class="inline">
-          <box class="width-8 bg-primary text-bg bold">{" Tab "}</box>
+          <box class="w-8 bg-primary text-bg font-bold">{" Tab "}</box>
           <box>Cycle focus within the active surface</box>
         </box>
         <box class="inline">
-          <box class="width-8 bg-primary text-bg bold">{" ^t "}</box>
+          <box class="w-8 bg-primary text-bg font-bold">{" ^t "}</box>
           <box>Cycle HTTP method</box>
         </box>
         <box class="inline">
-          <box class="width-8 bg-primary text-bg bold">{" ←/→ "}</box>
+          <box class="w-8 bg-primary text-bg font-bold">{" ←/→ "}</box>
           <box>Switch tabs</box>
         </box>
         <box class="inline">
-          <box class="width-8 bg-primary text-bg bold">{" ↑/↓ "}</box>
+          <box class="w-8 bg-primary text-bg font-bold">{" ↑/↓ "}</box>
           <box>Navigate list</box>
         </box>
         <box class="inline">
-          <box class="width-8 bg-primary text-bg bold">{" ^j "}</box>
+          <box class="w-8 bg-primary text-bg font-bold">{" ^j "}</box>
           <box>Send request</box>
         </box>
         <box class="inline">
-          <box class="width-8 bg-primary text-bg bold">{" Escape "}</box>
+          <box class="w-8 bg-primary text-bg font-bold">{" Escape "}</box>
           <box>Close this dialog</box>
         </box>
         <box class="inline">
-          <box class="width-8 bg-primary text-bg bold">{" q "}</box>
+          <box class="w-8 bg-primary text-bg font-bold">{" q "}</box>
           <box>Quit</box>
         </box>
         <box class="inline">
-          <box class="width-8 bg-primary text-bg bold">{" F2 "}</box>
+          <box class="w-8 bg-primary text-bg font-bold">{" F2 "}</box>
           <box>Toggle debug panel</box>
         </box>
         <box class="inline">
-          <box class="width-8 bg-primary text-bg bold">{" F3 "}</box>
+          <box class="w-8 bg-primary text-bg font-bold">{" F3 "}</box>
           <box>Cycle theme</box>
         </box>
         <box class="inline">
-          <box class="width-8 bg-primary text-bg bold">{" F4 "}</box>
+          <box class="w-8 bg-primary text-bg font-bold">{" F4 "}</box>
           <box>Toggle inspector, then click an element to inspect it</box>
         </box>
         <box class="inline">
-          <box class="width-8 bg-primary text-bg bold">{" PgUp "}</box>
+          <box class="w-8 bg-primary text-bg font-bold">{" PgUp "}</box>
           <box>Move inspector between bottom and top</box>
         </box>
         <box class="inline">
-          <box class="width-8 bg-primary text-bg bold">{" Theme "}</box>
+          <box class="w-8 bg-primary text-bg font-bold">{" Theme "}</box>
           <box>{@breeze.theme.name}</box>
         </box>
       </.modal>
-      <box :if={@show_debug} style="fixed right-0 bottom-0 width-42 height-24 layer-50">
+      <box :if={@show_debug} style="fixed right-0 bottom-0 w-42 h-24 layer-50">
         <live id="debug" view={Breeze.Debug} start_opts={[width: 42, height: 24]}>
         </live>
       </box>
