@@ -3,6 +3,34 @@ defmodule Breeze.Server.Error do
 
   @actions [:restart, :stop, :copy_details]
 
+  def safe_call(fun) when is_function(fun, 0) do
+    try do
+      {:ok, fun.()}
+    rescue
+      exception ->
+        {:crash, crash_info(:error, exception, __STACKTRACE__)}
+    catch
+      :exit, reason ->
+        {:crash, crash_info(:exit, reason, __STACKTRACE__)}
+
+      kind, reason ->
+        {:crash, crash_info(kind, reason, __STACKTRACE__)}
+    end
+  end
+
+  def crash_info(kind, reason, stacktrace) do
+    {kind, reason, stacktrace} = normalize_crash_info(kind, reason, stacktrace)
+
+    %{
+      kind: kind,
+      reason: reason,
+      stacktrace: stacktrace,
+      selected_index: nil,
+      focused: "error-stacktrace",
+      implicit_state: %{}
+    }
+  end
+
   def normalize(opts) when is_list(opts) do
     [
       view: Keyword.get(opts, :view, Breeze.ErrorView),
@@ -120,6 +148,28 @@ defmodule Breeze.Server.Error do
   end
 
   defp normalize_action_keybinding(_binding), do: nil
+
+  defp normalize_crash_info(:exit, {{%_exception{} = exception, stacktrace}, _call}, _stacktrace)
+       when is_list(stacktrace) do
+    {:error, exception, stacktrace}
+  end
+
+  defp normalize_crash_info(:exit, {%_exception{} = exception, stacktrace}, _stacktrace)
+       when is_list(stacktrace) do
+    {:error, exception, stacktrace}
+  end
+
+  defp normalize_crash_info(:exit, {{{kind, reason, stacktrace}, _location}, _call}, _stacktrace)
+       when is_list(stacktrace) do
+    {kind, reason, stacktrace}
+  end
+
+  defp normalize_crash_info(:exit, {kind, reason, stacktrace}, _stacktrace)
+       when is_list(stacktrace) do
+    {kind, reason, stacktrace}
+  end
+
+  defp normalize_crash_info(kind, reason, stacktrace), do: {kind, reason, stacktrace}
 
   defp exported?(view, function, arity) do
     Code.ensure_loaded?(view) and function_exported?(view, function, arity)

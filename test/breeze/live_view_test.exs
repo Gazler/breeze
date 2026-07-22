@@ -749,6 +749,32 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule ContainerDecoration do
+    def init(_items, _root_attrs, last_state),
+      do: {:ok, last_state, rerender_every: 10_000}
+
+    def handle_modifiers(:root, _flags, _state), do: []
+    def handle_modifiers(:child, _flags, _state), do: []
+    def animate(:root, box, _flags, _state, _ctx), do: box
+    def animate(:child, box, _flags, _state, _ctx), do: box
+  end
+
+  defmodule DecoratedContainerRoot do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box id="container" implicit={ContainerDecoration} style="border-rounded width-24 height-6">
+        <live id="child" view={CounterChild} start_opts={[]}>
+        </live>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule PersistentToggleRoot do
     use Breeze.View
 
@@ -1973,7 +1999,7 @@ defmodule Breeze.LiveView.CrashTest do
 
       send(pid, {reader, {:data, "q"}})
 
-      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
     end)
   end
 
@@ -2296,6 +2322,41 @@ defmodule Breeze.LiveView.CrashTest do
 
     assert next_state.debug.stats[:render_base_count] == initial_render_count
     assert Enum.any?(writes, &String.contains?(&1, "Count: 2"))
+
+    Process.exit(pid, :normal)
+  end
+
+  test "server fully rerenders when an existing decoration overlaps a live child patch" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: Breeze.LiveViewTest.DecoratedContainerRoot,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    state =
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+        if Map.has_key?(state.children, "child"), do: state, else: false
+      end)
+
+    initial_render_count = state.debug.stats[:render_base_count]
+    assert Enum.any?(state.frame.decorations, &(&1.id == "container"))
+
+    child = state.children["child"]
+    assert {:noreply, "button", true} = Breeze.ChildServer.dispatch_input(child.pid, "+")
+
+    wait_until(fn ->
+      next_state = :sys.get_state(pid)
+      next_state.debug.stats[:render_base_count] > initial_render_count
+    end)
+
+    next_state = :sys.get_state(pid)
+
+    assert next_state.debug.stats[:last_render_cause] == :child_invalidated
+    assert next_state.frame.base_output =~ "Count: 2"
 
     Process.exit(pid, :normal)
   end

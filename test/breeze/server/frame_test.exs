@@ -45,4 +45,30 @@ defmodule Breeze.Server.FrameTest do
     assert Frame.build_payload(["only"], ["only"], [previous_overlay], [], 10) ==
              "\e[4;1H\e[4;1H\e[K"
   end
+
+  test "child patches materialize complete rows without losing neighboring content" do
+    viewport = %{left: 5, top: 0, width: 3, height: 1}
+
+    assert Frame.patch_lines(["left old right"], "new", viewport, 20) == [
+             "left new right      "
+           ]
+  end
+
+  test "child patches preserve base output below the visible screen" do
+    viewport = %{left: 5, top: 0, width: 3, height: 1}
+    output = "left old right\nvisible tail\noff-screen one\noff-screen two"
+
+    patched = Frame.patch_output(output, "new", viewport, 20)
+
+    assert String.split(patched, "\n") == [
+             "left new right      ",
+             "visible tail",
+             "off-screen one",
+             "off-screen two"
+           ]
+  end
+
+  test "historical lines are cropped without breaking ANSI styles" do
+    assert Frame.fit_lines(["\e[31mabcdefgh\e[0m"], 4) == ["\e[31mabcd\e[0m"]
+  end
 end

@@ -172,7 +172,7 @@ defmodule Breeze.ExampleSnapshotTest do
     wait_until(fn ->
       state = :sys.get_state(pid)
 
-      state.debug.stats[:last_render_cause] == :child_invalidated and
+      state.debug.stats[:last_render_cause] == :input_flush and
         state.frame.base_output =~ "GET" and state.frame.base_output =~ "DELETE"
     end)
 

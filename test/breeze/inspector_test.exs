@@ -50,7 +50,7 @@ defmodule Breeze.InspectorTest do
   defmodule AppInspectorPage do
     use Breeze.RemoteInspector.Page
 
-    def page, do: [label: "Runtime tools"]
+    def page(_opts), do: [label: "Runtime tools"]
 
     def render(assigns) do
       ~H"""

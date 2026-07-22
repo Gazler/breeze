@@ -1,6 +1,8 @@
 defmodule Breeze.Server.Frame do
   @moduledoc false
 
+  alias BackBreeze.Box.LayerMap
+
   def normalize_lines(output, screen_height) do
     output
     |> :binary.split("\n", [:global])
@@ -39,21 +41,75 @@ defmodule Breeze.Server.Frame do
     end
   end
 
-  def invalidate_patched_rows(nil, _viewport), do: nil
+  def patch_lines(
+        lines,
+        fragment,
+        %{left: left, top: top, width: width, height: height},
+        screen_width
+      )
+      when is_list(lines) and is_binary(fragment) and is_integer(left) and left >= 0 and
+             is_integer(top) and top >= 0 and is_integer(width) and width > 0 and
+             is_integer(height) and height > 0 and is_integer(screen_width) and
+             screen_width > 0 do
+    patch_width = min(width, max(screen_width - left, 0))
 
-  def invalidate_patched_rows(lines, %{top: top, height: height})
-      when is_list(lines) and is_integer(top) and is_integer(height) and height > 0 do
-    last_row = top + height - 1
+    if patch_width == 0 do
+      lines
+    else
+      fragment
+      |> normalize_lines(height)
+      |> Enum.with_index()
+      |> Enum.reduce(lines, fn {fragment_line, row_offset}, acc ->
+        row = top + row_offset
 
-    lines
-    |> Enum.with_index()
-    |> Enum.map(fn
-      {_line, row} when row >= top and row <= last_row -> nil
-      {line, _row} -> line
-    end)
+        if row < length(acc) do
+          List.replace_at(
+            acc,
+            row,
+            patch_line(Enum.at(acc, row, ""), fragment_line, left, patch_width, screen_width)
+          )
+        else
+          acc
+        end
+      end)
+    end
   end
 
-  def invalidate_patched_rows(lines, _viewport), do: lines
+  def patch_lines(lines, _fragment, _viewport, _screen_width), do: lines
+
+  def patch_output(output, fragment, %{top: top, height: height} = viewport, screen_width)
+      when is_binary(output) and is_binary(fragment) and is_integer(top) and top >= 0 and
+             is_integer(height) and height > 0 do
+    lines = :binary.split(output, "\n", [:global])
+    required_lines = top + height
+    lines = lines ++ List.duplicate("", max(required_lines - length(lines), 0))
+
+    lines
+    |> patch_lines(fragment, viewport, screen_width)
+    |> Enum.join("\n")
+  end
+
+  def patch_output(output, _fragment, _viewport, _screen_width), do: output
+
+  def fit_lines(lines, width) when is_list(lines) and is_integer(width) do
+    Enum.map(lines, &fit_line(&1, width))
+  end
+
+  def fit_line(_line, width) when width <= 0, do: ""
+
+  def fit_line(line, width) when is_binary(line) and is_integer(width) do
+    if BackBreeze.Utils.string_length(line) > width do
+      {layer_map, _max_x, _max_y} = LayerMap.generate(line, %{}, 0, 0)
+
+      layer_map
+      |> LayerMap.filter(%{start_x: 0, start_y: 0, max_x: width - 1, max_y: 0})
+      |> LayerMap.to_content(width, 1)
+    else
+      line
+    end
+  end
+
+  def fit_line(_line, _width), do: ""
 
   def child_patch_payload(fragment, viewport) do
     fragment
@@ -86,6 +142,32 @@ defmodule Breeze.Server.Frame do
 
     overlay_output = Breeze.TerminalOverlay.render_overlays(overlays)
     IO.iodata_to_binary(["\e[2J\e[H", output, overlay_output])
+  end
+
+  defp patch_line(line, fragment, left, width, screen_width) do
+    {line_map, _max_x, _max_y} = LayerMap.generate(line || "", %{}, 0, 0)
+    patch_map = patch_layer_map(fragment, width)
+    line_map = LayerMap.clear_covered_by_source(line_map, patch_map, {left, 0})
+    {line_map, _max_x, _max_y} = LayerMap.merge(line_map, patch_map, {left, 0})
+    LayerMap.to_content(line_map, screen_width, 1)
+  end
+
+  defp patch_layer_map(fragment, width) do
+    {blank_map, _max_x, _max_y} =
+      LayerMap.generate(String.duplicate(" ", width), %{}, 0, 0)
+
+    {fragment_map, _max_x, _max_y} = LayerMap.generate(fragment, %{}, 0, 0)
+
+    fragment_map =
+      LayerMap.filter(fragment_map, %{
+        start_x: 0,
+        start_y: 0,
+        max_x: width - 1,
+        max_y: 0
+      })
+
+    {patch_map, _max_x, _max_y} = LayerMap.merge(blank_map, fragment_map, {0, 0})
+    patch_map
   end
 
   defp changed_base_rows(prev_lines, lines) do

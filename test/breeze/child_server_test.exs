@@ -246,6 +246,7 @@ defmodule Breeze.ChildServerTest do
 
   test "palette notifications refresh system themes loaded from a theme struct source" do
     ref = make_ref()
+    owner = self()
 
     terminal = %Termite.Terminal{
       reader: ref,
@@ -259,7 +260,8 @@ defmodule Breeze.ChildServerTest do
         view: MouseView,
         terminal: terminal,
         theme: theme_source,
-        theme_source: theme_source
+        theme_source: theme_source,
+        invalidate: fn -> send(owner, :invalidated) end
       )
 
     assert %{theme: %{mode: :system16}} = Breeze.ChildServer.metadata(pid)
@@ -290,5 +292,7 @@ defmodule Breeze.ChildServerTest do
     send(pid, {:breeze_theme_palette, {:reader, ref}, :ready})
 
     assert %{theme: %{mode: :system}} = Breeze.ChildServer.metadata(pid)
+    assert_receive :invalidated
+    refute_receive :invalidated
   end
 end

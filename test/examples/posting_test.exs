@@ -205,6 +205,29 @@ defmodule PostingTest do
     def resize(term), do: term.size
   end
 
+  test "F2 renders the debug panel above the posting interface" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: Posting,
+        terminal: terminal,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    send(pid, {reader, {:data, "\eOQ"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      rendered = state.frame.last_lines |> Enum.join("\n") |> visible()
+
+      Map.has_key?(state.children, "debug") and rendered =~ "│Debug"
+    end)
+
+    Process.exit(pid, :normal)
+  end
+
   test "server input flush loop settles after a focus change" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader

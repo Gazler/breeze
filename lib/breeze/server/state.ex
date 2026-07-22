@@ -19,10 +19,16 @@ defmodule Breeze.Server.State.Frame do
   defstruct [
     :last_payload,
     :last_lines,
+    :display,
+    :display_owner,
+    :display_owner_ref,
     base_output: "",
     last_overlays: [],
+    display_suspended_pids: [],
+    resume_on_input?: false,
     decorations: [],
     animation_timer: nil,
+    animation_generation: nil,
     next_tick_at: nil,
     last_render_at: nil
   ]
@@ -54,6 +60,7 @@ defmodule Breeze.Server.State.Rendered do
   @moduledoc false
 
   defstruct tracking_table: nil,
+            runtime_hooks: [],
             boxes: %{},
             elements: %{},
             render_tree: nil,
