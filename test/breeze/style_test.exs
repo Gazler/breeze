@@ -84,6 +84,29 @@ defmodule Breeze.StyleTest do
     assert element.style.overflow == :hidden
   end
 
+  test "supports max-height classes, aliases, and inline styles" do
+    class_element =
+      Style.empty()
+      |> Style.put_class("height-full max-height-23")
+      |> Style.to_element([])
+
+    alias_element =
+      Style.empty()
+      |> Style.put_class("h-full max-h-19")
+      |> Style.to_element([])
+
+    inline_element =
+      Style.empty()
+      |> Style.put_style(%{max_height: 17})
+      |> Style.to_element([])
+
+    assert class_element.style.height == :full
+    assert class_element.style.max_height == 23
+    assert alias_element.style.height == :full
+    assert alias_element.style.max_height == 19
+    assert inline_element.style.max_height == 17
+  end
+
   describe "Tailwind-compatible utilities" do
     test "supports width, height, and size utilities" do
       assert Style.resolve_dimensions("w-12 h-4") == %{width: 12, height: 4}

@@ -315,6 +315,9 @@ defmodule Breeze.Style do
   defp apply_style("height-full", {style, attrs}, _theme),
     do: {BackBreeze.Style.height(style, :full), attrs}
 
+  defp apply_style("max-height-" <> num, {style, attrs}, _theme),
+    do: {BackBreeze.Style.max_height(style, String.to_integer(num)), attrs}
+
   defp apply_style("height-" <> num, {style, attrs}, _theme),
     do: {BackBreeze.Style.height(style, String.to_integer(num)), attrs}
 
@@ -524,6 +527,9 @@ defmodule Breeze.Style do
   defp normalize_utility_alias("h-full"), do: "height-full"
   defp normalize_utility_alias("h-screen"), do: "height-screen"
 
+  defp normalize_utility_alias("max-h-" <> value = token),
+    do: normalize_integer_alias(value, token, "max-height-")
+
   defp normalize_utility_alias("w-" <> value = token),
     do: normalize_integer_alias(value, token, "width-")
 
@@ -706,6 +712,9 @@ defmodule Breeze.Style do
 
   defp merge_style_entry(:height, value, {style, attrs}, _theme),
     do: {%{style | height: value}, attrs}
+
+  defp merge_style_entry(:max_height, value, {style, attrs}, _theme),
+    do: {BackBreeze.Style.max_height(style, value), attrs}
 
   defp merge_style_entry(:overflow, value, {style, attrs}, _theme),
     do: {%{style | overflow: value}, attrs}

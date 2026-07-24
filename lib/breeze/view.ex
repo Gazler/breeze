@@ -168,8 +168,9 @@ defmodule Breeze.View do
 
   The following utility groups are supported:
 
-   * sizing - `w-n`, `h-n`, and `size-n`; `w-*` and `h-*` also accept `auto`,
-     `full`, and `screen`, while `size-*` accepts `auto` and `full`
+   * sizing - `w-n`, `h-n`, `max-h-n`, and `size-n`; `w-*` and `h-*` also
+     accept `auto`, `full`, and `screen`, while `size-*` accepts `auto` and
+     `full`
    * padding - `p-n`, `px-n`, `py-n`, `pt-n`, `pr-n`, `pb-n`, and `pl-n`
    * typography - `font-bold`, `font-normal`, `italic`, `not-italic`, and
      `text-left|center|right`
