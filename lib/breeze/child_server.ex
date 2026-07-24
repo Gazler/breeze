@@ -3,6 +3,7 @@ defmodule Breeze.ChildServer do
 
   use GenServer
 
+  alias Breeze.Renderer.InputRouting
   alias Breeze.Theme.Probe, as: ThemeProbe
 
   def start(opts) do
@@ -15,6 +16,10 @@ defmodule Breeze.ChildServer do
 
   def metadata(pid, opts \\ []) do
     GenServer.call(pid, {:metadata, opts})
+  end
+
+  def input_routing_changed?(pid, opts \\ []) do
+    GenServer.call(pid, {:input_routing_changed?, opts})
   end
 
   def runtime_state(pid, timeout \\ 5_000) do
@@ -167,6 +172,37 @@ defmodule Breeze.ChildServer do
        implicit_state: metadata_term.implicit_state,
        implicit_meta: metadata_term.implicit_meta
      }, term}
+  end
+
+  def handle_call({:input_routing_changed?, opts}, _from, term) do
+    probe_term = input_routing_probe_term(term, opts)
+    desired_signature = input_routing_signature(probe_term)
+    focused_implicit_id = focused_implicit_id(probe_term, probe_term.focused)
+
+    implicit_state =
+      probe_term.retained_implicit_state
+      |> Map.merge(probe_term.implicit_state)
+
+    previous_elements =
+      probe_term.retained_elements
+      |> Map.merge(probe_term.elements)
+
+    changed? =
+      InputRouting.structure_changed?(
+        probe_term.input_routing_signature,
+        desired_signature,
+        probe_term.focused
+      ) or
+        InputRouting.focused_implicit_changed?(
+          desired_signature,
+          focused_implicit_id,
+          Map.get(implicit_state, focused_implicit_id),
+          Map.get(probe_term.implicit_meta, focused_implicit_id, %{}),
+          Map.get(previous_elements, focused_implicit_id)
+        ) or
+        live_children_routing_changed?(desired_signature, probe_term, opts)
+
+    {:reply, changed?, term}
   end
 
   def handle_call(:runtime_state, _from, term) do
@@ -843,6 +879,8 @@ defmodule Breeze.ChildServer do
         Breeze.RenderState.build(term, acc)
       end)
 
+    term = %{term | input_routing_signature: Map.get(acc, :input_routing_signature)}
+
     focus_meta = Breeze.Focus.build_meta(acc.elements, term.implicit_state)
 
     focus_memory =
@@ -879,6 +917,85 @@ defmodule Breeze.ChildServer do
     }
 
     {term, acc, box}
+  end
+
+  defp input_routing_signature(term) do
+    implicit_state =
+      term.retained_implicit_state
+      |> Map.merge(term.implicit_state)
+
+    Breeze.Renderer.input_routing_signature(
+      term.view,
+      term.assigns,
+      terminal: term.terminal,
+      theme: term.theme,
+      theme_source: term.theme_source,
+      apply_theme_defaults: term.apply_theme_defaults?,
+      focused: term.focused,
+      implicit_state: implicit_state,
+      implicit_meta: term.implicit_meta
+    )
+  end
+
+  defp input_routing_probe_term(term, opts) do
+    case Keyword.fetch(opts, :assigns) do
+      {:ok, assigns} ->
+        term
+        |> apply_external_assigns(Map.new(assigns))
+        |> sync_theme_assigns()
+
+      :error ->
+        term
+    end
+  end
+
+  defp live_children_routing_changed?(desired_signature, term, opts) do
+    desired_live = InputRouting.live_entries(desired_signature)
+    live_children = Keyword.get(opts, :live_children, term.children)
+    live_prefix = Keyword.get(opts, :live_prefix)
+
+    Enum.any?(desired_live, fn {id, attrs} ->
+      child_id = live_probe_id(live_prefix, id)
+
+      case Map.get(live_children, child_id) do
+        %{pid: pid} = child when is_pid(pid) ->
+          focused? = InputRouting.contains_focus?(id, term.focused)
+
+          desired_view = fetch_live_attr(attrs, :view, nil)
+          desired_start_opts = fetch_live_attr(attrs, :start_opts, [])
+          desired_assigns = fetch_live_attr(attrs, :assigns, %{}) |> Map.new()
+
+          cond do
+            not Process.alive?(pid) ->
+              focused?
+
+            desired_view != child.view or desired_start_opts != child.start_opts ->
+              focused?
+
+            focused? or desired_assigns != Map.get(child, :assigns, %{}) ->
+              safe_input_routing_changed?(pid,
+                assigns: desired_assigns,
+                live_children: live_children,
+                live_prefix: child_id
+              )
+
+            true ->
+              false
+          end
+
+        _child ->
+          true
+      end
+    end)
+  end
+
+  defp live_probe_id(nil, id), do: id
+  defp live_probe_id(prefix, id), do: prefix <> "::" <> id
+
+  defp safe_input_routing_changed?(pid, opts) do
+    Breeze.ChildServer.input_routing_changed?(pid, opts)
+  catch
+    :exit, _reason -> true
   end
 
   defp normalize_result({:noreply, next_term}, _term), do: {:noreply, next_term}

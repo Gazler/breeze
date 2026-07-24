@@ -3,6 +3,7 @@ defmodule Breeze.Renderer do
 
   alias BackBreeze.Box
   alias BackBreeze.VirtualText
+  alias Breeze.Renderer.InputRouting
   alias Breeze.Style, as: RenderStyle
   alias Breeze.Theme
 
@@ -25,13 +26,29 @@ defmodule Breeze.Renderer do
 
     rendered = mod.render(assigns)
 
-    [{root_tag, _, root_children}] =
+    [root = {root_tag, _, root_children}] =
       rendered
       |> Breeze.Template.render_to_tree(assigns)
 
     root_children = prune_hidden_nodes(root_children, opts)
+
+    input_routing_signature = InputRouting.signature([put_elem(root, 2, root_children)])
+
     opts = maybe_attach_live_viewports(root_tag, root_children, opts)
-    build_from_tree_nodes(root_tag, root_children, opts)
+
+    {acc, box} = build_from_tree_nodes(root_tag, root_children, opts)
+    {Map.put(acc, :input_routing_signature, input_routing_signature), box}
+  end
+
+  def input_routing_signature(mod, assigns, opts \\ []) do
+    assigns = put_breeze_render_context(assigns, opts)
+    rendered = mod.render(assigns)
+
+    [root = {_root_tag, _, root_children}] =
+      Breeze.Template.render_to_tree(rendered, assigns)
+
+    root_children = prune_hidden_nodes(root_children, opts)
+    InputRouting.signature([put_elem(root, 2, root_children)])
   end
 
   def render(mod, assigns, opts \\ []) do
@@ -54,12 +71,15 @@ defmodule Breeze.Renderer do
         mod.render(assigns)
       end)
 
-    [{root_tag, _, root_children}] =
+    [root = {root_tag, _, root_children}] =
       profile(profile_scope, profile_label, :template_tree_us, fn ->
         Breeze.Template.render_to_tree(rendered, assigns)
       end)
 
     root_children = prune_hidden_nodes(root_children, opts)
+
+    input_routing_signature = InputRouting.signature([put_elem(root, 2, root_children)])
+
     opts = maybe_attach_live_viewports(root_tag, root_children, opts)
 
     {acc, box} =
@@ -77,7 +97,12 @@ defmodule Breeze.Renderer do
 
     emit_metric(profile_scope, profile_label, :element_count, map_size(acc.elements))
 
-    {Map.put(acc, :dimensions, dimensions), box}
+    acc =
+      acc
+      |> Map.put(:dimensions, dimensions)
+      |> Map.put(:input_routing_signature, input_routing_signature)
+
+    {acc, box}
   end
 
   defp put_breeze_render_context(assigns, opts) when is_map(assigns) do

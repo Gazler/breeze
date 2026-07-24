@@ -13,6 +13,11 @@ defmodule Breeze.Implicit do
   `last_state` is the state from the preceding render; once layout is known it
   also contains the previous `Breeze.Viewport` under `:__element__`.
 
+  Implicit modules are registered from static module references in compiled
+  templates. Initialization may run during input-routing reconciliation as
+  well as while a render settles state and layout, so `init/3` must not rely on
+  a particular call count and should not perform side effects.
+
   An initializer returns `{:ok, state}` or `{:ok, state, options}`. The options are:
 
     * `:rerender_every` - a positive interval in milliseconds for asynchronous

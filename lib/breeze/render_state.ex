@@ -57,6 +57,18 @@ defmodule Breeze.RenderState do
     build_dimensions(Enum.sort(acc.elements), acc.dimensions)
   end
 
+  @doc false
+  def init_implicit(mod, items, root_attrs, last_state) do
+    case Code.ensure_loaded(mod) do
+      {:module, _module} ->
+        normalize_init_result(mod.init(items, root_attrs, last_state))
+
+      {:error, reason} ->
+        raise ArgumentError,
+              "implicit #{inspect(mod)} could not be loaded (#{inspect(reason)})"
+    end
+  end
+
   defp init_implicits_and_events(sorted_elements, term, total) do
     {implicit_build_state, events} =
       Enum.reduce(sorted_elements, {initial_implicit_build_state(), %{}}, fn {_idx, elem} = item,
@@ -327,15 +339,7 @@ defmodule Breeze.RenderState do
         element -> Map.put(last_state, :__element__, element)
       end
 
-    {implicit_state, implicit_meta} =
-      case Code.ensure_loaded(mod) do
-        {:module, _module} ->
-          normalize_init_result(mod.init(items, root_attrs, last_state))
-
-        {:error, reason} ->
-          raise ArgumentError,
-                "implicit #{inspect(mod)} could not be loaded (#{inspect(reason)})"
-      end
+    {implicit_state, implicit_meta} = init_implicit(mod, items, root_attrs, last_state)
 
     {
       Map.put(acc, id, {mod, implicit_state}),
