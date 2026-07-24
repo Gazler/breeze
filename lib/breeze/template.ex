@@ -9,9 +9,13 @@ defmodule Breeze.Template do
     @type t :: %__MODULE__{nodes: list(), env: Macro.Env.t()}
   end
 
-  defstruct [:nodes, :env]
+  defstruct [:nodes, :env, implicit_modules: []]
 
-  @type t :: %__MODULE__{nodes: list(), env: Macro.Env.t()}
+  @type t :: %__MODULE__{
+          nodes: list(),
+          env: Macro.Env.t(),
+          implicit_modules: [module()]
+        }
   @type rendered :: t() | {t(), map()}
 
   @expression_pseudo_vars [:__CALLER__, :__DIR__, :__ENV__, :__MODULE__, :__STACKTRACE__]
@@ -56,11 +60,100 @@ defmodule Breeze.Template do
 
   def compile!(source, %Macro.Env{} = env, opts) when is_binary(source) and is_list(opts) do
     %Syntax{nodes: nodes} = parse!(source, env)
+    {nodes, implicit_modules} = register_static_implicits(nodes, env)
 
     %__MODULE__{
       nodes: compile_nodes(nodes, env, opts),
-      env: Macro.Env.prune_compile_info(env)
+      env: Macro.Env.prune_compile_info(env),
+      implicit_modules: implicit_modules
     }
+  end
+
+  def implicit_modules(%__MODULE__{implicit_modules: implicit_modules}),
+    do: implicit_modules
+
+  defp register_static_implicits(nodes, env) do
+    {nodes, implicit_modules} =
+      Enum.map_reduce(nodes, [], fn node, acc ->
+        {node, node_modules} = register_static_implicit_node(node, env)
+        {node, acc ++ node_modules}
+      end)
+
+    {nodes, Enum.uniq(implicit_modules)}
+  end
+
+  defp register_static_implicit_node(
+         {:element, name, attrs, directives, children},
+         env
+       ) do
+    {children, child_modules} = register_static_implicits(children, env)
+
+    if implicit_host_element?(name) do
+      {attrs, attr_modules} =
+        Enum.map_reduce(attrs, [], fn
+          {:dynamic, "implicit", expr}, acc ->
+            mod = static_implicit_module!(expr, env)
+            {{:static, "implicit", mod}, [mod | acc]}
+
+          {:static, "implicit", _value}, _acc ->
+            static_implicit_module_error!(env)
+
+          {:boolean, "implicit"}, _acc ->
+            static_implicit_module_error!(env)
+
+          attr, acc ->
+            {attr, acc}
+        end)
+
+      {{:element, name, attrs, directives, children}, Enum.reverse(attr_modules) ++ child_modules}
+    else
+      {{:element, name, attrs, directives, children}, child_modules}
+    end
+  end
+
+  defp register_static_implicit_node(node, _env), do: {node, []}
+
+  defp implicit_host_element?("." <> _component), do: false
+  defp implicit_host_element?(":" <> _slot), do: false
+  defp implicit_host_element?("live"), do: false
+  defp implicit_host_element?(_name), do: true
+
+  defp static_implicit_module!(expr, env) do
+    expanded =
+      case expr do
+        mod when is_atom(mod) ->
+          mod
+
+        {:__aliases__, _meta, _parts} ->
+          Macro.expand(expr, env)
+
+        {:__MODULE__, _meta, _context} ->
+          Macro.expand(expr, env)
+
+        _ ->
+          nil
+      end
+
+    if is_atom(expanded) and expanded not in [nil, true, false] do
+      expanded
+    else
+      static_implicit_module_error!(env, expr)
+    end
+  end
+
+  defp static_implicit_module_error!(env, expr \\ nil) do
+    line =
+      case expr do
+        {_form, meta, _args} when is_list(meta) -> Keyword.get(meta, :line, env.line)
+        _ -> env.line
+      end
+
+    raise CompileError,
+      file: env.file,
+      line: line,
+      description:
+        "the implicit attribute must be a static module, for example " <>
+          "implicit={MyApp.Implicit}; use :if to add or remove the element dynamically"
   end
 
   defp compile_nodes(nodes, env, opts) do
@@ -608,10 +701,22 @@ defmodule Breeze.Template do
         end
 
       {:spread, expr} ->
-        expr
-        |> eval_expr(ctx)
-        |> spread_pairs(:string)
+        pairs =
+          expr
+          |> eval_expr(ctx)
+          |> spread_pairs(:string)
+
+        reject_spread_implicit!(pairs)
+        pairs
     end)
+  end
+
+  defp reject_spread_implicit!(pairs) do
+    if Enum.any?(pairs, fn {name, _value} -> name == "implicit" end) do
+      raise ArgumentError,
+            "the implicit attribute cannot be supplied through a spread; " <>
+              "write implicit={MyApp.Implicit} directly in the template"
+    end
   end
 
   defp eval_component_attrs(attrs, ctx) do
