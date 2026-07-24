@@ -9,13 +9,9 @@ defmodule Breeze.Template do
     @type t :: %__MODULE__{nodes: list(), env: Macro.Env.t()}
   end
 
-  defstruct [:nodes, :env, implicit_modules: []]
+  defstruct [:nodes, :env]
 
-  @type t :: %__MODULE__{
-          nodes: list(),
-          env: Macro.Env.t(),
-          implicit_modules: [module()]
-        }
+  @type t :: %__MODULE__{nodes: list(), env: Macro.Env.t()}
   @type rendered :: t() | {t(), map()}
 
   @expression_pseudo_vars [:__CALLER__, :__DIR__, :__ENV__, :__MODULE__, :__STACKTRACE__]
@@ -60,58 +56,44 @@ defmodule Breeze.Template do
 
   def compile!(source, %Macro.Env{} = env, opts) when is_binary(source) and is_list(opts) do
     %Syntax{nodes: nodes} = parse!(source, env)
-    {nodes, implicit_modules} = register_static_implicits(nodes, env)
+    nodes = normalize_static_implicits(nodes, env)
 
     %__MODULE__{
       nodes: compile_nodes(nodes, env, opts),
-      env: Macro.Env.prune_compile_info(env),
-      implicit_modules: implicit_modules
+      env: Macro.Env.prune_compile_info(env)
     }
   end
 
-  def implicit_modules(%__MODULE__{implicit_modules: implicit_modules}),
-    do: implicit_modules
-
-  defp register_static_implicits(nodes, env) do
-    {nodes, implicit_modules} =
-      Enum.map_reduce(nodes, [], fn node, acc ->
-        {node, node_modules} = register_static_implicit_node(node, env)
-        {node, acc ++ node_modules}
-      end)
-
-    {nodes, Enum.uniq(implicit_modules)}
+  defp normalize_static_implicits(nodes, env) do
+    Enum.map(nodes, &normalize_static_implicit_node(&1, env))
   end
 
-  defp register_static_implicit_node(
-         {:element, name, attrs, directives, children},
-         env
-       ) do
-    {children, child_modules} = register_static_implicits(children, env)
+  defp normalize_static_implicit_node({:element, name, attrs, directives, children}, env) do
+    children = normalize_static_implicits(children, env)
 
     if implicit_host_element?(name) do
-      {attrs, attr_modules} =
-        Enum.map_reduce(attrs, [], fn
-          {:dynamic, "implicit", expr}, acc ->
-            mod = static_implicit_module!(expr, env)
-            {{:static, "implicit", mod}, [mod | acc]}
+      attrs =
+        Enum.map(attrs, fn
+          {:dynamic, "implicit", expr} ->
+            {:static, "implicit", static_implicit_module!(expr, env)}
 
-          {:static, "implicit", _value}, _acc ->
+          {:static, "implicit", _value} ->
             static_implicit_module_error!(env)
 
-          {:boolean, "implicit"}, _acc ->
+          {:boolean, "implicit"} ->
             static_implicit_module_error!(env)
 
-          attr, acc ->
-            {attr, acc}
+          attr ->
+            attr
         end)
 
-      {{:element, name, attrs, directives, children}, Enum.reverse(attr_modules) ++ child_modules}
+      {:element, name, attrs, directives, children}
     else
-      {{:element, name, attrs, directives, children}, child_modules}
+      {:element, name, attrs, directives, children}
     end
   end
 
-  defp register_static_implicit_node(node, _env), do: {node, []}
+  defp normalize_static_implicit_node(node, _env), do: node
 
   defp implicit_host_element?("." <> _component), do: false
   defp implicit_host_element?(":" <> _slot), do: false
@@ -121,17 +103,10 @@ defmodule Breeze.Template do
   defp static_implicit_module!(expr, env) do
     expanded =
       case expr do
-        mod when is_atom(mod) ->
-          mod
-
-        {:__aliases__, _meta, _parts} ->
-          Macro.expand(expr, env)
-
-        {:__MODULE__, _meta, _context} ->
-          Macro.expand(expr, env)
-
-        _ ->
-          nil
+        mod when is_atom(mod) -> mod
+        {:__aliases__, _meta, _parts} -> Macro.expand(expr, env)
+        {:__MODULE__, _meta, _context} -> Macro.expand(expr, env)
+        _ -> nil
       end
 
     if is_atom(expanded) and expanded not in [nil, true, false] do
@@ -701,10 +676,7 @@ defmodule Breeze.Template do
         end
 
       {:spread, expr} ->
-        pairs =
-          expr
-          |> eval_expr(ctx)
-          |> spread_pairs(:string)
+        pairs = expr |> eval_expr(ctx) |> spread_pairs(:string)
 
         reject_spread_implicit!(pairs)
         pairs

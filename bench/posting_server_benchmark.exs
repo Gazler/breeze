@@ -90,7 +90,8 @@ defmodule BreezeBench.PostingServerBenchmark do
 
   defp settled?(state) do
     :queue.is_empty(state.input.queued_input) and not state.input.flush_scheduled? and
-      is_nil(state.input.pending_ref) and is_nil(state.frame.animation_timer)
+      is_nil(state.input.render_timer) and is_nil(state.input.pending_ref) and
+      is_nil(state.frame.animation_timer)
   end
 
   defp report(label, samples) do

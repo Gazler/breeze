@@ -59,7 +59,9 @@ defmodule Breeze.Runtime.FrameTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      :queue.is_empty(state.input.queued_input) and not state.input.flush_scheduled?
+
+      :queue.is_empty(state.input.queued_input) and not state.input.flush_scheduled? and
+        is_nil(state.input.render_timer)
     end)
 
     assert :ok = Breeze.Runtime.display_frame(pid, :live)
@@ -113,6 +115,32 @@ defmodule Breeze.Runtime.FrameTest do
     send(view_pid, :unblock)
     assert :ok = Breeze.Runtime.display_frame(pid, :live)
     assert %{view: BlockingView} = Breeze.ChildServer.metadata(view_pid)
+
+    stop_gen_server(pid)
+  end
+
+  test "pausing commits a deferred input render before capturing the frame" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+    {:ok, pid} = start_app_server(view: DeferredPauseRoot, terminal: terminal)
+
+    :sys.replace_state(pid, fn state ->
+      put_in(state.frame.last_render_at, System.monotonic_time(:millisecond) + 5_000)
+    end)
+
+    send(pid, {reader, {:data, "+"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      Breeze.ChildServer.metadata(state.view_pid).assigns.count == 1 and
+        is_nil(state.input.pending_ref) and is_reference(state.input.render_timer)
+    end)
+
+    assert :ok = Breeze.Runtime.pause(pid)
+    paused = :sys.get_state(pid)
+    assert paused.frame.resume_on_input?
+    assert Enum.join(paused.frame.display.lines, "\n") =~ "count=1"
 
     stop_gen_server(pid)
   end

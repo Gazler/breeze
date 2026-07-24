@@ -195,44 +195,6 @@ defmodule Breeze.TemplateTest do
     end
   end
 
-  defmodule ImplicitRegistryView do
-    use Breeze.View
-
-    def render(assigns) do
-      ~H"""
-      <box>
-        <box id="input" implicit={Breeze.Implicit.Input}>
-        </box>
-        <box :if={@scroll?} id="scroll" implicit={Breeze.Implicit.Scroll}>
-        </box>
-      </box>
-      """
-    end
-  end
-
-  defmodule RegisteredImplicitLeaf do
-    use Breeze.Component
-
-    def implicit_field(assigns) do
-      ~H|<box id="registered" implicit={Breeze.Implicit.Input}>
-</box>|
-    end
-  end
-
-  defmodule RegisteredImplicitWrapper do
-    use Breeze.Component
-    import RegisteredImplicitLeaf
-
-    def implicit_wrapper(assigns), do: ~H"<.implicit_field/>"
-  end
-
-  defmodule ImportedImplicitRegistryView do
-    use Breeze.View
-    import RegisteredImplicitWrapper
-
-    def render(assigns), do: ~H"<.implicit_wrapper/>"
-  end
-
   defmodule SpreadImplicitView do
     use Breeze.View
 
@@ -336,25 +298,6 @@ defmodule Breeze.TemplateTest do
 
     test "supports private function components" do
       assert render(PrivateComponentView, %{value: "ok"}) == "<box>secret ok</box>"
-    end
-
-    test "registers static implicit modules while compiling templates" do
-      {template, _assigns} = ImplicitRegistryView.render(%{scroll?: false})
-
-      assert template.implicit_modules == [
-               Breeze.Implicit.Input,
-               Breeze.Implicit.Scroll
-             ]
-
-      assert ImplicitRegistryView.__breeze_implicits__() == [
-               Breeze.Implicit.Input,
-               Breeze.Implicit.Scroll
-             ]
-    end
-
-    test "propagates implicit registrations through imported components" do
-      assert RegisteredImplicitWrapper.__breeze_implicits__() == [Breeze.Implicit.Input]
-      assert ImportedImplicitRegistryView.__breeze_implicits__() == [Breeze.Implicit.Input]
     end
 
     test "rejects an implicit supplied through a spread" do

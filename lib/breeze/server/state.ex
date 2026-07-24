@@ -5,9 +5,13 @@ defmodule Breeze.Server.State.Input do
     :pending_ref,
     :pending_started_at,
     :pending_sync_child_render_id,
+    :render_cause,
+    :render_timer,
+    :render_timer_token,
     queued_input: :queue.new(),
     flush_scheduled?: false,
     render_after_flush?: false,
+    render_boundary?: false,
     last_interaction_at: nil,
     global_keybindings: []
   ]

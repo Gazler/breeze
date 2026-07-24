@@ -1,6 +1,23 @@
 defmodule Breeze.Server.Input do
   @moduledoc false
 
+  @pipeline_defaults [
+    pending_ref: nil,
+    pending_started_at: nil,
+    pending_sync_child_render_id: nil,
+    queued_input: :queue.new(),
+    flush_scheduled?: false,
+    render_cause: nil,
+    render_after_flush?: false,
+    render_boundary?: false,
+    render_timer: nil,
+    render_timer_token: nil
+  ]
+
+  def reset_pipeline(state, overrides \\ []) do
+    %{state | input: struct!(state.input, Keyword.merge(@pipeline_defaults, overrides))}
+  end
+
   def enqueue(state, decoded), do: update_in(state.input.queued_input, &:queue.in(decoded, &1))
 
   def schedule_flush(%{input: %{flush_scheduled?: true}} = state, _message), do: state

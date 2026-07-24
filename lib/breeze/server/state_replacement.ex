@@ -2,7 +2,7 @@ defmodule Breeze.Server.StateReplacement do
   @moduledoc false
 
   alias Breeze.Runtime.State, as: RuntimeState
-  alias Breeze.Server.{Error, FrameDisplay}
+  alias Breeze.Server.{Error, FrameDisplay, Input}
   alias Breeze.Server.State
 
   def prepare(state, %RuntimeState{root: %RuntimeState.View{} = root} = runtime_state) do
@@ -28,15 +28,7 @@ defmodule Breeze.Server.StateReplacement do
       |> Map.put(:children, %{})
       |> Map.put(:crash, nil)
       |> Map.put(:crash_scrollback?, false)
-      |> update_input(
-        pending_ref: nil,
-        pending_started_at: nil,
-        pending_sync_child_render_id: nil,
-        queued_input: :queue.new(),
-        flush_scheduled?: false,
-        render_after_flush?: false,
-        global_keybindings: global_keybindings
-      )
+      |> Input.reset_pipeline(global_keybindings: global_keybindings)
       |> Map.put(:frame, %State.Frame{last_render_at: System.monotonic_time(:millisecond)})
       |> Map.put(:rendered, %State.Rendered{
         tracking_table: state.rendered.tracking_table,
@@ -184,8 +176,6 @@ defmodule Breeze.Server.StateReplacement do
     rendered = struct!(state.rendered, runtime_hooks: hooks)
     %{state | rendered: rendered}
   end
-
-  defp update_input(state, updates), do: %{state | input: struct!(state.input, updates)}
 
   defp live_id(nil, id), do: id
   defp live_id(prefix, id), do: prefix <> "::" <> id

@@ -179,13 +179,9 @@ defmodule Breeze.ChildServer do
     desired_signature = input_routing_signature(probe_term)
     focused_implicit_id = focused_implicit_id(probe_term, probe_term.focused)
 
-    implicit_state =
-      probe_term.retained_implicit_state
-      |> Map.merge(probe_term.implicit_state)
+    implicit_state = probe_term.retained_implicit_state |> Map.merge(probe_term.implicit_state)
 
-    previous_elements =
-      probe_term.retained_elements
-      |> Map.merge(probe_term.elements)
+    previous_elements = probe_term.retained_elements |> Map.merge(probe_term.elements)
 
     changed? =
       InputRouting.structure_changed?(
@@ -199,8 +195,7 @@ defmodule Breeze.ChildServer do
           Map.get(implicit_state, focused_implicit_id),
           Map.get(probe_term.implicit_meta, focused_implicit_id, %{}),
           Map.get(previous_elements, focused_implicit_id)
-        ) or
-        live_children_routing_changed?(desired_signature, probe_term, opts)
+        ) or live_children_routing_changed?(desired_signature, probe_term, opts)
 
     {:reply, changed?, term}
   end
@@ -920,9 +915,7 @@ defmodule Breeze.ChildServer do
   end
 
   defp input_routing_signature(term) do
-    implicit_state =
-      term.retained_implicit_state
-      |> Map.merge(term.implicit_state)
+    implicit_state = term.retained_implicit_state |> Map.merge(term.implicit_state)
 
     Breeze.Renderer.input_routing_signature(
       term.view,
@@ -939,54 +932,49 @@ defmodule Breeze.ChildServer do
 
   defp input_routing_probe_term(term, opts) do
     case Keyword.fetch(opts, :assigns) do
-      {:ok, assigns} ->
-        term
-        |> apply_external_assigns(Map.new(assigns))
-        |> sync_theme_assigns()
-
-      :error ->
-        term
+      {:ok, assigns} -> term |> apply_external_assigns(Map.new(assigns)) |> sync_theme_assigns()
+      :error -> term
     end
   end
 
   defp live_children_routing_changed?(desired_signature, term, opts) do
-    desired_live = InputRouting.live_entries(desired_signature)
     live_children = Keyword.get(opts, :live_children, term.children)
     live_prefix = Keyword.get(opts, :live_prefix)
 
-    Enum.any?(desired_live, fn {id, attrs} ->
+    Enum.any?(InputRouting.live_entries(desired_signature), fn {id, attrs} ->
       child_id = live_probe_id(live_prefix, id)
+      child = Map.get(live_children, child_id)
+      focused? = InputRouting.contains_focus?(id, term.focused)
 
-      case Map.get(live_children, child_id) do
-        %{pid: pid} = child when is_pid(pid) ->
-          focused? = InputRouting.contains_focus?(id, term.focused)
-
-          desired_view = fetch_live_attr(attrs, :view, nil)
-          desired_start_opts = fetch_live_attr(attrs, :start_opts, [])
-          desired_assigns = fetch_live_attr(attrs, :assigns, %{}) |> Map.new()
-
-          cond do
-            not Process.alive?(pid) ->
-              focused?
-
-            desired_view != child.view or desired_start_opts != child.start_opts ->
-              focused?
-
-            focused? or desired_assigns != Map.get(child, :assigns, %{}) ->
-              safe_input_routing_changed?(pid,
-                assigns: desired_assigns,
-                live_children: live_children,
-                live_prefix: child_id
-              )
-
-            true ->
-              false
-          end
-
-        _child ->
-          true
-      end
+      live_child_routing_changed?(child, attrs, focused?, live_children, child_id)
     end)
+  end
+
+  defp live_child_routing_changed?(%{pid: pid} = child, attrs, focused?, live_children, child_id)
+       when is_pid(pid) do
+    desired_view = fetch_live_attr(attrs, :view, nil)
+    desired_start_opts = fetch_live_attr(attrs, :start_opts, [])
+    desired_assigns = fetch_live_attr(attrs, :assigns, %{}) |> Map.new()
+
+    if Process.alive?(pid) do
+      mount_changed? = desired_view != child.view or desired_start_opts != child.start_opts
+      should_probe? = focused? or desired_assigns != Map.get(child, :assigns, %{})
+
+      route_changed? =
+        safe_input_routing_changed?(pid,
+          assigns: desired_assigns,
+          live_children: live_children,
+          live_prefix: child_id
+        )
+
+      mount_changed? or (should_probe? and route_changed?)
+    else
+      focused?
+    end
+  end
+
+  defp live_child_routing_changed?(_child, _attrs, _focused?, _live_children, _child_id) do
+    true
   end
 
   defp live_probe_id(nil, id), do: id

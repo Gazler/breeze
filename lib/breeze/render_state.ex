@@ -64,8 +64,7 @@ defmodule Breeze.RenderState do
         normalize_init_result(mod.init(items, root_attrs, last_state))
 
       {:error, reason} ->
-        raise ArgumentError,
-              "implicit #{inspect(mod)} could not be loaded (#{inspect(reason)})"
+        raise ArgumentError, "implicit #{inspect(mod)} could not be loaded (#{inspect(reason)})"
     end
   end
 

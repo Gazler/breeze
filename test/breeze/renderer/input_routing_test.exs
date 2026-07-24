@@ -14,6 +14,16 @@ defmodule Breeze.Renderer.InputRoutingTest do
     def handle_modifiers(_type, _flags, _state), do: []
   end
 
+  defmodule StyleReconciliationProbe do
+    @behaviour Breeze.Implicit
+
+    def init([%{style_input: item_style}], %{style_input: root_style}, _state) do
+      {:ok, %{item_style: item_style, root_style: root_style}}
+    end
+
+    def handle_modifiers(_type, _flags, _state), do: []
+  end
+
   test "keeps the owning implicit on the focused routing path" do
     previous = InputRouting.signature(implicit_live_tree("before"))
     desired = InputRouting.signature(implicit_live_tree("after"))
@@ -22,11 +32,11 @@ defmodule Breeze.Renderer.InputRoutingTest do
     refute InputRouting.structure_changed?(previous, desired, "outside")
   end
 
-  test "leaves non-routing implicit attributes to explicit reconciliation" do
+  test "treats implicit item attributes as potential routing structure" do
     previous = InputRouting.signature(implicit_tree("second"))
     desired = InputRouting.signature(implicit_tree("changed"))
 
-    refute InputRouting.structure_changed?(previous, desired, "focused")
+    assert InputRouting.structure_changed?(previous, desired, "focused")
   end
 
   test "ignores non-routing attributes outside the focused implicit" do
@@ -41,6 +51,13 @@ defmodule Breeze.Renderer.InputRoutingTest do
     desired = InputRouting.signature(focus_scope_tree("trap"))
 
     assert InputRouting.structure_changed?(previous, desired, nil)
+  end
+
+  test "treats unfocused implicit root attributes as potential routing structure" do
+    previous = InputRouting.signature(attribute_driven_implicit_tree(false))
+    desired = InputRouting.signature(attribute_driven_implicit_tree(true))
+
+    assert InputRouting.structure_changed?(previous, desired, "outside")
   end
 
   test "collects live entries without exposing traversal to the server" do
@@ -79,10 +96,20 @@ defmodule Breeze.Renderer.InputRoutingTest do
            )
   end
 
+  test "normalizes root and item styles like the renderer during reconciliation" do
+    signature = InputRouting.signature(styled_implicit_tree())
+
+    refute InputRouting.focused_implicit_changed?(
+             signature,
+             "styled",
+             {StyleReconciliationProbe, %{item_style: "text-red", root_style: "border-rounded"}},
+             %{},
+             nil
+           )
+  end
+
   defp implicit_tree(sibling_value, class \\ nil) do
-    root_attrs =
-      [{:attribute, ["id", "outside"]}]
-      |> maybe_add_class(class)
+    root_attrs = [{:attribute, ["id", "outside"]}] |> maybe_add_class(class)
 
     [
       {:box, [],
@@ -143,6 +170,29 @@ defmodule Breeze.Renderer.InputRoutingTest do
                  {:attribute_bool, ["focusable"]}
                ]}
             ]}
+       ]}
+    ]
+  end
+
+  defp attribute_driven_implicit_tree(trap?) do
+    [
+      {:box, [],
+       [
+         {:attribute, ["id", "implicit"]},
+         {:attribute, ["implicit", ReconciliationProbe]},
+         {:attribute, ["routing-trap", trap?]}
+       ]}
+    ]
+  end
+
+  defp styled_implicit_tree do
+    [
+      {:box, [],
+       [
+         {:attribute, ["id", "styled"]},
+         {:attribute, ["implicit", StyleReconciliationProbe]},
+         {:attribute, ["style", "border-rounded"]},
+         {:box, [], [{:attribute, ["style", "text-red"]}]}
        ]}
     ]
   end

@@ -180,6 +180,207 @@ defmodule Breeze.InputRouterTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule CountingInputView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok, assign(term, count: 0, events: 0, parent: Keyword.fetch!(opts, :parent))}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>count={@count} events={@events}</box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "ArrowUp"}, term), do: handle_counted_input(term, 1)
+
+    def handle_event(_, %{"key" => "ArrowDown"}, term), do: handle_counted_input(term, -1)
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+
+    defp handle_counted_input(term, delta) do
+      events = term.assigns.events + 1
+      send(term.assigns.parent, {:handled_input, events})
+
+      {:noreply, assign(term, count: term.assigns.count + delta, events: events)}
+    end
+  end
+
+  defmodule RoutedLiveChild do
+    use Breeze.View
+
+    def mount(opts, term), do: {:ok, assign(term, parent: Keyword.fetch!(opts, :parent), hits: 0)}
+
+    def render(assigns) do
+      ~H"""
+      <box>child hits={@hits}</box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "x"}, term) do
+      send(term.assigns.parent, {:routed_child_x, self()})
+      {:noreply, assign(term, hits: term.assigns.hits + 1)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term, invalidate: false}
+  end
+
+  defmodule DynamicLiveRouteView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok,
+       term
+       |> assign(parent: Keyword.fetch!(opts, :parent), live?: Keyword.fetch!(opts, :live?))
+       |> focus("target")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <live :if={@live?} id="target" view={RoutedLiveChild} start_opts={[parent: @parent]} focusable>
+        </live>
+        <box :if={!@live?} id="target" focusable>plain target</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "a"}, term), do: {:noreply, assign(term, live?: true)}
+    def handle_event(_, %{"key" => "r"}, term), do: {:noreply, assign(term, live?: false)}
+
+    def handle_event(_, %{"mouse" => _mouse}, term) do
+      send(term.assigns.parent, :mouse_removed_live_target)
+      {:noreply, assign(term, live?: false)}
+    end
+
+    def handle_event(_, %{"key" => "x"}, term) do
+      send(term.assigns.parent, :routed_root_x)
+      {:noreply, term}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term, invalidate: false}
+  end
+
+  defmodule OriginalUntrappedLiveChild do
+    use Breeze.View
+
+    def render(assigns), do: ~H"<box>original child</box>"
+  end
+
+  defmodule ReplacementTrappingLiveChild do
+    use Breeze.View
+
+    def mount(opts, term), do: {:ok, assign(term, parent: Keyword.fetch!(opts, :parent), hits: 0)}
+
+    def render(assigns) do
+      ~H"""
+      <box id="dialog" focus-scope="trap">
+        <box id="button" focusable>replacement child</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "x"}, term) do
+      send(term.assigns.parent, :replacement_child_x)
+      {:noreply, assign(term, hits: term.assigns.hits + 1)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term, invalidate: false}
+  end
+
+  defmodule ReplacedLiveIdentityView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok,
+       term
+       |> assign(
+         child_view: Breeze.InputRouterTest.OriginalUntrappedLiveChild,
+         parent: Keyword.fetch!(opts, :parent)
+       )
+       |> focus("outside")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box id="outside" focusable>outside</box>
+        <live id="slot" view={@child_view} start_opts={[parent: @parent]}>
+        </live>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "s"}, term) do
+      {:noreply, assign(term, child_view: Breeze.InputRouterTest.ReplacementTrappingLiveChild)}
+    end
+
+    def handle_event(_, %{"key" => "x"}, term) do
+      send(term.assigns.parent, :replacement_root_x)
+      {:noreply, term}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term, invalidate: false}
+  end
+
+  defmodule AttributeDrivenTrapImplicit do
+    @behaviour Breeze.Implicit
+
+    def init(_items, root_attrs, last_state) do
+      {:ok,
+       last_state
+       |> Map.put(:parent, Map.fetch!(root_attrs, :owner))
+       |> Map.put(:trap?, Map.get(root_attrs, :"routing-trap", false))
+       |> Map.put_new(:hits, 0), captures_keys: ["x"]}
+    end
+
+    def handle_event(_, %{"key" => "x"}, state) do
+      send(state.parent, :attribute_implicit_x)
+      {:noreply, Map.update!(state, :hits, &(&1 + 1))}
+    end
+
+    def handle_event(_, _, state), do: {:noreply, state}
+
+    def handle_modifiers(:root, _flags, %{trap?: true}), do: [focus_scope: :trap]
+    def handle_modifiers(_, _, _state), do: []
+  end
+
+  defmodule UnfocusedImplicitRoutingView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok,
+       term |> assign(parent: Keyword.fetch!(opts, :parent), trap?: false) |> focus("outside")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box id="outside" focusable>outside</box>
+        <box
+          id="attribute-scope"
+          focusable
+          implicit={Breeze.InputRouterTest.AttributeDrivenTrapImplicit}
+          owner={@parent}
+          routing-trap={@trap?}
+        >
+          attribute-driven implicit
+        </box>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "t"}, term), do: {:noreply, assign(term, trap?: true)}
+
+    def handle_event(_, %{"key" => "x"}, term) do
+      send(term.assigns.parent, :attribute_root_x)
+      {:noreply, term}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term, invalidate: false}
+  end
+
   defmodule FocusedInputView do
     use Breeze.View
     import Breeze.Blocks
@@ -219,6 +420,48 @@ defmodule Breeze.InputRouterTest do
     def animate(_, box, _, _, _), do: box
   end
 
+  defmodule StatefulCapturingImplicit do
+    @behaviour Breeze.Implicit
+
+    def init(_children, %{owner: owner, style_input: style_input}, state) do
+      {:ok,
+       state
+       |> Map.put(:owner, owner)
+       |> Map.put(:style_input, style_input)
+       |> Map.put_new(:count, 0), captures_keys: true}
+    end
+
+    def handle_event(_, %{"key" => key}, state) do
+      count = state.count + 1
+      send(state.owner, {:stateful_custom_event, count, key})
+      {:noreply, %{state | count: count}}
+    end
+
+    def handle_modifiers(_, _, _), do: []
+  end
+
+  defmodule StatefulCustomImplicitView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok, term |> assign(parent: Keyword.fetch!(opts, :parent)) |> focus("capture")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box
+        id="capture"
+        focusable
+        implicit={Breeze.InputRouterTest.StatefulCapturingImplicit}
+        owner={@parent}
+        style="border-rounded"
+      >
+        capture
+      </box>
+      """
+    end
+  end
+
   defmodule FocusedCaptureView do
     use Breeze.View
 
@@ -249,6 +492,184 @@ defmodule Breeze.InputRouterTest do
 
     def handle_event(_, _, term), do: {:noreply, term}
     def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule DynamicImplicitRouteView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok,
+       term
+       |> assign(
+         enabled?: Keyword.get(opts, :enabled?, false),
+         parent: Keyword.fetch!(opts, :parent)
+       )
+       |> focus("capture")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box
+          :if={@enabled?}
+          id="capture"
+          focusable
+          implicit={Breeze.InputRouterTest.CapturingImplicit}
+          br-change="captured"
+        >
+          capturing
+        </box>
+        <box :if={!@enabled?} id="capture" focusable>plain</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "i"}, term), do: {:noreply, assign(term, enabled?: true)}
+
+    def handle_event("captured", %{"key" => "d"}, term) do
+      send(term.assigns.parent, :implicit_disabled)
+      {:noreply, assign(term, enabled?: false)}
+    end
+
+    def handle_event("captured", event, term) do
+      send(term.assigns.parent, {:dynamically_captured, event})
+      {:noreply, term}
+    end
+
+    def handle_event(_, %{"key" => "x"}, term) do
+      send(term.assigns.parent, :dynamic_root_x)
+      {:noreply, term}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
+  defmodule ControlledInputView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok, term |> assign(parent: Keyword.fetch!(opts, :parent), value: "") |> focus("capture")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box
+          id="capture"
+          focusable
+          implicit={Breeze.Implicit.Input}
+          input-value={@value}
+          br-change="changed"
+        >
+        </box>
+      </box>
+      """
+    end
+
+    def handle_event("changed", %{value: value}, term) do
+      send(term.assigns.parent, {:controlled_input_change, value})
+      {:noreply, assign(term, value: "")}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
+  defmodule TrapLiveChild do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box :if={@trap?} id="dialog" focus-scope="trap">
+          <box id="button" focusable>button</box>
+        </box>
+      </box>
+      """
+    end
+
+    def handle_event(_, %{"key" => key}, term) do
+      send(term.assigns.parent, {:live_trapped_key, key})
+      {:noreply, term}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
+  defmodule DynamicLiveTrapInputView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok,
+       term
+       |> assign(parent: Keyword.fetch!(opts, :parent), trap?: false, value: "")
+       |> focus("capture")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box
+          id="capture"
+          focusable
+          implicit={Breeze.Implicit.Input}
+          input-value={@value}
+          br-change="changed"
+        >
+        </box>
+        <live id="sibling" view={TrapLiveChild} assigns={%{parent: @parent, trap?: @trap?}}>
+        </live>
+      </box>
+      """
+    end
+
+    def handle_event("changed", %{value: value}, term) do
+      send(term.assigns.parent, {:live_trap_input_change, value})
+      {:noreply, assign(term, trap?: true, value: value)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
+  defmodule ReparentedTrapInputView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok,
+       term
+       |> assign(parent: Keyword.fetch!(opts, :parent), inside?: false, value: "")
+       |> focus("capture")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box
+          id="capture"
+          focusable
+          implicit={Breeze.Implicit.Input}
+          input-value={@value}
+          br-change="changed"
+        >
+        </box>
+        <box id="dialog" focus-scope="trap">
+          <box :if={@inside?} id="button" focusable>button</box>
+        </box>
+        <box :if={!@inside?} id="button" focusable>button</box>
+      </box>
+      """
+    end
+
+    def handle_event("changed", %{value: value}, term) do
+      send(term.assigns.parent, {:reparented_trap_input_change, value})
+      {:noreply, assign(term, inside?: true, value: value)}
+    end
+
+    def handle_event(_, %{"key" => key}, term) do
+      send(term.assigns.parent, {:reparented_trapped_key, key})
+      {:noreply, term}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
   end
 
   defmodule FocusCycleView do
@@ -477,6 +898,383 @@ defmodule Breeze.InputRouterTest do
     assert_receive :next_handled, 500
   end
 
+  test "server coalesces ordered async callbacks within a frame" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: CountingInputView,
+        start_opts: [parent: self()],
+        terminal: terminal
+      )
+
+    on_exit(fn -> stop_gen_server(pid) end)
+
+    initial_render_count = :sys.get_state(pid).debug.stats[:render_base_count]
+    defer_input_render(pid)
+
+    :ok = :sys.suspend(pid)
+
+    Enum.each(1..20, fn index ->
+      sequence = if rem(index, 2) == 0, do: "\e[B", else: "\e[A"
+      send(pid, {reader, {:data, sequence}})
+    end)
+
+    :ok = :sys.resume(pid)
+
+    Enum.each(1..20, fn count -> assert_receive {:handled_input, ^count}, 500 end)
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      :queue.is_empty(state.input.queued_input) and is_nil(state.input.pending_ref) and
+        state.input.render_after_flush? and is_reference(state.input.render_timer)
+    end)
+
+    deferred_state = :sys.get_state(pid)
+    metadata = Breeze.ChildServer.metadata(deferred_state.view_pid)
+
+    assert metadata.assigns.count == 0
+    assert metadata.assigns.events == 20
+    assert deferred_state.debug.stats[:render_base_count] == initial_render_count
+
+    assert {:ok, _runtime_state} = Breeze.Runtime.capture_state(pid)
+
+    settled_state = :sys.get_state(pid)
+    assert settled_state.debug.stats[:render_base_count] - initial_render_count == 1
+    refute settled_state.input.render_after_flush?
+    assert is_nil(settled_state.input.render_timer)
+  end
+
+  test "server reconciles a newly added live input target before the next queued key" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: DynamicLiveRouteView,
+        start_opts: [parent: self(), live?: false],
+        terminal: terminal
+      )
+
+    on_exit(fn -> stop_gen_server(pid) end)
+    assert :sys.get_state(pid).children == %{}
+
+    :ok = :sys.suspend(pid)
+    send(pid, {reader, {:data, "a"}})
+    send(pid, {reader, {:data, "x"}})
+    :ok = :sys.resume(pid)
+
+    assert_receive {:routed_child_x, child_pid}, 500
+    wait_for_input_callbacks(pid)
+    refute_received :routed_root_x
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      match?(%{pid: ^child_pid, view: RoutedLiveChild}, state.children["target"])
+    end)
+  end
+
+  test "server replaces an unfocused live identity before the next queued key" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: ReplacedLiveIdentityView,
+        start_opts: [parent: self()],
+        terminal: terminal
+      )
+
+    on_exit(fn -> stop_gen_server(pid) end)
+    old_child = :sys.get_state(pid).children["slot"].pid
+    defer_input_render(pid)
+
+    :ok = :sys.suspend(pid)
+    send(pid, {reader, {:data, "s"}})
+    send(pid, {reader, {:data, "x"}})
+    :ok = :sys.resume(pid)
+
+    assert_receive :replacement_child_x, 500
+    wait_for_input_callbacks(pid)
+    refute_received :replacement_root_x
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      match?(%{view: ReplacementTrappingLiveChild}, state.children["slot"]) and
+        state.focused == "slot::button" and not Process.alive?(old_child)
+    end)
+  end
+
+  test "server removes a live input target before routing the next queued key" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: DynamicLiveRouteView,
+        start_opts: [parent: self(), live?: true],
+        terminal: terminal
+      )
+
+    on_exit(fn -> stop_gen_server(pid) end)
+    old_child = :sys.get_state(pid).children["target"].pid
+
+    :ok = :sys.suspend(pid)
+    send(pid, {reader, {:data, "r"}})
+    send(pid, {reader, {:data, "x"}})
+    :ok = :sys.resume(pid)
+
+    assert_receive :routed_root_x, 500
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      state.children == %{} and not Process.alive?(old_child)
+    end)
+
+    wait_for_input_callbacks(pid)
+    refute_received {:routed_child_x, ^old_child}
+  end
+
+  test "server commits a mouse tree change before routing a queued ordinary key" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: DynamicLiveRouteView,
+        start_opts: [parent: self(), live?: true],
+        terminal: terminal
+      )
+
+    on_exit(fn -> stop_gen_server(pid) end)
+    old_child = :sys.get_state(pid).children["target"].pid
+
+    defer_input_render(pid)
+
+    send(pid, {reader, {:data, "\e[<0;1;1M"}})
+
+    assert_receive :mouse_removed_live_target, 500
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      is_nil(state.input.pending_ref) and state.input.render_after_flush? and
+        state.input.render_boundary? and is_reference(state.input.render_timer) and
+        Map.has_key?(state.children, "target")
+    end)
+
+    send(pid, {reader, {:data, "x"}})
+
+    assert_receive :routed_root_x, 500
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      state.children == %{} and not Process.alive?(old_child)
+    end)
+
+    wait_for_input_callbacks(pid)
+    refute_received {:routed_child_x, ^old_child}
+  end
+
+  test "server reconciles a removed implicit before a later ordinary key" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: DynamicImplicitRouteView,
+        start_opts: [parent: self(), enabled?: true],
+        terminal: terminal
+      )
+
+    on_exit(fn -> stop_gen_server(pid) end)
+
+    defer_input_render(pid)
+
+    send(pid, {reader, {:data, "d"}})
+    assert_receive :implicit_disabled, 500
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      is_nil(state.input.pending_ref) and state.input.render_after_flush? and
+        is_reference(state.input.render_timer)
+    end)
+
+    send(pid, {reader, {:data, "x"}})
+
+    assert_receive :dynamic_root_x, 500
+    wait_for_input_callbacks(pid)
+    refute_received {:dynamically_captured, %{"key" => "x"}}
+  end
+
+  test "server reconciles routing derived by an unfocused implicit before the next queued key" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: UnfocusedImplicitRoutingView,
+        start_opts: [parent: self()],
+        terminal: terminal
+      )
+
+    on_exit(fn -> stop_gen_server(pid) end)
+    defer_input_render(pid)
+
+    :ok = :sys.suspend(pid)
+    send(pid, {reader, {:data, "t"}})
+    send(pid, {reader, {:data, "x"}})
+    :ok = :sys.resume(pid)
+
+    assert_receive :attribute_implicit_x, 500
+    wait_for_input_callbacks(pid)
+    refute_received :attribute_root_x
+    assert :sys.get_state(pid).focused == "attribute-scope"
+  end
+
+  test "server coalesces stable custom implicit callbacks without a built-in allowlist" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: StatefulCustomImplicitView,
+        start_opts: [parent: self()],
+        terminal: terminal
+      )
+
+    on_exit(fn -> stop_gen_server(pid) end)
+
+    initial_render_count = :sys.get_state(pid).debug.stats[:render_base_count]
+    defer_input_render(pid)
+    :ok = :sys.suspend(pid)
+
+    Enum.each(1..10, fn index ->
+      sequence = if rem(index, 2) == 0, do: "\e[B", else: "\e[A"
+      send(pid, {reader, {:data, sequence}})
+    end)
+
+    :ok = :sys.resume(pid)
+
+    Enum.each(1..10, fn index ->
+      key = if rem(index, 2) == 0, do: "ArrowDown", else: "ArrowUp"
+      assert_receive {:stateful_custom_event, ^index, ^key}, 500
+    end)
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      :queue.is_empty(state.input.queued_input) and is_nil(state.input.pending_ref) and
+        state.input.render_after_flush? and is_reference(state.input.render_timer)
+    end)
+
+    assert :sys.get_state(pid).debug.stats[:render_base_count] == initial_render_count
+    assert {:ok, _runtime_state} = Breeze.Runtime.capture_state(pid)
+    assert :sys.get_state(pid).debug.stats[:render_base_count] == initial_render_count + 1
+  end
+
+  test "server applies a controlled built-in input value before a later key" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: ControlledInputView,
+        start_opts: [parent: self()],
+        terminal: terminal
+      )
+
+    on_exit(fn -> stop_gen_server(pid) end)
+
+    defer_input_render(pid)
+
+    send(pid, {reader, {:data, "d"}})
+    assert_receive {:controlled_input_change, "d"}, 500
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      is_nil(state.input.pending_ref) and state.input.render_after_flush? and
+        is_reference(state.input.render_timer)
+    end)
+
+    send(pid, {reader, {:data, "x"}})
+
+    assert_receive {:controlled_input_change, "x"}, 500
+    wait_for_input_callbacks(pid)
+    refute_received {:controlled_input_change, "dx"}
+  end
+
+  test "server probes changed live assigns for a newly trapped scope" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: DynamicLiveTrapInputView,
+        start_opts: [parent: self()],
+        terminal: terminal
+      )
+
+    on_exit(fn -> stop_gen_server(pid) end)
+
+    defer_input_render(pid)
+
+    send(pid, {reader, {:data, "d"}})
+    assert_receive {:live_trap_input_change, "d"}, 500
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      is_nil(state.input.pending_ref) and state.input.render_after_flush? and
+        is_reference(state.input.render_timer)
+    end)
+
+    send(pid, {reader, {:data, "x"}})
+
+    assert_receive {:live_trapped_key, "x"}, 500
+    wait_for_input_callbacks(pid)
+    refute_received {:live_trap_input_change, "dx"}
+    assert :sys.get_state(pid).focused == "sibling::button"
+  end
+
+  test "server detects a focusable moving into an existing trapped scope" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: ReparentedTrapInputView,
+        start_opts: [parent: self()],
+        terminal: terminal
+      )
+
+    on_exit(fn -> stop_gen_server(pid) end)
+
+    defer_input_render(pid)
+
+    send(pid, {reader, {:data, "d"}})
+    assert_receive {:reparented_trap_input_change, "d"}, 500
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      is_nil(state.input.pending_ref) and state.input.render_after_flush? and
+        is_reference(state.input.render_timer)
+    end)
+
+    send(pid, {reader, {:data, "x"}})
+
+    assert_receive {:reparented_trapped_key, "x"}, 500
+    wait_for_input_callbacks(pid)
+    refute_received {:reparented_trap_input_change, "dx"}
+    assert :sys.get_state(pid).focused == "button"
+  end
+
   test "ctrl-c always halts regardless of global keybindings" do
     assert_ctrl_c_halts("\x03")
     assert_ctrl_c_halts("\e[99;5u")
@@ -614,6 +1412,19 @@ defmodule Breeze.InputRouterTest do
     assert :sys.get_state(server_pid).focused == "capture"
 
     stop_gen_server(pid)
+  end
+
+  defp defer_input_render(pid) do
+    :sys.replace_state(pid, fn state ->
+      put_in(state.frame.last_render_at, System.monotonic_time(:millisecond) + 5_000)
+    end)
+  end
+
+  defp wait_for_input_callbacks(pid) do
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      :queue.is_empty(state.input.queued_input) and is_nil(state.input.pending_ref)
+    end)
   end
 
   defp assert_ctrl_c_halts(sequence) do
@@ -903,6 +1714,43 @@ defmodule Breeze.InputRouterTest do
     refute_received :halted
 
     stop_gen_server(pid)
+  end
+
+  test "input router settles deferred implicit metadata before applying a stop key" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: DynamicImplicitRouteView,
+        start_opts: [parent: parent],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter],
+        halt_fun: fn -> send(parent, :halted) end,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    state = :sys.get_state(pid)
+    reader = state.reader
+    server_pid = state.server_pid
+
+    defer_input_render(server_pid)
+
+    send(pid, {reader, {:data, "i"}})
+
+    wait_until(fn ->
+      server_state = :sys.get_state(server_pid)
+
+      Breeze.ChildServer.metadata(server_state.view_pid).assigns.enabled? and
+        is_nil(server_state.input.pending_ref) and server_state.input.render_after_flush?
+    end)
+
+    send(pid, {reader, {:data, "q"}})
+
+    assert_receive {:dynamically_captured, %{"key" => "q"}}, 500
+    wait_for_input_callbacks(server_pid)
+    refute_received :halted
+
+    Process.exit(pid, :normal)
   end
 end
 

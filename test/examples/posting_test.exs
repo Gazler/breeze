@@ -313,12 +313,15 @@ defmodule Posting.ServerInputTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input)
+
+      not state.input.flush_scheduled? and is_nil(state.input.render_timer) and
+        :queue.is_empty(state.input.queued_input)
     end)
 
     state = :sys.get_state(pid)
 
     refute state.input.flush_scheduled?
+    assert is_nil(state.input.render_timer)
     assert :queue.is_empty(state.input.queued_input)
 
     stop_gen_server(pid)
@@ -341,7 +344,8 @@ defmodule Posting.ServerInputTest do
       state = :sys.get_state(pid)
       term = :sys.get_state(state.view_pid)
 
-      not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input) and
+      not state.input.flush_scheduled? and is_nil(state.input.render_timer) and
+        :queue.is_empty(state.input.queued_input) and
         String.ends_with?(term.assigns.url, String.duplicate("x", 100))
     end)
 
@@ -391,7 +395,8 @@ defmodule Posting.ServerEditingInputTest do
         state = :sys.get_state(server_pid)
         term = :sys.get_state(state.view_pid)
 
-        not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input) and
+        not state.input.flush_scheduled? and is_nil(state.input.render_timer) and
+          :queue.is_empty(state.input.queued_input) and
           term.assigns.url == ""
       end)
 
@@ -445,7 +450,8 @@ defmodule Posting.ServerEditingInputTest do
       state = :sys.get_state(pid)
       term = :sys.get_state(state.view_pid)
 
-      not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input) and
+      not state.input.flush_scheduled? and is_nil(state.input.render_timer) and
+        :queue.is_empty(state.input.queued_input) and
         String.ends_with?(term.assigns.url, "こんにちは")
     end)
 
@@ -492,7 +498,9 @@ defmodule Posting.InspectorOptInTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input)
+
+      not state.input.flush_scheduled? and is_nil(state.input.render_timer) and
+        :queue.is_empty(state.input.queued_input)
     end)
 
     assert %{enabled?: false, visible?: false, selected_id: nil} =
@@ -623,6 +631,7 @@ defmodule Posting.InspectorSelectionTest do
       state = :sys.get_state(pid)
 
       Process.alive?(pid) and not state.input.flush_scheduled? and
+        is_nil(state.input.render_timer) and
         :queue.is_empty(state.input.queued_input)
     end)
 
@@ -758,7 +767,9 @@ defmodule Posting.InspectorMouseInteractionTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input)
+
+      not state.input.flush_scheduled? and is_nil(state.input.render_timer) and
+        :queue.is_empty(state.input.queued_input)
     end)
 
     snapshot = Diagnostics.inspector_snapshot(pid)

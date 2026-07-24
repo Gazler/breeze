@@ -16,7 +16,6 @@ defmodule Breeze.Component do
     quote do
       import Breeze.Component
       Module.register_attribute(__MODULE__, :breeze_components, accumulate: true)
-      Module.register_attribute(__MODULE__, :breeze_implicits, accumulate: true)
       Module.register_attribute(__MODULE__, :__attrs__, accumulate: true)
       Module.register_attribute(__MODULE__, :__slot_attrs__, accumulate: true)
       Module.register_attribute(__MODULE__, :__slots__, accumulate: true)
@@ -47,10 +46,6 @@ defmodule Breeze.Component do
     |> Enum.each(&Module.put_attribute(__CALLER__.module, :breeze_components, &1))
 
     template
-    |> Breeze.Template.implicit_modules()
-    |> Enum.each(&Module.put_attribute(__CALLER__.module, :breeze_implicits, &1))
-
-    template
     |> Breeze.Template.local_helper_captures()
     |> Enum.each(&Module.put_attribute(__CALLER__.module, :__template_helper_captures__, &1))
 
@@ -77,11 +72,6 @@ defmodule Breeze.Component do
       |> Module.get_attribute(:breeze_components)
       |> Enum.uniq()
 
-    own_implicits =
-      env.module
-      |> Module.get_attribute(:breeze_implicits)
-      |> Enum.uniq()
-
     component_specs = pop_component_specs(env)
     helper_captures = pop_template_helper_captures(env)
     template_expressions = pop_template_expressions(env)
@@ -89,18 +79,6 @@ defmodule Breeze.Component do
     component_spec_names = Enum.map(component_specs, & &1.name)
     local_components = Enum.uniq(component_spec_names ++ local_component_names(env, components))
     public_components = Enum.filter(local_components, &Module.defines?(env.module, {&1, 1}, :def))
-
-    imported_components =
-      components
-      |> Enum.reject(&(&1 in local_components))
-      |> Enum.map(&{&1, imported_component_module(env, &1)})
-
-    implicits =
-      imported_components
-      |> Enum.flat_map(fn {_component, module} -> component_implicit_modules(module) end)
-      |> Kernel.++(own_implicits)
-      |> Enum.uniq()
-      |> Enum.sort()
 
     helper_definitions =
       helper_captures
@@ -140,10 +118,12 @@ defmodule Breeze.Component do
       end)
 
     imported_component_definitions =
-      Enum.map(imported_components, fn {component, module} ->
+      components
+      |> Enum.reject(&(&1 in local_components))
+      |> Enum.map(fn component ->
         imported_fun = Macro.var(component, nil)
 
-        case module do
+        case imported_component_module(env, component) do
           nil ->
             quote do
               def __breeze_component__(unquote(component), assigns),
@@ -184,7 +164,6 @@ defmodule Breeze.Component do
       unquote_splicing(imported_component_definitions)
 
       def __breeze_components__, do: unquote(public_components)
-      def __breeze_implicits__, do: unquote(implicits)
 
       def __breeze_component__(name, _assigns) do
         raise UndefinedFunctionError, module: __MODULE__, function: name, arity: 1
@@ -631,16 +610,6 @@ defmodule Breeze.Component do
       _ ->
         nil
     end)
-  end
-
-  defp component_implicit_modules(nil), do: []
-
-  defp component_implicit_modules(module) do
-    if Code.ensure_loaded?(module) and function_exported?(module, :__breeze_implicits__, 0) do
-      module.__breeze_implicits__()
-    else
-      []
-    end
   end
 
   defp validate_misplaced_attrs!([], _file, _message_fun), do: :ok

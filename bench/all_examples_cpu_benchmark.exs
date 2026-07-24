@@ -270,9 +270,7 @@ defmodule BreezeBench.AllExamplesCPU do
         stderr_to_stdout: true
       )
 
-    if status != 0 do
-      raise "benchmark worker #{scenario_id} failed (#{status}):\n#{output}"
-    end
+    if status != 0, do: raise("benchmark worker #{scenario_id} failed (#{status}):\n#{output}")
 
     output
     |> String.split("\n")
@@ -395,11 +393,7 @@ defmodule BreezeBench.AllExamplesCPU do
     |> Keyword.reject(fn {_key, value} -> is_nil(value) end)
   end
 
-  defp scenario_keys(scenario) do
-    scenario
-    |> Map.get(:keys, ["x", "y"])
-    |> Enum.map(&raw_key/1)
-  end
+  defp scenario_keys(scenario), do: scenario |> Map.get(:keys, ["x", "y"]) |> Enum.map(&raw_key/1)
 
   defp raw_key("ArrowUp"), do: "\e[A"
   defp raw_key("ArrowDown"), do: "\e[B"
@@ -432,8 +426,7 @@ defmodule BreezeBench.AllExamplesCPU do
     {:message_queue_len, router_mailbox_size} = Process.info(router, :message_queue_len)
     {:message_queue_len, mailbox_size} = Process.info(server, :message_queue_len)
 
-    if router_mailbox_size == 0 and mailbox_size == 0 and
-         :queue.is_empty(input.queued_input) and
+    if router_mailbox_size == 0 and mailbox_size == 0 and :queue.is_empty(input.queued_input) and
          not input.flush_scheduled? and is_nil(input.pending_ref) and
          not input.render_after_flush? and is_nil(Map.get(input, :render_timer)) do
       state
@@ -545,10 +538,7 @@ defmodule BreezeBench.AllExamplesCPU do
   end
 
   defp median_field(results, field, middle) do
-    results
-    |> Enum.map(&Map.fetch!(&1, field))
-    |> Enum.sort()
-    |> Enum.at(middle)
+    results |> Enum.map(&Map.fetch!(&1, field)) |> Enum.sort() |> Enum.at(middle)
   end
 
   defp benchmark_size do
@@ -566,8 +556,7 @@ defmodule BreezeBench.AllExamplesCPU do
   end
 
   defp fetch_scenario!(id) do
-    Enum.find(@scenarios, &(&1.id == id)) ||
-      raise "unknown scenario #{inspect(id)}"
+    Enum.find(@scenarios, &(&1.id == id)) || raise "unknown scenario #{inspect(id)}"
   end
 
   defp selected_scenarios do
@@ -597,10 +586,7 @@ defmodule BreezeBench.AllExamplesCPU do
       |> Enum.map(&Path.relative_to(&1, @examples_root))
       |> Enum.sort()
 
-    scenario_files =
-      @scenarios
-      |> Enum.map(& &1.file)
-      |> Enum.sort()
+    scenario_files = @scenarios |> Enum.map(& &1.file) |> Enum.sort()
 
     if files != scenario_files do
       raise """
@@ -633,11 +619,7 @@ defmodule BreezeBench.AllExamplesCPU do
     end
   end
 
-  defp pad_number(number, width) do
-    number
-    |> Integer.to_string()
-    |> String.pad_leading(width)
-  end
+  defp pad_number(number, width), do: number |> Integer.to_string() |> String.pad_leading(width)
 end
 
 BreezeBench.AllExamplesCPU.run()

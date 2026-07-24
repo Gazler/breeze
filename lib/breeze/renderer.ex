@@ -26,26 +26,20 @@ defmodule Breeze.Renderer do
 
     rendered = mod.render(assigns)
 
-    [root = {root_tag, _, root_children}] =
+    [{root_tag, _, root_children}] =
       rendered
       |> Breeze.Template.render_to_tree(assigns)
 
     root_children = prune_hidden_nodes(root_children, opts)
-
-    input_routing_signature = InputRouting.signature([put_elem(root, 2, root_children)])
-
     opts = maybe_attach_live_viewports(root_tag, root_children, opts)
-
-    {acc, box} = build_from_tree_nodes(root_tag, root_children, opts)
-    {Map.put(acc, :input_routing_signature, input_routing_signature), box}
+    build_from_tree_nodes(root_tag, root_children, opts)
   end
 
   def input_routing_signature(mod, assigns, opts \\ []) do
     assigns = put_breeze_render_context(assigns, opts)
     rendered = mod.render(assigns)
 
-    [root = {_root_tag, _, root_children}] =
-      Breeze.Template.render_to_tree(rendered, assigns)
+    [root = {_root_tag, _, root_children}] = Breeze.Template.render_to_tree(rendered, assigns)
 
     root_children = prune_hidden_nodes(root_children, opts)
     InputRouting.signature([put_elem(root, 2, root_children)])
@@ -77,9 +71,7 @@ defmodule Breeze.Renderer do
       end)
 
     root_children = prune_hidden_nodes(root_children, opts)
-
     input_routing_signature = InputRouting.signature([put_elem(root, 2, root_children)])
-
     opts = maybe_attach_live_viewports(root_tag, root_children, opts)
 
     {acc, box} =

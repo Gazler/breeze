@@ -265,9 +265,9 @@ defmodule Breeze.View do
   end
   ```
 
-  The module in an `implicit` attribute must be static so Breeze can register it
-  while compiling the template. To add or remove an implicit dynamically, put
-  `:if` on an element whose implicit module remains literal:
+  The module in an `implicit` attribute must be a static module reference. To add
+  or remove an implicit dynamically, put `:if` on an element whose implicit
+  module remains literal:
 
   ```heex
   <box :if={@enabled?} id="items" implicit={MyAppList}>...</box>

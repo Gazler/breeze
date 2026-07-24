@@ -12,9 +12,7 @@ defmodule Breeze.Renderer.InputRouting do
     "br-submit"
   ]
 
-  def signature(nodes) when is_list(nodes) do
-    signature(nodes, false)
-  end
+  def signature(nodes) when is_list(nodes), do: signature(nodes, false)
 
   def structure_changed?(previous, desired, focused) do
     focused_structure(previous, focused) != focused_structure(desired, focused) or
@@ -47,21 +45,15 @@ defmodule Breeze.Renderer.InputRouting do
     end
   end
 
-  def focused_structure(_signature, nil), do: []
+  defp focused_structure(_signature, nil), do: []
 
-  def focused_structure(signature, focused) do
-    signature
-    |> select_focus_path(focused)
-    |> project_structure(:focused)
+  defp focused_structure(signature, focused) do
+    signature |> select_focus_path(focused) |> project_structure(:focused, false)
   end
 
-  def global_structure(signature) do
-    project_structure(signature, :global)
-  end
+  defp global_structure(signature), do: project_structure(signature, :global, false)
 
-  def live_entries(signature) do
-    collect_live_entries(signature, %{})
-  end
+  def live_entries(signature), do: collect_live_entries(signature, %{})
 
   def contains_focus?(id, focused) when is_binary(id) and is_binary(focused) do
     focused == id or String.starts_with?(focused, id <> "::")
@@ -83,10 +75,7 @@ defmodule Breeze.Renderer.InputRouting do
     all_attrs = routing_attrs(children, :all)
     implicit? = attr_truthy?(all_attrs, "implicit")
 
-    attrs =
-      if within_implicit? or implicit?,
-        do: all_attrs,
-        else: routing_attrs(children, :root)
+    attrs = if within_implicit? or implicit?, do: all_attrs, else: routing_attrs(children, :root)
 
     nested = nested_nodes(children)
     id = attr_value(attrs, "id")
@@ -151,46 +140,44 @@ defmodule Breeze.Renderer.InputRouting do
   defp select_focus_path(_signature, _focused), do: []
 
   defp select_focus_entry(entry, focused) do
-    cond do
-      contains_focus?(entry_id(entry), focused) ->
-        [focus_target_entry(entry)]
-
-      true ->
-        case select_focus_path(entry_children(entry), focused) do
-          [] ->
-            []
-
-          selected ->
-            if entry_type(entry) == :implicit,
-              do: [entry],
-              else: [put_entry_children(entry, selected)]
-        end
+    if contains_focus?(entry_id(entry), focused) do
+      [focus_target_entry(entry)]
+    else
+      case {select_focus_path(entry_children(entry), focused), entry_type(entry)} do
+        {[], _} -> []
+        {_selected, :implicit} -> [entry]
+        {selected, _} -> [put_entry_children(entry, selected)]
+      end
     end
   end
 
-  defp project_structure(signature, mode) when is_list(signature) do
-    Enum.flat_map(signature, &project_entry(&1, mode))
+  defp project_structure(signature, mode, within_implicit?) when is_list(signature) do
+    Enum.flat_map(signature, &project_entry(&1, mode, within_implicit?))
   end
 
-  defp project_structure(_signature, _mode), do: []
+  defp project_structure(_signature, _mode, _within_implicit?), do: []
 
-  defp project_entry({:implicit, id, tag, attrs, nested}, mode) do
-    attrs = routing_structure_attrs(attrs)
-    nested = project_structure(nested, mode)
+  defp project_entry({:implicit, id, tag, attrs, nested}, mode, _within_implicit?) do
+    attrs = normalize_and_sort_attrs(attrs)
+    nested = project_structure(nested, mode, true)
     [{:implicit, id, tag, attrs, nested}]
   end
 
-  defp project_entry({:live, id, attrs}, :focused) do
+  defp project_entry({:live, id, attrs}, :focused, _within_implicit?) do
     [{:live, id, normalize_and_sort_attrs(attrs)}]
   end
 
-  defp project_entry({:live, id, _attrs}, :global) do
-    [{:live, id}]
+  defp project_entry({:live, id, _attrs}, :global, _within_implicit?), do: [{:live, id}]
+
+  defp project_entry({:node, id, tag, attrs, nested}, mode, true) do
+    attrs = normalize_and_sort_attrs(attrs)
+    nested = project_structure(nested, mode, true)
+    [{:node, id, tag, attrs, nested}]
   end
 
-  defp project_entry({:node, id, tag, attrs, nested}, mode) do
+  defp project_entry({:node, id, tag, attrs, nested}, mode, false) do
     attrs = routing_structure_attrs(attrs)
-    nested = project_structure(nested, mode)
+    nested = project_structure(nested, mode, false)
 
     if meaningful_routing_attrs?(attrs) or nested != [],
       do: [{:node, id, tag, attrs, nested}],
@@ -210,11 +197,8 @@ defmodule Breeze.Renderer.InputRouting do
 
   defp collect_live_entries(signature, acc) when is_list(signature) do
     Enum.reduce(signature, acc, fn
-      {:live, id, attrs}, acc ->
-        Map.put(acc, id, attrs)
-
-      entry, acc ->
-        collect_live_entries(entry_children(entry), acc)
+      {:live, id, attrs}, acc -> Map.put(acc, id, attrs)
+      entry, acc -> collect_live_entries(entry_children(entry), acc)
     end)
   end
 
@@ -222,11 +206,8 @@ defmodule Breeze.Renderer.InputRouting do
 
   defp find_implicit(signature, id) when is_list(signature) do
     Enum.find_value(signature, fn
-      {:implicit, ^id, _tag, _attrs, _nested} = entry ->
-        entry
-
-      entry ->
-        find_implicit(entry_children(entry), id)
+      {:implicit, ^id, _tag, _attrs, _nested} = entry -> entry
+      entry -> find_implicit(entry_children(entry), id)
     end)
   end
 
@@ -241,36 +222,28 @@ defmodule Breeze.Renderer.InputRouting do
 
   defp implicit_item_attrs(signature) when is_list(signature) do
     Enum.flat_map(signature, fn
-      {:implicit, _id, _tag, attrs, _nested} ->
-        [implicit_attrs(attrs)]
-
-      {:live, _id, _attrs} ->
-        []
-
-      {:node, _id, _tag, attrs, nested} ->
-        [implicit_attrs(attrs) | implicit_item_attrs(nested)]
+      {:implicit, _id, _tag, attrs, _nested} -> [implicit_attrs(attrs)]
+      {:live, _id, _attrs} -> []
+      {:node, _id, _tag, attrs, nested} -> [implicit_attrs(attrs) | implicit_item_attrs(nested)]
     end)
   end
 
   defp implicit_item_attrs(_signature), do: []
 
   defp implicit_attrs(attrs) do
-    attrs
-    |> attrs_to_map()
-    |> Map.drop([:focusable, :implicit, :id, :implicit_owner])
+    attrs |> attrs_to_map() |> Map.drop([:focusable, :implicit, :id, :implicit_owner])
   end
 
   defp attrs_to_map(attrs) do
     Enum.reduce(normalize_attrs(attrs), %{}, fn {name, value}, acc ->
-      Map.put(acc, existing_attr_key(name), value)
+      Map.put(acc, renderer_attr_key(name), value)
     end)
   end
 
-  defp existing_attr_key(name) do
-    String.to_existing_atom(name)
-  rescue
-    ArgumentError -> name
-  end
+  # Renderer.build_tree/9 exposes style source under :style_input and atomizes
+  # every other attribute name before implicit callbacks run.
+  defp renderer_attr_key("style"), do: :style_input
+  defp renderer_attr_key(name), do: String.to_atom(name)
 
   defp entry_type({type, _id, _tag, _attrs, _nested}), do: type
   defp entry_type({:live, _id, _attrs}), do: :live
@@ -293,17 +266,9 @@ defmodule Breeze.Renderer.InputRouting do
     {type, id, tag, attrs, nested}
   end
 
-  defp normalize_and_sort_attrs(attrs) do
-    attrs
-    |> normalize_attrs()
-    |> Enum.sort()
-  end
+  defp normalize_and_sort_attrs(attrs), do: attrs |> normalize_attrs() |> Enum.sort()
 
-  defp normalize_attr_map(attrs) do
-    attrs
-    |> normalize_attrs()
-    |> Map.new()
-  end
+  defp normalize_attr_map(attrs), do: attrs |> normalize_attrs() |> Map.new()
 
   defp normalize_attrs(attrs) when is_map(attrs) do
     Enum.map(attrs, fn {name, value} -> {normalize_attr_name(name), value} end)
