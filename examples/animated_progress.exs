@@ -5,8 +5,19 @@ defmodule AnimatedProgressBar do
     width = Keyword.get(opts, :width, 24)
     label = Keyword.get(opts, :label, "Animated progress")
     interval = Keyword.get(opts, :interval, 60)
-    send(self(), :tick)
-    {:ok, assign(term, value: 0, width: width, direction: 1, interval: interval, label: label)}
+    animate? = Keyword.get(opts, :animate?, true)
+
+    if animate?, do: send(self(), :tick)
+
+    {:ok,
+     assign(term,
+       value: 0,
+       width: width,
+       direction: 1,
+       interval: interval,
+       label: label,
+       animate?: animate?
+     )}
   end
 
   def render(assigns) do
@@ -28,7 +39,9 @@ defmodule AnimatedProgressBar do
   def handle_event(_, _, term), do: {:noreply, term}
 
   def handle_info(:tick, term) do
-    Process.send_after(self(), :tick, term.assigns.interval)
+    if term.assigns.animate? do
+      Process.send_after(self(), :tick, term.assigns.interval)
+    end
 
     next_value = term.assigns.value + term.assigns.direction
 
@@ -48,7 +61,9 @@ end
 defmodule AnimatedProgressExample do
   use Breeze.View
 
-  def mount(_opts, term), do: {:ok, term}
+  def mount(opts, term) do
+    {:ok, assign(term, animate?: Keyword.get(opts, :animate?, true))}
+  end
 
   def render(assigns) do
     ~H"""
@@ -62,7 +77,7 @@ defmodule AnimatedProgressExample do
         <live
           id="progress_slow"
           view={AnimatedProgressBar}
-          start_opts={[label: "Slow", width: 20, interval: 140]}
+          start_opts={[label: "Slow", width: 20, interval: 140, animate?: @animate?]}
         >
         </live>
         <box style="width-2">
@@ -70,7 +85,7 @@ defmodule AnimatedProgressExample do
         <live
           id="progress_medium"
           view={AnimatedProgressBar}
-          start_opts={[label: "Medium", width: 16, interval: 85]}
+          start_opts={[label: "Medium", width: 16, interval: 85, animate?: @animate?]}
         >
         </live>
         <box style="width-2">
@@ -78,7 +93,7 @@ defmodule AnimatedProgressExample do
         <live
           id="progress_fast"
           view={AnimatedProgressBar}
-          start_opts={[label: "Fast", width: 12, interval: 45]}
+          start_opts={[label: "Fast", width: 12, interval: 45, animate?: @animate?]}
         >
         </live>
       </box>

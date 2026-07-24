@@ -192,6 +192,65 @@ defmodule Breeze.ExampleSnapshotTest do
     )
   end
 
+  test "animated progress example snapshots independent child ticks" do
+    terminal = Termite.Terminal.start(adapter: SnapshotAdapter, size: {94, 10})
+    reader = terminal.reader
+
+    {:ok, pid} =
+      Breeze.Server.start_app_link(
+        view: AnimatedProgressExample,
+        start_opts: [animate?: false],
+        terminal: terminal,
+        reader: reader,
+        global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
+      )
+
+    on_exit(fn -> Process.exit(pid, :normal) end)
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      map_size(state.children) == 3 and
+        state.frame.base_output =~ "0/20" and
+        state.frame.base_output =~ "0/16" and
+        state.frame.base_output =~ "0/12"
+    end)
+
+    assert_snapshot(
+      :sys.get_state(pid).frame.base_output,
+      "examples/animated-progress/initial.ansi",
+      snapshot_dir: "../__snapshots__"
+    )
+
+    state = :sys.get_state(pid)
+
+    for {id, tick_count} <- [
+          {"progress_slow", 12},
+          {"progress_medium", 13},
+          {"progress_fast", 3}
+        ],
+        _tick <- 1..tick_count do
+      child = Map.fetch!(state.children, id)
+      assert {:noreply, _focused} = Breeze.ChildServer.dispatch_info(child.pid, :tick, terminal)
+    end
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      output = state.frame.base_output
+
+      state.debug.stats[:last_render_cause] == :child_patch and
+        output =~ "12/20" and
+        output =~ "13/16" and
+        output =~ "3/12"
+    end)
+
+    assert_snapshot(
+      :sys.get_state(pid).frame.base_output,
+      "examples/animated-progress/after-ticks.ansi",
+      snapshot_dir: "../__snapshots__"
+    )
+  end
+
   test "responsive example progressively adds layout chrome" do
     compact = Breeze.Test.start!(Responsive, size: {39, 24})
     medium = Breeze.Test.start!(Responsive, size: {60, 24})
