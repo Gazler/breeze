@@ -26,6 +26,19 @@ defmodule Breeze.InputCaptureTest do
     refute InputCapture.captures_key?(meta, "\t")
   end
 
+  test "batches printable keys only when explicitly enabled" do
+    key = %{"key" => "a"}
+
+    refute InputCapture.batches_printable_keys?(%{captures_printable_keys: true}, key)
+
+    assert InputCapture.batches_printable_keys?(
+             %{captures_printable_keys: true, batch_printable_keys: true},
+             key
+           )
+
+    refute InputCapture.batches_printable_keys?(%{batch_printable_keys: true}, key)
+  end
+
   test "captures control keys when enabled" do
     meta = %{captures_control_keys: true}
 

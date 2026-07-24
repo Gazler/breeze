@@ -26,6 +26,9 @@ defmodule Breeze.Implicit do
       capture selectively.
     * `:captures_printable_keys` - capture printable input and supported text
       editing keys.
+    * `:batch_printable_keys` - deliver adjacent printable input as one event whose
+      `"key"` contains the combined text and whose `"__batched_printable__"` flag is
+      true. This is opt-in and only applies with `:captures_printable_keys`.
     * `:captures_control_keys` - capture control-modified key input.
     * `:captures_focus_keys` - capture Tab and Shift-Tab input.
     * `:requires_layout_rerender` - rerender after the implicit's dimensions
@@ -98,6 +101,7 @@ defmodule Breeze.Implicit do
           | {:active_when_focused, boolean()}
           | {:captures_keys, boolean() | [key_name()]}
           | {:captures_printable_keys, boolean()}
+          | {:batch_printable_keys, boolean()}
           | {:captures_control_keys, boolean()}
           | {:captures_focus_keys, boolean()}
           | {:requires_layout_rerender, boolean()}

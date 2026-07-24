@@ -24,6 +24,7 @@ defmodule Breeze.Implicit.Input do
      rerender_every: 500,
      active_when_focused: true,
      captures_printable_keys: true,
+     batch_printable_keys: true,
      requires_layout_rerender: true}
   end
 

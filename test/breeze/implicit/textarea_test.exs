@@ -108,6 +108,7 @@ defmodule Breeze.Implicit.TextareaTest do
     assert meta[:rerender_every] == 500
     assert meta[:active_when_focused] == true
     assert meta[:captures_printable_keys] == true
+    assert meta[:batch_printable_keys] == true
     assert meta[:requires_layout_rerender] == true
   end
 

@@ -46,11 +46,19 @@ defmodule Breeze.Server.Input do
   end
 
   defp process_batched_input(
-         {:key, %{"__batched_printable__" => true} = event},
+         {:key, %{"__batched_printable__" => true, "key" => key} = event},
          state,
          handlers
-       ) do
-    handlers.handle_sync_or_deferred.({:key, event}, state)
+       )
+       when is_binary(key) do
+    if handlers.batchable_printable?.(event, state) do
+      {key, state} = coalesce_printable_keys_from_queue(key, state, handlers)
+      handlers.handle_sync_or_deferred.({:key, Map.put(event, "key", key)}, state)
+    else
+      state
+      |> prepend_printable_keys(key)
+      |> flush_batch(handlers)
+    end
   end
 
   defp process_batched_input({:key, key}, state, handlers) do
@@ -58,7 +66,6 @@ defmodule Breeze.Server.Input do
       {key, state} = coalesce_printable_keys_from_queue(key, state, handlers)
       handlers.handle_sync_or_deferred.({:key, batched_printable_event(key)}, state)
     else
-      {key, state} = coalesce_repeated_keys_from_queue(key, state, handlers)
       handlers.handle_sync_or_deferred.({:key, key}, state)
     end
   end
@@ -107,7 +114,7 @@ defmodule Breeze.Server.Input do
       {{:value, {:key, next_key}}, queue} ->
         if handlers.batchable_printable?.(next_key, state) do
           coalesce_printable_keys_from_queue(
-            key <> next_key,
+            key <> printable_key_text(next_key),
             put_in(state.input.queued_input, queue),
             handlers
           )
@@ -123,26 +130,18 @@ defmodule Breeze.Server.Input do
     end
   end
 
-  defp coalesce_repeated_keys_from_queue(key, state, handlers) do
-    case queue_out(state.input.queued_input) do
-      {{:value, {:key, next_key}}, queue} ->
-        if next_key == key and not handlers.batchable_printable?.(next_key, state) do
-          coalesce_repeated_keys_from_queue(
-            key,
-            put_in(state.input.queued_input, queue),
-            handlers
-          )
-        else
-          {key, state}
-        end
+  defp prepend_printable_keys(state, key) do
+    printable_keys =
+      key
+      |> String.graphemes()
+      |> Enum.map(&{:key, &1})
+      |> :queue.from_list()
 
-      {{:value, _next}, _queue} ->
-        {key, state}
-
-      {:empty, _queue} ->
-        {key, state}
-    end
+    update_in(state.input.queued_input, &:queue.join(printable_keys, &1))
   end
+
+  defp printable_key_text(%{"key" => key}) when is_binary(key), do: key
+  defp printable_key_text(key) when is_binary(key), do: key
 
   defp wheel_match?(left, right) do
     left.action == right.action and left.x == right.x and left.y == right.y and

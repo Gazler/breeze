@@ -1692,7 +1692,7 @@ defmodule Breeze.LiveView.CoreTest do
     Process.exit(pid, :normal)
   end
 
-  test "server coalesces repeated identical key events in the input queue" do
+  test "server preserves repeated identical key events in the input queue" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader
 
@@ -1714,7 +1714,7 @@ defmodule Breeze.LiveView.CoreTest do
     assert %{implicit_state: %{"scroll" => {Breeze.Implicit.Scroll, scroll_state}}} =
              Breeze.ChildServer.metadata(view_pid)
 
-    assert scroll_state.offset_y == 23
+    assert scroll_state.offset_y == 115
 
     Process.exit(pid, :normal)
   end

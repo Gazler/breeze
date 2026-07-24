@@ -30,6 +30,14 @@ defmodule Breeze.InputCapture do
 
   def captures_printable_key?(_meta, _key), do: false
 
+  def batches_printable_keys?(
+        %{captures_printable_keys: true, batch_printable_keys: true},
+        key
+      ),
+      do: printable_key?(key)
+
+  def batches_printable_keys?(_meta, _key), do: false
+
   def captures_text_editing_key?(%{captures_printable_keys: true}, key),
     do: text_editing_key?(key)
 

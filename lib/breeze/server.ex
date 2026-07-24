@@ -1232,8 +1232,7 @@ defmodule Breeze.Server do
   defp truthy_input_modifier?(value), do: value in [true, "true"]
 
   defp batchable_printable_input?(key, state) do
-    Breeze.InputCapture.printable_key?(key) and
-      focused_implicit_captures_printable_key?(state, key)
+    Breeze.InputCapture.batches_printable_keys?(focused_implicit_meta(state), key)
   end
 
   defp stop_global_key?(key, state) do
@@ -1251,10 +1250,6 @@ defmodule Breeze.Server do
 
   defp focused_implicit_meta(state) do
     Map.get(focused_child_or_root_metadata(state), :focused_implicit_meta, %{})
-  end
-
-  defp focused_implicit_captures_printable_key?(state, key) do
-    Breeze.InputCapture.captures_printable_key?(focused_implicit_meta(state), key)
   end
 
   defp focused_implicit_captures_key?(state, key) do

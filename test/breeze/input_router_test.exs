@@ -510,6 +510,40 @@ defmodule Breeze.InputRouterTest do
     Process.exit(pid, :normal)
   end
 
+  test "captured printable chunks are delivered as individual keys without batching opt-in" do
+    parent = self()
+
+    {:ok, pid} =
+      Breeze.InputRouter.start_link(
+        view: FocusedCaptureView,
+        start_opts: [parent: parent],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter],
+        halt_fun: fn -> send(parent, :halted) end
+      )
+
+    state = :sys.get_state(pid)
+    reader = state.reader
+    server_pid = state.server_pid
+
+    wait_until(fn ->
+      match?(
+        %{captures_printable_keys: true},
+        Breeze.Server.focused_implicit_metadata(server_pid)
+      )
+    end)
+
+    send(pid, {reader, {:data, "wwa"}})
+
+    for expected <- ["w", "w", "a"] do
+      assert_receive {:captured, %{"key" => ^expected} = event}
+      refute Map.has_key?(event, "__batched_printable__")
+    end
+
+    refute_receive :halted, 50
+    Process.exit(pid, :normal)
+  end
+
   test "tab and shift-tab are forwarded when a focused implicit captures focus keys" do
     parent = self()
 
