@@ -383,8 +383,7 @@ defmodule Breeze.Style do
   defp apply_style("text-right", {style, attrs}, _theme),
     do: {BackBreeze.Style.text_align(style, :right), attrs}
 
-  defp apply_style("text", {style, attrs}, theme),
-    do: {BackBreeze.Style.foreground_color(style, Theme.resolve_color(theme, :text)), attrs}
+  defp apply_style("text", acc, theme), do: apply_foreground_color(:text, acc, theme)
 
   defp apply_style("text-mute-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :text_mute, normalize_percent(value))}
@@ -398,17 +397,16 @@ defmodule Breeze.Style do
   defp apply_style("emphasize-text-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :text_emphasize, normalize_percent(value))}
 
-  defp apply_style("text-" <> color, {style, attrs}, theme),
-    do: {BackBreeze.Style.foreground_color(style, Theme.resolve_color(theme, color)), attrs}
+  defp apply_style("text-" <> color, acc, theme),
+    do: apply_foreground_color(color, acc, theme)
 
-  defp apply_style("placeholder-text", {style, attrs}, theme),
-    do: {BackBreeze.Style.foreground_color(style, Theme.resolve_color(theme, :text)), attrs}
+  defp apply_style("placeholder-text", acc, theme),
+    do: apply_foreground_color(:text, acc, theme)
 
-  defp apply_style("placeholder-text-" <> color, {style, attrs}, theme),
-    do: {BackBreeze.Style.foreground_color(style, Theme.resolve_color(theme, color)), attrs}
+  defp apply_style("placeholder-text-" <> color, acc, theme),
+    do: apply_foreground_color(color, acc, theme)
 
-  defp apply_style("bg", {style, attrs}, theme),
-    do: {BackBreeze.Style.background_color(style, Theme.resolve_color(theme, :background)), attrs}
+  defp apply_style("bg", acc, theme), do: apply_background_color(:background, acc, theme)
 
   defp apply_style("bg-mute-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :bg_mute, normalize_percent(value))}
@@ -422,8 +420,8 @@ defmodule Breeze.Style do
   defp apply_style("emphasize-bg-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :bg_emphasize, normalize_percent(value))}
 
-  defp apply_style("bg-" <> color, {style, attrs}, theme),
-    do: {BackBreeze.Style.background_color(style, Theme.resolve_color(theme, color)), attrs}
+  defp apply_style("bg-" <> color, acc, theme),
+    do: apply_background_color(color, acc, theme)
 
   defp apply_style("scrollbar-mute-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :scrollbar_mute, normalize_percent(value))}
@@ -473,10 +471,8 @@ defmodule Breeze.Style do
   defp apply_style("scrollbar-arrows", {style, attrs}, _theme),
     do: {BackBreeze.Style.scrollbar(style, %{arrows: true}), attrs}
 
-  defp apply_style("scrollbar-" <> color, {style, attrs}, theme),
-    do:
-      {put_scrollbar_color(style, Theme.resolve_color(theme, color)),
-       Map.put(attrs, :scrollbar_color_explicit, true)}
+  defp apply_style("scrollbar-" <> color, acc, theme),
+    do: apply_scrollbar_color(color, acc, theme)
 
   defp apply_style("border-none", {style, attrs}, _theme),
     do: {%{style | border: BackBreeze.Border.none()}, attrs}
@@ -502,10 +498,41 @@ defmodule Breeze.Style do
   defp apply_style("border-l", {style, attrs}, _theme),
     do: {BackBreeze.Style.border_left(style), attrs}
 
-  defp apply_style("border-" <> color, {style, attrs}, theme),
-    do: {BackBreeze.Style.border_color(style, Theme.resolve_color(theme, color)), attrs}
+  defp apply_style("border-" <> color, acc, theme),
+    do: apply_border_color(color, acc, theme)
 
   defp apply_style(_, acc, _theme), do: acc
+
+  defp apply_foreground_color(value, {style, attrs} = acc, theme) do
+    case Theme.resolve_class_color(theme, value) do
+      nil -> acc
+      color -> {BackBreeze.Style.foreground_color(style, color), attrs}
+    end
+  end
+
+  defp apply_background_color(value, {style, attrs} = acc, theme) do
+    case Theme.resolve_class_color(theme, value) do
+      nil -> acc
+      color -> {BackBreeze.Style.background_color(style, color), attrs}
+    end
+  end
+
+  defp apply_border_color(value, {style, attrs} = acc, theme) do
+    case Theme.resolve_class_color(theme, value) do
+      nil -> acc
+      color -> {BackBreeze.Style.border_color(style, color), attrs}
+    end
+  end
+
+  defp apply_scrollbar_color(value, {style, attrs} = acc, theme) do
+    case Theme.resolve_class_color(theme, value) do
+      nil ->
+        acc
+
+      color ->
+        {put_scrollbar_color(style, color), Map.put(attrs, :scrollbar_color_explicit, true)}
+    end
+  end
 
   # Breeze originally shipped verbose sizing and spacing names. Keep those
   # implementations as the canonical runtime path and translate the equivalent

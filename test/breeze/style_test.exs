@@ -73,6 +73,58 @@ defmodule Breeze.StyleTest do
     assert element.style.foreground_color == 2
   end
 
+  test "ignores class colors that the active theme cannot resolve" do
+    element =
+      Style.empty()
+      |> Style.put_class(
+        "text-3 text-lol text-#abc bg-4 bg-lol bg-#abc border border-5 border-lol " <>
+          "border-#abc overflow-scroll scrollbar-lol scrollbar-#abc"
+      )
+      |> Style.to_element([])
+
+    assert element.style.foreground_color == 3
+    assert element.style.background_color == 4
+    assert element.style.border == BackBreeze.Border.line()
+    assert element.style.border_color == 5
+    refute element.attributes[:scrollbar_color_explicit]
+  end
+
+  test "raw hex colors remain available through inline styles" do
+    element =
+      Style.empty()
+      |> Style.put_style(%{
+        foreground_color: "#abc",
+        background_color: "#123456",
+        border_color: "#def"
+      })
+      |> Style.to_element([])
+
+    assert element.style.foreground_color == "#abc"
+    assert element.style.background_color == "#123456"
+    assert element.style.border_color == "#def"
+  end
+
+  test "class colors resolve custom theme extras" do
+    theme =
+      Breeze.Theme.new(
+        defaults: %{
+          foreground_color: "#eeeeee",
+          background_color: "#111111",
+          border_color: "#666666"
+        },
+        extras: %{brand: "#9B8AFB"}
+      )
+
+    element =
+      Style.empty()
+      |> Style.put_class("text-brand bg-brand border border-brand")
+      |> Style.to_element(theme: theme)
+
+    assert element.style.foreground_color == {155, 138, 251}
+    assert element.style.background_color == {155, 138, 251}
+    assert element.style.border_color == {155, 138, 251}
+  end
+
   test "supports hidden class" do
     element =
       Style.empty()

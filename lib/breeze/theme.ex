@@ -435,6 +435,21 @@ defmodule Breeze.Theme do
 
   def resolve_color(_theme, value), do: value
 
+  @doc false
+  @spec resolve_class_color(t() | map() | keyword() | atom() | nil, term()) :: color() | nil
+  def resolve_class_color(theme, value) do
+    case resolve_color(theme, value) do
+      color when is_integer(color) and color in 0..255 ->
+        color
+
+      {red, green, blue} = color when red in 0..255 and green in 0..255 and blue in 0..255 ->
+        color
+
+      _other ->
+        nil
+    end
+  end
+
   @doc "Blends two colors using a weight clamped between `0.0` and `1.0`."
   @spec blend(color(), color(), float()) :: color()
   def blend(left, right, weight) when is_number(weight) do
