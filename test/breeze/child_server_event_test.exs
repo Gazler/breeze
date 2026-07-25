@@ -1,6 +1,8 @@
 defmodule Breeze.ChildServerEventTest do
   use ExUnit.Case, async: true
 
+  import Breeze.TestSupport.ProcessHelpers, only: [start_child_server: 1]
+
   defmodule ModalView do
     use Breeze.View
     import Breeze.Blocks
@@ -64,7 +66,7 @@ defmodule Breeze.ChildServerEventTest do
 
   test "escape on a focused modal child routes to the modal implicit" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: ModalView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: ModalView, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert %{focused: "confirm"} = Breeze.ChildServer.metadata(pid)
@@ -80,7 +82,7 @@ defmodule Breeze.ChildServerEventTest do
 
   test "escape closes a modal with no focusable children by focusing the modal root" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: RootOnlyModalView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: RootOnlyModalView, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert %{focused: "root-only-modal"} = Breeze.ChildServer.metadata(pid)

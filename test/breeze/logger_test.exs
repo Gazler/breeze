@@ -1,6 +1,9 @@
 defmodule Breeze.LoggerTest do
   use ExUnit.Case, async: false
 
+  import Breeze.TestSupport.ProcessHelpers,
+    only: [start_app_server: 1, start_child_server: 1]
+
   alias Breeze.ChildServer
   alias Breeze.Renderer
   require Logger
@@ -44,7 +47,7 @@ defmodule Breeze.LoggerTest do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
 
     {:ok, server} =
-      Breeze.Server.start_app_link(view: EmptyView, terminal: terminal, logger: :attach)
+      start_app_server(view: EmptyView, terminal: terminal, logger: :attach)
 
     assert Process.whereis(Breeze.Logger.Collector) == collector
     GenServer.stop(server, :normal)
@@ -58,7 +61,7 @@ defmodule Breeze.LoggerTest do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
 
     {:ok, server} =
-      Breeze.Server.start_app_link(view: EmptyView, terminal: terminal, logger: :attach)
+      start_app_server(view: EmptyView, terminal: terminal, logger: :attach)
 
     ephemeral = Process.whereis(Breeze.Logger.Collector)
     assert is_pid(ephemeral)
@@ -87,7 +90,7 @@ defmodule Breeze.LoggerTest do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
 
     assert {:ok, server} =
-             Breeze.Server.start_app_link(
+             start_app_server(
                view: EmptyView,
                terminal: terminal,
                logger: :attach
@@ -197,7 +200,7 @@ defmodule Breeze.LoggerTest do
     before_status = Breeze.Logger.Collector.status()
     assert {:ok, before_default} = :logger.get_handler_config(:default)
 
-    {:ok, _pid} = ChildServer.start(view: Breeze.Logger, start_opts: [])
+    {:ok, _pid} = start_child_server(view: Breeze.Logger, start_opts: [])
 
     assert Breeze.Logger.Collector.status() == before_status
     assert :logger.get_handler_config(:default) == {:ok, before_default}
@@ -231,7 +234,7 @@ defmodule Breeze.LoggerTest do
 
   @tag capture_log: true
   test "logger view renders recent log lines" do
-    {:ok, pid} = ChildServer.start(view: Breeze.Logger, start_opts: [max_lines: 2])
+    {:ok, pid} = start_child_server(view: Breeze.Logger, start_opts: [max_lines: 2])
     wait_until(fn -> true end)
 
     first = "logger-view-first-#{System.unique_integer([:positive])}"
@@ -344,7 +347,7 @@ defmodule Breeze.LoggerTest do
         %{level: :info, line: "scroll-line-#{index}", style: "text-6"}
       end
 
-    {:ok, pid} = ChildServer.start(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
+    {:ok, pid} = start_child_server(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
     {:ok, _acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
     :sys.replace_state(pid, fn term -> Breeze.View.assign(term, lines: lines) end)
     {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
@@ -361,7 +364,7 @@ defmodule Breeze.LoggerTest do
 
   @tag capture_log: true
   test "focused logger still receives non-scroll keys" do
-    {:ok, pid} = ChildServer.start(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
+    {:ok, pid} = start_child_server(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
     {:ok, _acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
 
     Logger.info("clear-me-#{System.unique_integer([:positive])}")
@@ -384,7 +387,7 @@ defmodule Breeze.LoggerTest do
   @tag capture_log: true
   test "logger can disable the clear shortcut" do
     {:ok, pid} =
-      ChildServer.start(
+      start_child_server(
         view: Breeze.Logger,
         start_opts: [height: 6, max_lines: 20, clear_key: nil]
       )
@@ -414,7 +417,7 @@ defmodule Breeze.LoggerTest do
         %{level: :info, line: "line-#{index}", style: "text-6"}
       end
 
-    {:ok, pid} = ChildServer.start(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
+    {:ok, pid} = start_child_server(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
     :sys.replace_state(pid, fn term -> Breeze.View.assign(term, lines: lines) end)
     {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
     bottom_scroll = logger_viewport(acc).scroll
@@ -435,7 +438,7 @@ defmodule Breeze.LoggerTest do
         %{level: :info, line: "manual-line-#{index}", style: "text-6"}
       end
 
-    {:ok, pid} = ChildServer.start(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
+    {:ok, pid} = start_child_server(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
     :sys.replace_state(pid, fn term -> Breeze.View.assign(term, lines: lines) end)
     {:ok, acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
     bottom_scroll = logger_viewport(acc).scroll
@@ -452,13 +455,13 @@ defmodule Breeze.LoggerTest do
     end)
   end
 
-  defp wait_until(fun, attempts \\ 20)
+  defp wait_until(fun, attempts \\ 200)
 
   defp wait_until(fun, attempts) when attempts > 0 do
     if fun.() do
       :ok
     else
-      Process.sleep(20)
+      Process.sleep(2)
       wait_until(fun, attempts - 1)
     end
   end

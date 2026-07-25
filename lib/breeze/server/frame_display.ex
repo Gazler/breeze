@@ -79,10 +79,11 @@ defmodule Breeze.Server.FrameDisplay do
 
   def release(state) do
     demonitor_owner(state.frame.display_owner_ref)
+    timeout = sys_timeout(state)
 
     state.frame.display_suspended_pids
     |> Enum.reverse()
-    |> Enum.each(&safe_resume/1)
+    |> Enum.each(&safe_resume(&1, timeout))
 
     update_frame(state,
       display: nil,
@@ -226,32 +227,33 @@ defmodule Breeze.Server.FrameDisplay do
   defp suspend_runtime(%{frame: %{display_suspended_pids: [_ | _]}} = state), do: state
 
   defp suspend_runtime(state) do
-    targets = runtime_pids(state)
-    Enum.each(targets, &safe_suspend/1)
+    timeout = sys_timeout(state)
+    targets = runtime_pids(state, timeout)
+    Enum.each(targets, &safe_suspend(&1, timeout))
     update_frame(state, display_suspended_pids: targets)
   end
 
-  defp runtime_pids(state) do
+  defp runtime_pids(state, timeout) do
     direct_pids =
       [state.view_pid | Enum.map(Map.values(state.children || %{}), &Map.get(&1, :pid))]
 
     direct_pids
-    |> Enum.flat_map(fn pid -> [pid | child_runtime_pids(pid)] end)
+    |> Enum.flat_map(fn pid -> [pid | child_runtime_pids(pid, timeout)] end)
     |> Enum.filter(&(is_pid(&1) and &1 != self() and Process.alive?(&1)))
     |> Enum.uniq()
   end
 
-  defp child_runtime_pids(pid) when is_pid(pid) do
-    Breeze.ChildServer.runtime_pids(pid, @sys_timeout)
+  defp child_runtime_pids(pid, timeout) when is_pid(pid) do
+    Breeze.ChildServer.runtime_pids(pid, timeout)
   catch
     :exit, _reason -> []
   end
 
-  defp child_runtime_pids(_pid), do: []
+  defp child_runtime_pids(_pid, _timeout), do: []
 
-  defp safe_suspend(pid) when is_pid(pid) do
+  defp safe_suspend(pid, timeout) when is_pid(pid) do
     if pid != self() and Process.alive?(pid) do
-      case :sys.suspend(pid, @sys_timeout) do
+      case :sys.suspend(pid, timeout) do
         :ok -> :ok
         _result -> :error
       end
@@ -262,9 +264,9 @@ defmodule Breeze.Server.FrameDisplay do
     :exit, _reason -> :error
   end
 
-  defp safe_resume(pid) when is_pid(pid) do
+  defp safe_resume(pid, timeout) when is_pid(pid) do
     if pid != self() and Process.alive?(pid) do
-      case :sys.resume(pid, @sys_timeout) do
+      case :sys.resume(pid, timeout) do
         :ok -> :ok
         _result -> :error
       end
@@ -275,7 +277,13 @@ defmodule Breeze.Server.FrameDisplay do
     :exit, _reason -> :error
   end
 
-  defp safe_resume(_pid), do: :ok
+  defp safe_resume(_pid, _timeout), do: :ok
+
+  defp sys_timeout(%{frame: %{display_sys_timeout: timeout}})
+       when is_integer(timeout) and timeout >= 0,
+       do: timeout
+
+  defp sys_timeout(_state), do: @sys_timeout
 
   defp historical_dimension(captured, current) when is_integer(captured) and captured > 0,
     do: min(captured, max(current, 0))

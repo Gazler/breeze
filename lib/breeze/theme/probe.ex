@@ -1,6 +1,8 @@
 defmodule Breeze.Theme.Probe do
   @moduledoc false
 
+  alias Breeze.Theme.Probe.TableOwner
+
   @palette_cache_table __MODULE__.PaletteCache
   @palette_waiters_table __MODULE__.PaletteWaiters
   @palette_probe_timeout_ms 120
@@ -142,29 +144,13 @@ defmodule Breeze.Theme.Probe do
   defp terminal_cache_key(_terminal), do: :error
 
   defp ensure_palette_cache_table do
-    case :ets.whereis(@palette_cache_table) do
-      :undefined ->
-        :ets.new(@palette_cache_table, [:named_table, :public, :set, read_concurrency: true])
-
-      table ->
-        table
-    end
-  rescue
-    ArgumentError ->
-      @palette_cache_table
+    TableOwner.ensure_tables()
+    @palette_cache_table
   end
 
   defp ensure_palette_waiters_table do
-    case :ets.whereis(@palette_waiters_table) do
-      :undefined ->
-        :ets.new(@palette_waiters_table, [:named_table, :public, :bag])
-
-      table ->
-        table
-    end
-  rescue
-    ArgumentError ->
-      @palette_waiters_table
+    TableOwner.ensure_tables()
+    @palette_waiters_table
   end
 
   defp notify_palette_waiters(key, status) do
@@ -309,5 +295,70 @@ defmodule Breeze.Theme.Probe do
   defp palette_probe_complete?(palette) when is_map(palette) do
     Enum.all?([:background, :foreground], &match?({_, _, _}, Map.get(palette, &1))) and
       Enum.all?(@required_palette_indexes, &match?({_, _, _}, Map.get(palette, &1)))
+  end
+end
+
+defmodule Breeze.Theme.Probe.TableOwner do
+  @moduledoc false
+
+  use GenServer
+
+  @palette_cache_table Breeze.Theme.Probe.PaletteCache
+  @palette_waiters_table Breeze.Theme.Probe.PaletteWaiters
+
+  def ensure_tables do
+    case {
+      Process.whereis(__MODULE__),
+      :ets.whereis(@palette_cache_table),
+      :ets.whereis(@palette_waiters_table)
+    } do
+      {pid, cache, waiters}
+      when is_pid(pid) and cache != :undefined and waiters != :undefined ->
+        :ok
+
+      _ ->
+        ensure_started()
+        |> GenServer.call(:ensure_tables)
+    end
+  end
+
+  @impl true
+  def init(:ok), do: {:ok, ensure_tables_owned()}
+
+  @impl true
+  def handle_call(:ensure_tables, _from, _state) do
+    {:reply, :ok, ensure_tables_owned()}
+  end
+
+  defp ensure_tables_owned do
+    ensure_table(@palette_cache_table, [
+      :named_table,
+      :public,
+      :set,
+      read_concurrency: true
+    ])
+
+    ensure_table(@palette_waiters_table, [:named_table, :public, :bag])
+    nil
+  end
+
+  defp ensure_started do
+    case Process.whereis(__MODULE__) do
+      nil ->
+        case GenServer.start(__MODULE__, :ok, name: __MODULE__) do
+          {:ok, pid} -> pid
+          {:error, {:already_started, pid}} -> pid
+        end
+
+      pid ->
+        pid
+    end
+  end
+
+  defp ensure_table(name, options) do
+    case :ets.whereis(name) do
+      :undefined -> :ets.new(name, options)
+      table -> table
+    end
   end
 end

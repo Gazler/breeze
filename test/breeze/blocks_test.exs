@@ -1,6 +1,8 @@
 defmodule Breeze.BlocksTest do
   use ExUnit.Case, async: true
 
+  import Breeze.TestSupport.ProcessHelpers, only: [start_child_server: 1]
+
   alias Breeze.Blocks
   alias Breeze.ChildServer
   alias Breeze.Renderer
@@ -658,38 +660,6 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
-  defp rendered_cell!(box, point) do
-    rendered_cell(box, point) || flunk("expected rendered cell at #{inspect(point)}")
-  end
-
-  defp rendered_cell(box, point) do
-    layer_cell(Map.get(box, :fixed_layer_map), point) ||
-      layer_cell(Map.get(box, :layer_map), point)
-  end
-
-  defp layer_cell(layer_map, point) when is_map(layer_map) do
-    Map.get(layer_map, point) || default_fill_cell(Map.get(layer_map, :__default_fill__), point)
-  end
-
-  defp layer_cell(_layer_map, _point), do: nil
-
-  defp default_fill_cell(nil, _point), do: nil
-
-  defp default_fill_cell({_cell, _left, _top, _right, _bottom} = fill, point) do
-    default_fill_cell([fill], point)
-  end
-
-  defp default_fill_cell(fills, {y, x}) when is_list(fills) do
-    Enum.find_value(fills, fn
-      {cell, left, top, right, bottom}
-      when left <= x and x <= right and top <= y and y <= bottom ->
-        cell
-
-      _fill ->
-        nil
-    end)
-  end
-
   defmodule InferredTableExample do
     use Breeze.View
     import Breeze.Blocks
@@ -742,6 +712,38 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defp rendered_cell!(box, point) do
+    rendered_cell(box, point) || flunk("expected rendered cell at #{inspect(point)}")
+  end
+
+  defp rendered_cell(box, point) do
+    layer_cell(Map.get(box, :fixed_layer_map), point) ||
+      layer_cell(Map.get(box, :layer_map), point)
+  end
+
+  defp layer_cell(layer_map, point) when is_map(layer_map) do
+    Map.get(layer_map, point) || default_fill_cell(Map.get(layer_map, :__default_fill__), point)
+  end
+
+  defp layer_cell(_layer_map, _point), do: nil
+
+  defp default_fill_cell(nil, _point), do: nil
+
+  defp default_fill_cell({_cell, _left, _top, _right, _bottom} = fill, point) do
+    default_fill_cell([fill], point)
+  end
+
+  defp default_fill_cell(fills, {y, x}) when is_list(fills) do
+    Enum.find_value(fills, fn
+      {cell, left, top, right, bottom}
+      when left <= x and x <= right and top <= y and y <= bottom ->
+        cell
+
+      _fill ->
+        nil
+    end)
+  end
+
   describe "merge_class/2" do
     test "matches merge_style semantics" do
       assert Blocks.merge_class("border width-24 height-8", "width-32 bg-4") ==
@@ -787,7 +789,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "tabs supports an underline variant" do
-    {:ok, pid} = ChildServer.start(view: UnderlineTabsExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: UnderlineTabsExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "tabs", implicit_state: %{})
 
@@ -799,7 +801,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "tabs accepts a configurable highlight color" do
-    {:ok, pid} = ChildServer.start(view: HighlightTabsExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: HighlightTabsExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "tabs", implicit_state: %{})
 
@@ -810,7 +812,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "tabs allow an individual tab highlight override" do
-    {:ok, pid} = ChildServer.start(view: PerTabHighlightTabsExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: PerTabHighlightTabsExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "tabs", implicit_state: %{})
 
@@ -823,7 +825,7 @@ defmodule Breeze.BlocksTest do
 
   test "tabs render on the panel background by default" do
     {:ok, pid} =
-      ChildServer.start(
+      start_child_server(
         view: UnderlineTabsExample,
         start_opts: [],
         theme: Breeze.Theme.builtin(:gruvbox)
@@ -857,7 +859,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "button renders with primary styling and a focused inverse state" do
-    {:ok, pid} = ChildServer.start(view: ButtonExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: ButtonExample, start_opts: [])
 
     {:ok, acc, box} = ChildServer.render(pid, focused: "confirm", implicit_state: %{})
 
@@ -867,7 +869,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "panel highlights when a descendant is focused" do
-    {:ok, pid} = ChildServer.start(view: PanelFocusWithinExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: PanelFocusWithinExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "confirm", implicit_state: %{})
 
@@ -1080,7 +1082,7 @@ defmodule Breeze.BlocksTest do
 
   test "list can render muted while unfocused and restore active colors on focus" do
     {:ok, pid} =
-      ChildServer.start(
+      start_child_server(
         view: MutedListExample,
         start_opts: [],
         theme: Breeze.Theme.builtin(:gruvbox)
@@ -1101,7 +1103,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "list items render their labels" do
-    {:ok, pid} = ChildServer.start(view: MutedListExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: MutedListExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "items", implicit_state: %{})
 
@@ -1110,7 +1112,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "list supports wide unicode selected markers" do
-    {:ok, pid} = ChildServer.start(view: UnicodeMarkerListExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: UnicodeMarkerListExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "items", implicit_state: %{})
 
@@ -1119,7 +1121,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "list does not mark every item selected when nothing is selected" do
-    {:ok, pid} = ChildServer.start(view: UnselectedListExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: UnselectedListExample, start_opts: [])
 
     {:ok, _acc, box} =
       ChildServer.render(pid, focused: nil, implicit_state: %{}, allow_unfocused: true)
@@ -1132,7 +1134,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "list virtual window derives the item slice from selection" do
-    {:ok, pid} = ChildServer.start(view: VirtualListExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: VirtualListExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "items", implicit_state: %{})
 
@@ -1144,7 +1146,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "list virtual window scrolls to a changed controlled selection" do
-    {:ok, pid} = ChildServer.start(view: VirtualListExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: VirtualListExample, start_opts: [])
 
     {:ok, _acc, _box} = ChildServer.render(pid, focused: "items", implicit_state: %{})
 
@@ -1164,7 +1166,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "tree renders visible rows with collapsed and expanded prefixes" do
-    {:ok, pid} = ChildServer.start(view: TreeExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: TreeExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
     content = BackBreeze.Utils.strip_escape_chars(box.content)
@@ -1176,7 +1178,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "tree expands selected rows through the implicit lifecycle" do
-    {:ok, pid} = ChildServer.start(view: TreeExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: TreeExample, start_opts: [])
 
     {:ok, _acc, _box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
 
@@ -1190,7 +1192,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "tree virtual window derives the row slice from selection" do
-    {:ok, pid} = ChildServer.start(view: VirtualTreeExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: VirtualTreeExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
 
@@ -1202,7 +1204,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "tree virtual window scrolls to a changed controlled selection" do
-    {:ok, pid} = ChildServer.start(view: VirtualTreeExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: VirtualTreeExample, start_opts: [])
 
     {:ok, _acc, _box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
 
@@ -1221,7 +1223,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "tree virtual window can use implicit-owned expanded state" do
-    {:ok, pid} = ChildServer.start(view: VirtualUncontrolledTreeExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: VirtualUncontrolledTreeExample, start_opts: [])
 
     {:ok, _acc, _box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
 
@@ -1235,7 +1237,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "wrapped virtual tree can use implicit-owned expanded state" do
-    {:ok, pid} = ChildServer.start(view: WrappedVirtualUncontrolledTreeExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: WrappedVirtualUncontrolledTreeExample, start_opts: [])
 
     {:ok, _acc, _box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
 
@@ -1249,7 +1251,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "tree renders no empty content by default" do
-    {:ok, pid} = ChildServer.start(view: EmptyTreeExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: EmptyTreeExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
 
@@ -1257,7 +1259,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "tree supports an empty slot" do
-    {:ok, pid} = ChildServer.start(view: EmptyTreeSlotExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: EmptyTreeSlotExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "files", implicit_state: %{})
 
@@ -1265,7 +1267,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "table renders headers, rows, and selectable cells" do
-    {:ok, pid} = ChildServer.start(view: TableExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: TableExample, start_opts: [])
 
     {:ok, acc, box} = ChildServer.render(pid, focused: "cities", implicit_state: %{})
 
@@ -1278,7 +1280,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "table inferred widths include full text and cell padding" do
-    {:ok, pid} = ChildServer.start(view: InferredTableExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: InferredTableExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "packages", implicit_state: %{})
     content = BackBreeze.Utils.strip_escape_chars(box.content)
@@ -1290,7 +1292,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "table distributes unbounded columns across the available row width" do
-    {:ok, pid} = ChildServer.start(view: StretchTableExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: StretchTableExample, start_opts: [])
 
     {:ok, _acc, box} = ChildServer.render(pid, focused: "packages", implicit_state: %{})
     lines = box.content |> BackBreeze.Utils.strip_escape_chars() |> String.split("\n")
@@ -1302,7 +1304,7 @@ defmodule Breeze.BlocksTest do
   end
 
   test "table emits change events from keyboard navigation" do
-    {:ok, pid} = ChildServer.start(view: TableExample, start_opts: [])
+    {:ok, pid} = start_child_server(view: TableExample, start_opts: [])
 
     assert {:ok, _acc, _box} = ChildServer.render(pid, focused: "cities", implicit_state: %{})
     assert {:noreply, "cities", true} = ChildServer.dispatch_input(pid, "ArrowDown")

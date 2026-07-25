@@ -447,7 +447,10 @@ defmodule Breeze.Server do
         input: %State.Input{
           global_keybindings: Keyword.get(opts, :global_keybindings, [])
         },
-        frame: %State.Frame{last_render_at: System.monotonic_time(:millisecond)},
+        frame: %State.Frame{
+          last_render_at: System.monotonic_time(:millisecond),
+          display_sys_timeout: Keyword.get(internal_opts, :frame_display_sys_timeout)
+        },
         debug: %State.Debug{},
         inspector_state: %State.Inspector{config: Keyword.get(opts, :inspector, false)},
         rendered: %State.Rendered{
@@ -1289,11 +1292,12 @@ defmodule Breeze.Server do
     do: state
 
   defp render_base(state, cause, attempts) do
+    profile_scope = make_ref()
+    Breeze.DebugProfiler.reset(profile_scope)
+
     try do
       tracking_ref = RenderTracking.begin(state.rendered.tracking_table)
       started_at = System.monotonic_time(:microsecond)
-      profile_scope = make_ref()
-      Breeze.DebugProfiler.reset(profile_scope)
       root_started_at = System.monotonic_time(:microsecond)
 
       {acc, box, decorations} =
@@ -1342,6 +1346,8 @@ defmodule Breeze.Server do
     catch
       {:stopped, state} -> state
       {:crash_state, crash_state} -> crash_state
+    after
+      Breeze.DebugProfiler.discard(profile_scope)
     end
   end
 
@@ -1707,26 +1713,32 @@ defmodule Breeze.Server do
   end
 
   defp render_invalidated_child(state, child_id) do
-    try do
-      with {:ok, ctx} <- invalidated_child_context(state, child_id),
-           {:ok, ctx} <- render_invalidated_child_snapshot(ctx),
-           :ok <- validate_child_patch_render(ctx) do
-        {:ok, write_invalidated_child_patch(ctx)}
+    with {:ok, ctx} <- invalidated_child_context(state, child_id) do
+      try do
+        with {:ok, ctx} <- render_invalidated_child_snapshot(ctx),
+             :ok <- validate_child_patch_render(ctx) do
+          {:ok, write_invalidated_child_patch(ctx)}
+        end
+      catch
+        {:crash_state, crash_state} -> {:crash, crash_state}
+      after
+        Breeze.DebugProfiler.discard(ctx.profile_scope)
       end
-    catch
-      {:crash_state, crash_state} -> {:crash, crash_state}
     end
   end
 
   defp render_live_snapshot(state, child_id, opts) do
     result =
-      try do
-        with {:ok, ctx} <- invalidated_child_context(state, child_id),
-             {:ok, ctx} <- render_invalidated_child_snapshot(ctx) do
-          {:ok, live_snapshot_from_context(ctx, opts)}
+      with {:ok, ctx} <- invalidated_child_context(state, child_id) do
+        try do
+          with {:ok, ctx} <- render_invalidated_child_snapshot(ctx) do
+            {:ok, live_snapshot_from_context(ctx, opts)}
+          end
+        catch
+          {:crash_state, crash_state} -> {:crash, crash_state}
+        after
+          Breeze.DebugProfiler.discard(ctx.profile_scope)
         end
-      catch
-        {:crash_state, crash_state} -> {:crash, crash_state}
       end
 
     case result do
@@ -2351,8 +2363,10 @@ defmodule Breeze.Server do
 
   @impl true
   def terminate(_reason, state) do
+    Breeze.DebugProfiler.discard_owner(self())
     state = FrameDisplay.clear(state)
     shutdown_view_processes(state)
+    stop_reloader(state.reloader_pid)
 
     if state.logger_collector do
       _ = Breeze.Logger.Collector.release(self())
@@ -2364,6 +2378,17 @@ defmodule Breeze.Server do
     Breeze.RemoteInspector.Supervisor.stop(state.remote_inspector_supervisor)
 
     :ok
+  end
+
+  defp stop_reloader(nil), do: :ok
+
+  defp stop_reloader(pid) when is_pid(pid) do
+    Process.unlink(pid)
+    if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
+    :ok
+  catch
+    :exit, :noproc -> :ok
+    :exit, {:noproc, {GenServer, :stop, _args}} -> :ok
   end
 
   defp maybe_exit_alt_screen(terminal, true), do: Termite.Screen.exit_alt_screen(terminal)

@@ -59,7 +59,9 @@ defmodule Breeze.TestSupport.LiveViewCase do
       }
 
       import ExUnit.CaptureLog
-      import Breeze.TestSupport.ProcessHelpers, only: [stop_gen_server: 1]
+
+      import Breeze.TestSupport.ProcessHelpers,
+        only: [start_app_server: 1, start_child_server: 1, stop_gen_server: 1]
     end
   end
 end
@@ -73,20 +75,20 @@ defmodule Breeze.TestSupport.LiveViewHelpers do
     receive do
       {:terminal_write, str} -> drain_terminal_writes([str | writes])
     after
-      10 -> Enum.reverse(writes)
+      2 -> Enum.reverse(writes)
     end
   end
 
-  def wait_until(fun, attempts \\ 20)
+  def wait_until(fun, attempts \\ 100)
 
   def wait_until(fun, attempts) when attempts > 0 do
     case fun.() do
       false ->
-        Process.sleep(10)
+        Process.sleep(2)
         wait_until(fun, attempts - 1)
 
       nil ->
-        Process.sleep(10)
+        Process.sleep(2)
         wait_until(fun, attempts - 1)
 
       value ->

@@ -1,6 +1,8 @@
 defmodule Breeze.Implicit.DropdownTest do
   use ExUnit.Case, async: true
 
+  import Breeze.TestSupport.ProcessHelpers, only: [start_child_server: 1]
+
   alias Breeze.Implicit.Dropdown
 
   defmodule DropdownView do
@@ -146,7 +148,7 @@ defmodule Breeze.Implicit.DropdownTest do
 
   test "selecting an item keeps focus on the dropdown in the child server" do
     terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = Breeze.ChildServer.start(view: DropdownView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: DropdownView, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "method", true} = Breeze.ChildServer.dispatch_input(pid, "\x14")
@@ -259,7 +261,7 @@ defmodule Breeze.Implicit.DropdownTest do
 
   test "clicking the rendered trigger opens the dropdown" do
     terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = Breeze.ChildServer.start(view: DropdownView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: DropdownView, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     bounds = :sys.get_state(pid).mouse_targets["method"]
@@ -285,7 +287,7 @@ defmodule Breeze.Implicit.DropdownTest do
 
   test "clicking a rendered item selects it and closes the dropdown" do
     terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = Breeze.ChildServer.start(view: DropdownView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: DropdownView, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     trigger_bounds = :sys.get_state(pid).mouse_targets["method"]
@@ -328,7 +330,7 @@ defmodule Breeze.Implicit.DropdownTest do
 
   test "opened dropdown renders its menu items" do
     terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = Breeze.ChildServer.start(view: DropdownView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: DropdownView, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "method", true} = Breeze.ChildServer.dispatch_input(pid, "\x14")
@@ -346,7 +348,7 @@ defmodule Breeze.Implicit.DropdownTest do
 
   test "closed dropdown renders the closed indicator without animate" do
     terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = Breeze.ChildServer.start(view: DropdownView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: DropdownView, terminal: terminal)
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
@@ -357,7 +359,7 @@ defmodule Breeze.Implicit.DropdownTest do
 
   test "opened dropdown still renders inside a grid row" do
     terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = Breeze.ChildServer.start(view: GridDropdownView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: GridDropdownView, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "method", true} = Breeze.ChildServer.dispatch_input(pid, "\x14")

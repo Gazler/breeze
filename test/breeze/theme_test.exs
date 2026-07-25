@@ -1,9 +1,12 @@
 defmodule Breeze.ThemeTest do
   use ExUnit.Case, async: true
-  import Breeze.TestSupport.ProcessHelpers, only: [stop_gen_server: 1]
+
+  import Breeze.TestSupport.ProcessHelpers,
+    only: [start_child_server: 1, stop_gen_server: 1]
 
   alias Breeze.Theme
   alias Breeze.Theme.Probe, as: ThemeProbe
+  alias Breeze.Theme.Probe.TableOwner
 
   defmodule PaletteAdapter do
     @behaviour Termite.Terminal.Adapter
@@ -170,6 +173,24 @@ defmodule Breeze.ThemeTest do
     refute query =~ "\a"
     assert query =~ "\e]10;?\e\\"
     assert query =~ "\e]4;14;?\e\\"
+  end
+
+  test "runtime palette tables have a stable owner" do
+    ref = make_ref()
+
+    terminal = %Termite.Terminal{
+      reader: ref,
+      adapter: {PaletteAdapter, %{ref: ref}},
+      size: %{width: 80, height: 24}
+    }
+
+    assert {:start, {:reader, ^ref}, _query} = ThemeProbe.start_runtime_palette_probe(terminal)
+
+    owner = Process.whereis(TableOwner)
+
+    assert is_pid(owner)
+    assert :ets.info(Breeze.Theme.Probe.PaletteCache, :owner) == owner
+    assert :ets.info(Breeze.Theme.Probe.PaletteWaiters, :owner) == owner
   end
 
   test "system can derive colors from a probed runtime palette" do
@@ -380,7 +401,7 @@ defmodule Breeze.ThemeTest do
   end
 
   test "child metadata reflects theme changes" do
-    {:ok, pid} = Breeze.ChildServer.start(view: ToggleView, start_opts: [])
+    {:ok, pid} = start_child_server(view: ToggleView, start_opts: [])
     on_exit(fn -> stop_gen_server(pid) end)
 
     assert Breeze.ChildServer.metadata(pid).theme.mode == :system16

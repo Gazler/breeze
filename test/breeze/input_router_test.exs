@@ -1,11 +1,13 @@
 defmodule Breeze.InputRouterTest do
   use ExUnit.Case, async: true
-  import Breeze.TestSupport.ProcessHelpers, only: [stop_gen_server: 1]
+
+  import Breeze.TestSupport.ProcessHelpers,
+    only: [start_app_server: 1, start_input_router: 1, stop_gen_server: 1]
+
   import Breeze.TestSupport.WaitUntil
 
   alias Breeze.ChildServer
   alias Breeze.Theme
-  alias Breeze.Theme.Probe, as: ThemeProbe
 
   defmodule FakeAdapter do
     @behaviour Termite.Terminal.Adapter
@@ -106,39 +108,39 @@ defmodule Breeze.InputRouterTest do
   defmodule DelayedPaletteAdapter do
     @behaviour Termite.Terminal.Adapter
 
-    def start(_opts) do
-      {:ok, %{ref: make_ref(), size: %{width: 80, height: 24}}}
+    @late_palette_reply "\e]4;5;rgb:9999/3333/aaaa\a" <>
+                          "\e]4;6;rgb:3333/aaaa/aaaa\a" <>
+                          "\e]4;9;rgb:dddd/6666/4444\a" <>
+                          "\e]4;10;rgb:4444/cccc/5555\a" <>
+                          "\e]4;11;rgb:e6e6/d1d1/5a5a\a" <>
+                          "\e]4;12;rgb:5f5f/7b7b/e0e0\a" <>
+                          "\e]4;13;rgb:b3b3/6b6b/d4d4\a" <>
+                          "\e]4;14;rgb:5a5a/d6d6/d6d6\a"
+
+    def start(opts) do
+      {:ok,
+       %{
+         ref: make_ref(),
+         size: %{width: 80, height: 24},
+         owner: Keyword.fetch!(opts, :owner)
+       }}
     end
 
     def reader(term), do: {:ok, term.ref}
     def resize(term), do: term.size
+    def late_reply(reader), do: {reader, {:data, @late_palette_reply}}
 
     def write(term, str) do
       if String.contains?(str, "\e]10;?") do
-        owner = self()
         ref = term.ref
 
-        send(owner, {ref, {:data, "\e]10;rgb:f0f0/f0f0/f0f0\a"}})
-        send(owner, {ref, {:data, "\e]11;rgb:1010/1111/1212\a"}})
-        send(owner, {ref, {:data, "\e]4;1;rgb:aaaa/2222/3333\a"}})
-        send(owner, {ref, {:data, "\e]4;2;rgb:2222/aaaa/3333\a"}})
-        send(owner, {ref, {:data, "\e]4;3;rgb:cccc/bbbb/3333\a"}})
-        send(owner, {ref, {:data, "\e]4;4;rgb:3333/5555/aaaa\a"}})
-
-        Process.send_after(
-          owner,
-          {ref,
-           {:data,
-            "\e]4;5;rgb:9999/3333/aaaa\a" <>
-              "\e]4;6;rgb:3333/aaaa/aaaa\a" <>
-              "\e]4;9;rgb:dddd/6666/4444\a" <>
-              "\e]4;10;rgb:4444/cccc/5555\a" <>
-              "\e]4;11;rgb:e6e6/d1d1/5a5a\a" <>
-              "\e]4;12;rgb:5f5f/7b7b/e0e0\a" <>
-              "\e]4;13;rgb:b3b3/6b6b/d4d4\a" <>
-              "\e]4;14;rgb:5a5a/d6d6/d6d6\a"}},
-          ThemeProbe.runtime_palette_probe_timeout_ms() + 20
-        )
+        send(self(), {ref, {:data, "\e]10;rgb:f0f0/f0f0/f0f0\a"}})
+        send(self(), {ref, {:data, "\e]11;rgb:1010/1111/1212\a"}})
+        send(self(), {ref, {:data, "\e]4;1;rgb:aaaa/2222/3333\a"}})
+        send(self(), {ref, {:data, "\e]4;2;rgb:2222/aaaa/3333\a"}})
+        send(self(), {ref, {:data, "\e]4;3;rgb:cccc/bbbb/3333\a"}})
+        send(self(), {ref, {:data, "\e]4;4;rgb:3333/5555/aaaa\a"}})
+        send(term.owner, {:palette_probe_partial_sent, self()})
       end
 
       {:ok, term}
@@ -160,7 +162,11 @@ defmodule Breeze.InputRouterTest do
 
     def handle_event(_, %{"key" => "r"}, term) do
       send(term.assigns.parent, :started)
-      Process.sleep(200)
+
+      receive do
+        :unblock -> :ok
+      end
+
       send(term.assigns.parent, :finished)
       {:noreply, term}
     end
@@ -317,11 +323,40 @@ defmodule Breeze.InputRouterTest do
     end
   end
 
+  defmodule ThemeProbeLeakView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok,
+       term
+       |> put_theme(Theme.builtin(:gruvbox))
+       |> assign(parent: Keyword.fetch!(opts, :parent))}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>probe</box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "t"}, term) do
+      send(term.assigns.parent, :theme_switch)
+      {:noreply, put_theme(term, :system)}
+    end
+
+    def handle_event(_, event, term) do
+      send(term.assigns.parent, {:leaked_input, event})
+      {:noreply, term}
+    end
+
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   test "input router owns the session view supervisor and stops it on hangup" do
     parent = self()
 
     {:ok, router} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: SessionRootView,
         alt_screen: false,
         hide_cursor: false,
@@ -359,48 +394,39 @@ defmodule Breeze.InputRouterTest do
     router_ref = Process.monitor(router)
     send(router, {router_state.reader, {:signal, :hup}})
 
-    assert_receive :halted
-    assert_receive {:DOWN, ^router_ref, :process, ^router, :normal}
+    assert_receive :halted, 500
+    assert_receive {:DOWN, ^router_ref, :process, ^router, :normal}, 500
 
     wait_until(fn ->
       Enum.all?([supervisor, server, root, child], &(not Process.alive?(&1)))
     end)
   end
 
-  defmodule ThemeProbeLeakView do
-    use Breeze.View
+  test "stopping the input router also stops its app server" do
+    parent = self()
 
-    def mount(opts, term) do
-      {:ok,
-       term
-       |> put_theme(Theme.builtin(:gruvbox))
-       |> assign(parent: Keyword.fetch!(opts, :parent))}
-    end
+    {:ok, router} =
+      start_input_router(
+        view: BlockingView,
+        start_opts: [parent: parent],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter],
+        halt_fun: fn -> send(parent, :halted) end
+      )
 
-    def render(assigns) do
-      ~H"""
-      <box>probe</box>
-      """
-    end
+    server = :sys.get_state(router).server_pid
+    server_ref = Process.monitor(server)
 
-    def handle_event(_, %{"key" => "t"}, term) do
-      send(term.assigns.parent, :theme_switch)
-      {:noreply, put_theme(term, :system)}
-    end
-
-    def handle_event(_, event, term) do
-      send(term.assigns.parent, {:leaked_input, event})
-      {:noreply, term}
-    end
-
-    def handle_info(_, term), do: {:noreply, term}
+    assert :ok = stop_gen_server(router)
+    assert_receive :halted, 500
+    assert_receive {:DOWN, ^server_ref, :process, ^server, :shutdown}, 500
   end
 
   test "stop global keys are handled even while the app server is blocked" do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: BlockingView,
         start_opts: [parent: parent],
         hide_cursor: false,
@@ -413,11 +439,11 @@ defmodule Breeze.InputRouterTest do
     reader = :sys.get_state(pid).reader
 
     send(pid, {reader, {:data, "r"}})
-    assert_receive :started
+    assert_receive :started, 500
 
     send(pid, {reader, {:data, "q"}})
-    assert_receive :halted
-    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    assert_receive :halted, 500
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
   end
 
   test "input queued during an asynchronous dispatch is handled after it completes" do
@@ -426,18 +452,26 @@ defmodule Breeze.InputRouterTest do
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: BlockingView,
         start_opts: [parent: parent],
         terminal: terminal
       )
 
     on_exit(fn -> Process.exit(pid, :shutdown) end)
+    view_pid = :sys.get_state(pid).view_pid
 
     send(pid, {reader, {:data, "r"}})
-    assert_receive :started
+    assert_receive :started, 500
 
     send(pid, {reader, {:data, "n"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      not :queue.is_empty(state.input.queued_input)
+    end)
+
+    send(view_pid, :unblock)
 
     assert_receive :finished, 500
     assert_receive :next_handled, 500
@@ -454,7 +488,7 @@ defmodule Breeze.InputRouterTest do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: FocusedInputView,
         hide_cursor: false,
         terminal_opts: [adapter: FakeAdapter],
@@ -475,15 +509,15 @@ defmodule Breeze.InputRouterTest do
 
     send(pid, {reader, {:data, "\e[99;5u"}})
 
-    assert_receive :halted
-    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    assert_receive :halted, 500
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
   end
 
   test "ctrl-c is forwarded when a focused implicit captures control keys" do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: FocusedCaptureView,
         start_opts: [parent: parent],
         hide_cursor: false,
@@ -505,16 +539,17 @@ defmodule Breeze.InputRouterTest do
     send(pid, {reader, {:data, "\x03"}})
 
     assert_receive {:captured, %{"ctrlKey" => true, "key" => "c"}}
-    refute_receive :halted, 50
+    _state = :sys.get_state(pid)
+    refute_received :halted
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
 
   test "captured printable chunks are delivered as individual keys without batching opt-in" do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: FocusedCaptureView,
         start_opts: [parent: parent],
         hide_cursor: false,
@@ -540,15 +575,16 @@ defmodule Breeze.InputRouterTest do
       refute Map.has_key?(event, "__batched_printable__")
     end
 
-    refute_receive :halted, 50
-    Process.exit(pid, :normal)
+    _state = :sys.get_state(pid)
+    refute_received :halted
+    stop_gen_server(pid)
   end
 
   test "tab and shift-tab are forwarded when a focused implicit captures focus keys" do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: FocusedCaptureView,
         start_opts: [parent: parent],
         hide_cursor: false,
@@ -573,17 +609,18 @@ defmodule Breeze.InputRouterTest do
     send(pid, {reader, {:data, "\e[9;2u"}})
     assert_receive {:captured, %{"key" => "ShiftTab"}}
 
-    refute_receive :halted, 50
+    _state = :sys.get_state(pid)
+    refute_received :halted
     assert :sys.get_state(server_pid).focused == "capture"
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
 
   defp assert_ctrl_c_halts(sequence) do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: BlockingView,
         start_opts: [parent: parent],
         hide_cursor: false,
@@ -597,15 +634,15 @@ defmodule Breeze.InputRouterTest do
 
     send(pid, {reader, {:data, sequence}})
 
-    assert_receive :halted
-    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    assert_receive :halted, 500
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
   end
 
   test "alt_screen false skips alternate screen enter and exit while preserving input" do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: BlockingView,
         start_opts: [parent: parent],
         alt_screen: false,
@@ -621,10 +658,10 @@ defmodule Breeze.InputRouterTest do
     refute_received {:terminal_write, "\e[?1049h"}
 
     send(pid, {reader, {:data, "r"}})
-    assert_receive :started
+    assert_receive :started, 500
 
     send(pid, {reader, {:data, "q"}})
-    assert_receive :halted
+    assert_receive :halted, 500
 
     refute_received {:terminal_write, "\e[?1049l"}
   end
@@ -633,7 +670,7 @@ defmodule Breeze.InputRouterTest do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: BlockingView,
         start_opts: [parent: parent],
         hide_cursor: false,
@@ -647,7 +684,7 @@ defmodule Breeze.InputRouterTest do
     state = :sys.get_state(pid)
     send(pid, {state.reader, {:data, "q"}})
 
-    assert_receive :halted
+    assert_receive :halted, 500
     assert_receive {:terminal_write, "\e[?1049l"}
   end
 
@@ -655,7 +692,7 @@ defmodule Breeze.InputRouterTest do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: BlockingView,
         start_opts: [parent: parent],
         hide_cursor: false,
@@ -669,7 +706,7 @@ defmodule Breeze.InputRouterTest do
     state = :sys.get_state(pid)
     send(pid, {state.reader, {:data, "q"}})
 
-    assert_receive :halted
+    assert_receive :halted, 500
     assert_receive {:terminal_write, "\e[<u\e[>4;0m"}
   end
 
@@ -683,7 +720,7 @@ defmodule Breeze.InputRouterTest do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: FocusCycleView,
         terminal: terminal,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
@@ -714,7 +751,7 @@ defmodule Breeze.InputRouterTest do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: FocusCycleView,
         hide_cursor: false,
         terminal_opts: [adapter: FakeAdapter],
@@ -743,14 +780,14 @@ defmodule Breeze.InputRouterTest do
     end)
 
     send(pid, {reader, {:data, "q"}})
-    assert_receive :halted
+    assert_receive :halted, 500
   end
 
   test "enhanced keyboard mode can be disabled" do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: BlockingView,
         start_opts: [parent: parent],
         enhanced_keyboard: false,
@@ -765,7 +802,7 @@ defmodule Breeze.InputRouterTest do
     state = :sys.get_state(pid)
     send(pid, {state.reader, {:data, "q"}})
 
-    assert_receive :halted
+    assert_receive :halted, 500
     refute_received {:terminal_write, "\e[<u\e[>4;0m"}
   end
 
@@ -774,7 +811,7 @@ defmodule Breeze.InputRouterTest do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: BlockingView,
         start_opts: [parent: parent],
         hide_cursor: false,
@@ -787,11 +824,11 @@ defmodule Breeze.InputRouterTest do
     reader = terminal.reader
 
     send(pid, {reader, {:data, "r"}})
-    assert_receive :started
+    assert_receive :started, 500
 
     send(pid, {reader, {:data, "q"}})
-    assert_receive :halted
-    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    assert_receive :halted, 500
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
   end
 
   test "Server.run blocks until the app stops without halting" do
@@ -809,7 +846,24 @@ defmodule Breeze.InputRouterTest do
       end)
 
     assert_receive {:terminal_started, router_pid, reader}, 1_000
-    refute Task.yield(task, 50)
+
+    wait_until(fn ->
+      case Process.info(task.pid, [:current_function, :monitors]) do
+        [
+          {:current_function, {Breeze.Server, :run, 1}},
+          {:monitors, monitors}
+        ] ->
+          {:process, router_pid} in monitors
+
+        nil ->
+          false
+
+        _other ->
+          false
+      end
+    end)
+
+    refute Task.yield(task, 0)
 
     send(router_pid, {reader, {:data, "q"}})
 
@@ -820,7 +874,7 @@ defmodule Breeze.InputRouterTest do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: FocusedInputView,
         hide_cursor: false,
         terminal_opts: [adapter: FakeAdapter],
@@ -841,18 +895,22 @@ defmodule Breeze.InputRouterTest do
 
     send(pid, {reader, {:data, "q"}})
 
-    refute_receive :halted, 50
-
     wait_until(fn ->
       :sys.get_state(server_pid).frame.base_output =~ "helloq"
     end)
 
-    Process.exit(pid, :normal)
+    _state = :sys.get_state(pid)
+    refute_received :halted
+
+    stop_gen_server(pid)
   end
 end
 
 defmodule Breeze.InputRouterThemeSyncTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
+
+  import Breeze.TestSupport.ProcessHelpers,
+    only: [start_input_router: 1, stop_gen_server: 1]
 
   import Breeze.TestSupport.WaitUntil
 
@@ -870,7 +928,7 @@ defmodule Breeze.InputRouterThemeSyncTest do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: ThemeSwitchView,
         hide_cursor: false,
         terminal_opts: [adapter: PaletteAdapter],
@@ -893,24 +951,24 @@ defmodule Breeze.InputRouterThemeSyncTest do
         metadata.theme.mode == :system and
           metadata.theme.variables[:palette_probe_status] == :ready
       end,
-      100
+      500
     )
 
     wait_until(
       fn ->
         :sys.get_state(server_pid).frame.base_output =~ "mode=system status=ready"
       end,
-      100
+      500
     )
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
 
   test "split runtime palette replies are consumed instead of forwarded as input" do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: ThemeProbeLeakView,
         start_opts: [parent: parent],
         hide_cursor: false,
@@ -933,23 +991,24 @@ defmodule Breeze.InputRouterThemeSyncTest do
         metadata.theme.mode == :system and
           metadata.theme.variables[:palette_probe_status] == :ready
       end,
-      100
+      500
     )
 
-    refute_receive {:leaked_input, _event}, 50
+    _state = :sys.get_state(pid)
+    refute_received {:leaked_input, _event}
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
 
   test "late runtime palette replies are drained instead of forwarded as input" do
     parent = self()
 
     {:ok, pid} =
-      Breeze.InputRouter.start_link(
+      start_input_router(
         view: ThemeProbeLeakView,
         start_opts: [parent: parent],
         hide_cursor: false,
-        terminal_opts: [adapter: DelayedPaletteAdapter],
+        terminal_opts: [adapter: DelayedPaletteAdapter, owner: parent],
         halt_fun: fn -> send(parent, :halted) end
       )
 
@@ -960,6 +1019,12 @@ defmodule Breeze.InputRouterThemeSyncTest do
 
     send(pid, {reader, {:data, "t"}})
     assert_receive :theme_switch
+    assert_receive {:palette_probe_partial_sent, ^pid}
+
+    probe = :sys.get_state(pid).theme_probe
+    send(pid, {:theme_probe_timeout, probe.key, probe.ref})
+    _state = :sys.get_state(pid)
+    send(pid, DelayedPaletteAdapter.late_reply(reader))
 
     wait_until(
       fn ->
@@ -968,11 +1033,12 @@ defmodule Breeze.InputRouterThemeSyncTest do
         metadata.theme.mode == :system and
           metadata.theme.variables[:palette_probe_status] == :ready
       end,
-      80
+      400
     )
 
-    refute_receive {:leaked_input, _event}, 50
+    _state = :sys.get_state(pid)
+    refute_received {:leaked_input, _event}
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
 end

@@ -1,6 +1,9 @@
 defmodule Breeze.RendererTest do
   use ExUnit.Case, async: true
-  import Breeze.TestSupport.ProcessHelpers, only: [stop_gen_server: 1]
+
+  import Breeze.TestSupport.ProcessHelpers,
+    only: [start_child_server: 1, stop_gen_server: 1]
+
   alias BackBreeze.VirtualText.Source
   alias Breeze.Renderer
 
@@ -706,7 +709,8 @@ defmodule Breeze.RendererTest do
     end
 
     test "scroll panels wire the scroll implicit" do
-      {:ok, pid} = Breeze.ChildServer.start(view: ScrollPanelExample, start_opts: [])
+      {:ok, pid} = start_child_server(view: ScrollPanelExample, start_opts: [])
+
       on_exit(fn -> stop_gen_server(pid) end)
 
       {:ok, _acc, initial_box} =
@@ -770,7 +774,7 @@ defmodule Breeze.RendererTest do
     end
 
     test "selected-with-owner also works through child server rerenders" do
-      {:ok, pid} = Breeze.ChildServer.start(view: SelectedWithOwnerExample, start_opts: [])
+      {:ok, pid} = start_child_server(view: SelectedWithOwnerExample, start_opts: [])
 
       {:ok, _acc, box} = Breeze.ChildServer.render(pid, focused: "list", implicit_state: %{})
 
@@ -779,7 +783,7 @@ defmodule Breeze.RendererTest do
     end
 
     test "tracks the namespaced live child root viewport" do
-      {:ok, pid} = Breeze.ChildServer.start(view: LiveCounterChild, start_opts: [])
+      {:ok, pid} = start_child_server(view: LiveCounterChild, start_opts: [])
 
       {acc, _box} =
         Renderer.render(ParentLiveExample, %{start_opts: []},
@@ -808,7 +812,7 @@ defmodule Breeze.RendererTest do
     end
 
     test "renders live children against their constrained slot dimensions" do
-      {:ok, pid} = Breeze.ChildServer.start(view: LiveSurfaceChild, start_opts: [])
+      {:ok, pid} = start_child_server(view: LiveSurfaceChild, start_opts: [])
 
       {_, box} =
         Renderer.render(SizedLiveSurfaceExample, %{},

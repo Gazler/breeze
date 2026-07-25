@@ -1,6 +1,8 @@
 defmodule Breeze.Implicit.TextareaTest do
   use ExUnit.Case, async: true
 
+  import Breeze.TestSupport.ProcessHelpers, only: [start_child_server: 1]
+
   alias BackBreeze.Box
   alias Breeze.ChildServer
   alias Breeze.Implicit.Textarea
@@ -354,7 +356,7 @@ defmodule Breeze.Implicit.TextareaTest do
 
   test "public textarea block updates through br-change" do
     terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = ChildServer.start(view: BlockTextareaView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: BlockTextareaView, terminal: terminal)
 
     assert {:ok, _acc, initial_box} = ChildServer.render(pid, terminal: terminal)
     initial_content = Regex.replace(~r/\e\[[0-9;]*m/u, initial_box.content, "")
@@ -376,7 +378,7 @@ defmodule Breeze.Implicit.TextareaTest do
 
   test "public textarea block can submit on enter" do
     terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = ChildServer.start(view: SubmitTextareaView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: SubmitTextareaView, terminal: terminal)
 
     assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "composer", true} = ChildServer.dispatch_input(pid, "Enter")
@@ -386,7 +388,7 @@ defmodule Breeze.Implicit.TextareaTest do
 
   test "disabled public textarea renders without becoming focusable or implicit" do
     terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = ChildServer.start(view: DisabledTextareaView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: DisabledTextareaView, terminal: terminal)
 
     assert {:ok, acc, box} = ChildServer.render(pid, terminal: terminal)
     metadata = ChildServer.metadata(pid)

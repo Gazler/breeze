@@ -1,7 +1,9 @@
 defmodule Breeze.Storybook.InspectorTest do
   use ExUnit.Case, async: true
 
-  import Breeze.TestSupport.ProcessHelpers, only: [stop_gen_server: 1]
+  import Breeze.TestSupport.ProcessHelpers,
+    only: [start_app_server: 1, stop_gen_server: 1]
+
   import Breeze.TestSupport.WaitUntil
 
   defmodule RecordingAdapter do
@@ -30,7 +32,7 @@ defmodule Breeze.Storybook.InspectorTest do
     terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Breeze.Storybook,
         terminal: terminal,
         inspector: [remote: false]
