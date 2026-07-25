@@ -8,6 +8,9 @@ defmodule Breeze.TestSupport.StorybookCase do
       import Breeze.TestSupport.WaitUntil
       import Breeze.TestSupport.StorybookHelpers
 
+      import Breeze.TestSupport.ProcessHelpers,
+        only: [start_app_server: 1, start_child_server: 1]
+
       alias Breeze.TestSupport.StorybookFakeAdapter, as: FakeAdapter
       alias Breeze.TestSupport.StorybookRecordingAdapter, as: RecordingAdapter
     end
@@ -53,6 +56,7 @@ defmodule Breeze.TestSupport.StorybookHelpers do
   @moduledoc false
 
   import ExUnit.Assertions
+  import Breeze.TestSupport.ProcessHelpers, only: [start_app_server: 1, stop_gen_server: 1]
   import Breeze.TestSupport.WaitUntil
 
   alias Breeze.TestSupport.StorybookRecordingAdapter, as: RecordingAdapter
@@ -85,7 +89,7 @@ defmodule Breeze.TestSupport.StorybookHelpers do
     receive do
       {:terminal_write, str} -> drain_terminal_writes([str | writes])
     after
-      10 -> Enum.reverse(writes)
+      2 -> Enum.reverse(writes)
     end
   end
 
@@ -99,7 +103,7 @@ defmodule Breeze.TestSupport.StorybookHelpers do
         start_opts: [directory: "storybook", file: file]
       ]
       |> Keyword.merge(opts)
-      |> Breeze.Server.start_app_link()
+      |> start_app_server()
 
     ExUnit.Callbacks.on_exit(fn -> stop_server(pid) end)
 
@@ -111,7 +115,7 @@ defmodule Breeze.TestSupport.StorybookHelpers do
   end
 
   def stop_server(pid) do
-    Breeze.TestSupport.ProcessHelpers.stop_gen_server(pid)
+    stop_gen_server(pid)
   end
 
   def wait_for_preview_child(pid, story_id) do
@@ -131,7 +135,7 @@ defmodule Breeze.TestSupport.StorybookHelpers do
           _ -> false
         end
       end,
-      100
+      500
     )
   end
 

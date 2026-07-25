@@ -2,6 +2,7 @@ defmodule Breeze.RemoteInspectorTest do
   use ExUnit.Case, async: true
 
   import Breeze.TestSupport.WaitUntil
+  import Breeze.TestSupport.ProcessHelpers, only: [start_child_server: 1]
 
   defmodule InspectorAppView do
     use Breeze.View
@@ -449,6 +450,7 @@ defmodule Breeze.RemoteInspectorTest do
   end
 
   test "app connector retries and publishes the current snapshot without app interaction" do
+    parent = self()
     snapshot = %{root_view: InspectorAppView, selected_id: "button"}
     {:ok, app_pid} = FakeInspectorServer.start_link(snapshot)
     {:ok, inspector_pid} = SnapshotCaptureServer.start_link(self())
@@ -458,14 +460,19 @@ defmodule Breeze.RemoteInspectorTest do
     {:ok, connector_pid} =
       Breeze.RemoteInspector.Supervisor.start_connector(supervisor, app_pid,
         retry_interval: 5,
-        resolver: fn -> Agent.get(resolver_state, & &1) end
+        resolver: fn ->
+          result = Agent.get(resolver_state, & &1)
+          send(parent, {:resolver_called, result})
+          result
+        end
       )
 
     connector_ref = Process.monitor(connector_pid)
 
     assert connector_pid in supervised_pids(supervisor)
 
-    refute_receive {:captured_snapshot, ^app_pid, _snapshot}, 20
+    assert_receive {:resolver_called, :retry}
+    refute_received {:captured_snapshot, ^app_pid, _snapshot}
 
     Agent.update(resolver_state, fn _state -> {:ok, inspector_pid} end)
 
@@ -1017,7 +1024,8 @@ defmodule Breeze.RemoteInspectorTest do
 
   test "theme tab can scroll its final palette row fully into view" do
     terminal = %Termite.Terminal{size: %{width: 40, height: 8}}
-    {:ok, pid} = Breeze.ChildServer.start(view: ThemeTabView, start_opts: [], terminal: terminal)
+
+    {:ok, pid} = start_child_server(view: ThemeTabView, start_opts: [], terminal: terminal)
 
     on_exit(fn -> stop_process(pid) end)
 
@@ -1188,8 +1196,8 @@ defmodule Breeze.RemoteInspectorTest do
                term
              )
 
-    refute_receive {:selected_inspector, _id}, 50
-    refute_receive {:inspector_render_tree, _opts}, 50
+    refute_received {:selected_inspector, _id}
+    refute_received {:inspector_render_tree, _opts}
   end
 
   test "remote inspector follows the newest live source after a disconnect and reconnect" do
@@ -1390,6 +1398,7 @@ defmodule Breeze.RemoteInspectorSyncTest do
 
     Breeze.RemoteInspector.Server.publish(pid, self(), snapshot)
     published = Breeze.RemoteInspector.Server.snapshot(pid)
+    send(pid, :flush_snapshots)
     key = {node(), inspect(self())}
 
     assert_receive {:remote_inspector_snapshots,
@@ -1416,13 +1425,15 @@ defmodule Breeze.RemoteInspectorSyncTest do
     end)
 
     _state = Breeze.RemoteInspector.Server.snapshot(pid)
+    send(pid, :flush_snapshots)
     key = {node(), inspect(self())}
 
     assert_receive {:remote_inspector_snapshots,
                     %{snapshots: %{^key => entry}, latest_source: ^key}}
 
     assert entry.snapshot.selected_id == "item-20"
-    refute_receive {:remote_inspector_snapshots, _update}, 30
+    _state = :sys.get_state(pid)
+    refute_received {:remote_inspector_snapshots, _update}
   end
 
   test "incremental logs retain the newest entries in oldest-first order" do

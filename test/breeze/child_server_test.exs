@@ -1,6 +1,8 @@
 defmodule Breeze.ChildServerTest do
   use ExUnit.Case, async: true
-  import Breeze.TestSupport.ProcessHelpers, only: [stop_gen_server: 1]
+
+  import Breeze.TestSupport.ProcessHelpers,
+    only: [start_child_server: 1, stop_gen_server: 1]
 
   alias Breeze.Theme
   alias Breeze.Theme.Probe, as: ThemeProbe
@@ -128,7 +130,7 @@ defmodule Breeze.ChildServerTest do
   end
 
   test "dispatches mouse input through handle_event/3" do
-    {:ok, pid} = Breeze.ChildServer.start(view: MouseView)
+    {:ok, pid} = start_child_server(view: MouseView)
 
     assert {:noreply, nil, true} =
              Breeze.ChildServer.dispatch_input(pid, %{
@@ -140,7 +142,7 @@ defmodule Breeze.ChildServerTest do
   end
 
   test "dispatch_event/3 supports invalidate false replies from handle_event/3" do
-    {:ok, pid} = Breeze.ChildServer.start(view: InvalidateEventView)
+    {:ok, pid} = start_child_server(view: InvalidateEventView)
 
     assert {:noreply, nil, false} =
              Breeze.ChildServer.dispatch_event(pid, "defer_render", %{})
@@ -152,7 +154,7 @@ defmodule Breeze.ChildServerTest do
 
   test "bootstrap prepass runs only once for views without implicit state" do
     terminal = %Termite.Terminal{size: %{width: 20, height: 5}}
-    {:ok, pid} = Breeze.ChildServer.start(view: MouseView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: MouseView, terminal: terminal)
     on_exit(fn -> stop_gen_server(pid) end)
     assert is_nil(:sys.get_state(pid).last_render_at)
 
@@ -189,7 +191,7 @@ defmodule Breeze.ChildServerTest do
 
   test "wheel mouse events do not steal focus" do
     terminal = %Termite.Terminal{size: %{width: 20, height: 5}}
-    {:ok, wheel_pid} = Breeze.ChildServer.start(view: MouseFocusView, terminal: terminal)
+    {:ok, wheel_pid} = start_child_server(view: MouseFocusView, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(wheel_pid, terminal: terminal)
     assert %{focused: "left"} = Breeze.ChildServer.metadata(wheel_pid)
@@ -204,7 +206,7 @@ defmodule Breeze.ChildServerTest do
 
   test "mouse clicks detect the clicked target id" do
     terminal = %Termite.Terminal{size: %{width: 20, height: 5}}
-    {:ok, pid} = Breeze.ChildServer.start(view: MouseTargetView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: MouseTargetView, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
@@ -219,7 +221,7 @@ defmodule Breeze.ChildServerTest do
 
   test "mouse targets with full width use the rendered terminal width" do
     terminal = %Termite.Terminal{size: %{width: 20, height: 5}}
-    {:ok, pid} = Breeze.ChildServer.start(view: FullWidthMouseTargetView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: FullWidthMouseTargetView, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
@@ -233,7 +235,7 @@ defmodule Breeze.ChildServerTest do
   end
 
   test "metadata exposes active keybindings and local handlers dispatch before handle_event/3" do
-    {:ok, pid} = Breeze.ChildServer.start(view: KeybindingView)
+    {:ok, pid} = start_child_server(view: KeybindingView)
 
     assert %{active_keybindings: [%{key: "q", label: "Quit"}, %{key: "Enter", label: "Save"}]} =
              Breeze.ChildServer.metadata(pid)
@@ -256,7 +258,7 @@ defmodule Breeze.ChildServerTest do
     theme_source = Theme.system()
 
     {:ok, pid} =
-      Breeze.ChildServer.start(
+      start_child_server(
         view: MouseView,
         terminal: terminal,
         theme: theme_source,
@@ -293,6 +295,7 @@ defmodule Breeze.ChildServerTest do
 
     assert %{theme: %{mode: :system}} = Breeze.ChildServer.metadata(pid)
     assert_receive :invalidated
-    refute_receive :invalidated
+    _state = :sys.get_state(pid)
+    refute_received :invalidated
   end
 end

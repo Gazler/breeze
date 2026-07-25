@@ -1,62 +1,87 @@
-defmodule Breeze.ExampleSnapshotTest do
-  use ExUnit.Case, async: true
-  use Breeze.SnapshotAssertions
-  import Breeze.TestSupport.WaitUntil
+defmodule Breeze.TestSupport.ExampleSnapshotCase do
+  @moduledoc false
 
-  @docs_modules [
-    Access,
-    Agent,
-    Application,
-    Atom,
-    Base,
-    Behaviour,
-    Calendar,
-    Code,
-    Config,
-    Date,
-    DateTime,
-    Enum,
-    Exception,
-    File,
-    Float,
-    GenServer,
-    Integer,
-    IO,
-    Keyword,
-    List,
-    Macro,
-    Map,
-    MapSet,
-    NaiveDateTime,
-    Node,
-    OptionParser,
-    Path,
-    Process,
-    Range,
-    Record,
-    Regex,
-    String,
-    Supervisor,
-    System,
-    Task,
-    Time,
-    Tuple,
-    URI,
-    Version
-  ]
+  use ExUnit.CaseTemplate
 
-  defmodule SnapshotAdapter do
-    @behaviour Termite.Terminal.Adapter
+  using do
+    quote do
+      use Breeze.SnapshotAssertions
 
-    def start(opts) do
-      {width, height} = Keyword.get(opts, :size, {80, 24})
-      {:ok, %{ref: make_ref(), size: %{width: width, height: height}}}
+      import Breeze.TestSupport.WaitUntil
+
+      import Breeze.TestSupport.ProcessHelpers,
+        only: [start_app_server: 1, stop_gen_server: 1]
+
+      alias Breeze.TestSupport.ExampleSnapshotAdapter, as: SnapshotAdapter
     end
-
-    def reader(term), do: {:ok, term.ref}
-    def write(term, _str), do: {:ok, term}
-    def resize(term), do: term.size
   end
+end
+
+defmodule Breeze.TestSupport.ExampleSnapshotAdapter do
+  @moduledoc false
+
+  @behaviour Termite.Terminal.Adapter
+
+  def start(opts) do
+    {width, height} = Keyword.get(opts, :size, {80, 24})
+    {:ok, %{ref: make_ref(), size: %{width: width, height: height}}}
+  end
+
+  def reader(term), do: {:ok, term.ref}
+  def write(term, _str), do: {:ok, term}
+  def resize(term), do: term.size
+end
+
+defmodule Breeze.TestSupport.ExampleSnapshots do
+  @moduledoc false
+
+  def docs_modules do
+    [
+      Access,
+      Agent,
+      Application,
+      Atom,
+      Base,
+      Behaviour,
+      Calendar,
+      Code,
+      Config,
+      Date,
+      DateTime,
+      Enum,
+      Exception,
+      File,
+      Float,
+      GenServer,
+      Integer,
+      IO,
+      Keyword,
+      List,
+      Macro,
+      Map,
+      MapSet,
+      NaiveDateTime,
+      Node,
+      OptionParser,
+      Path,
+      Process,
+      Range,
+      Record,
+      Regex,
+      String,
+      Supervisor,
+      System,
+      Task,
+      Time,
+      Tuple,
+      URI,
+      Version
+    ]
+  end
+end
+
+defmodule Breeze.ExampleSnapshot.CounterTest do
+  use Breeze.TestSupport.ExampleSnapshotCase, async: true
 
   test "counter example snapshots increment and decrement" do
     session = Breeze.Test.start!(Demo, size: {24, 3})
@@ -78,6 +103,10 @@ defmodule Breeze.ExampleSnapshotTest do
       snapshot_dir: "../__snapshots__"
     )
   end
+end
+
+defmodule Breeze.ExampleSnapshot.ModalConfirmTest do
+  use Breeze.TestSupport.ExampleSnapshotCase, async: true
 
   test "modal example snapshots opening and confirming the modal" do
     session =
@@ -104,6 +133,10 @@ defmodule Breeze.ExampleSnapshotTest do
       snapshot_dir: "../__snapshots__"
     )
   end
+end
+
+defmodule Breeze.ExampleSnapshot.ModalInsetTest do
+  use Breeze.TestSupport.ExampleSnapshotCase, async: true
 
   test "modal example snapshots opening the inset modal" do
     session =
@@ -120,6 +153,10 @@ defmodule Breeze.ExampleSnapshotTest do
       snapshot_dir: "../__snapshots__"
     )
   end
+end
+
+defmodule Breeze.ExampleSnapshot.TabsTest do
+  use Breeze.TestSupport.ExampleSnapshotCase, async: true
 
   test "tabs example snapshots horizontal selection changes" do
     session = Breeze.Test.start!(TabsExample, size: {34, 14})
@@ -143,6 +180,10 @@ defmodule Breeze.ExampleSnapshotTest do
       snapshot_dir: "../__snapshots__"
     )
   end
+end
+
+defmodule Breeze.ExampleSnapshot.PostingInitialTest do
+  use Breeze.TestSupport.ExampleSnapshotCase, async: true
 
   test "posting example initial snapshot" do
     session = Breeze.Test.start!(Posting, size: {120, 24})
@@ -152,20 +193,24 @@ defmodule Breeze.ExampleSnapshotTest do
       snapshot_dir: "../__snapshots__"
     )
   end
+end
+
+defmodule Breeze.ExampleSnapshot.PostingMethodTest do
+  use Breeze.TestSupport.ExampleSnapshotCase, async: true
 
   test "posting example snapshots method dropdown opened through server input decoding" do
     terminal = Termite.Terminal.start(adapter: SnapshotAdapter, size: {120, 24})
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         reader: reader,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
-    on_exit(fn -> Process.exit(pid, :normal) end)
+    on_exit(fn -> stop_gen_server(pid) end)
 
     send(pid, {reader, {:data, "\x14"}})
 
@@ -180,6 +225,10 @@ defmodule Breeze.ExampleSnapshotTest do
       snapshot_dir: "../__snapshots__"
     )
   end
+end
+
+defmodule Breeze.ExampleSnapshot.PostingHelpTest do
+  use Breeze.TestSupport.ExampleSnapshotCase, async: true
 
   test "posting example snapshots help modal centered" do
     session = Breeze.Test.start!(Posting, size: {120, 24})
@@ -191,13 +240,17 @@ defmodule Breeze.ExampleSnapshotTest do
       snapshot_dir: "../__snapshots__"
     )
   end
+end
+
+defmodule Breeze.ExampleSnapshot.AnimatedProgressTest do
+  use Breeze.TestSupport.ExampleSnapshotCase, async: true
 
   test "animated progress example snapshots independent child ticks" do
     terminal = Termite.Terminal.start(adapter: SnapshotAdapter, size: {94, 10})
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: AnimatedProgressExample,
         start_opts: [animate?: false],
         terminal: terminal,
@@ -205,7 +258,7 @@ defmodule Breeze.ExampleSnapshotTest do
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
-    on_exit(fn -> Process.exit(pid, :normal) end)
+    on_exit(fn -> stop_gen_server(pid) end)
 
     wait_until(fn ->
       state = :sys.get_state(pid)
@@ -250,6 +303,10 @@ defmodule Breeze.ExampleSnapshotTest do
       snapshot_dir: "../__snapshots__"
     )
   end
+end
+
+defmodule Breeze.ExampleSnapshot.ResponsiveTest do
+  use Breeze.TestSupport.ExampleSnapshotCase, async: true
 
   test "responsive example progressively adds layout chrome" do
     compact = Breeze.Test.start!(Responsive, size: {39, 24})
@@ -279,12 +336,16 @@ defmodule Breeze.ExampleSnapshotTest do
     assert large_content =~ "╭"
     assert large_content =~ "single row"
   end
+end
+
+defmodule Breeze.ExampleSnapshot.DocsTest do
+  use Breeze.TestSupport.ExampleSnapshotCase, async: true
 
   test "docs example snapshots stdlib scrolling" do
     session =
       Breeze.Test.start!(Docs,
         size: {80, 14},
-        start_opts: [docs: @docs_modules]
+        start_opts: [docs: Breeze.TestSupport.ExampleSnapshots.docs_modules()]
       )
 
     on_exit(fn -> Breeze.Test.stop(session) end)
@@ -331,6 +392,10 @@ defmodule Breeze.ExampleSnapshotTest do
       snapshot_dir: "../__snapshots__"
     )
   end
+end
+
+defmodule Breeze.ExampleSnapshot.SnakeTest do
+  use Breeze.TestSupport.ExampleSnapshotCase, async: true
 
   test "snake example snapshots deterministic ticks" do
     session =

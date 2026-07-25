@@ -41,7 +41,7 @@ defmodule Breeze.TelemetryTest do
 
     assert :result = Breeze.Telemetry.span(@event, %{source: :test}, fn -> :result end)
     assert :ok = Breeze.Telemetry.execute(@event, %{value: 1}, %{source: :test})
-    refute_receive _event
+    refute_received _event
   end
 
   def handle_event(event, measurements, metadata, pid) do

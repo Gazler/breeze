@@ -150,6 +150,7 @@ defmodule Breeze.InputRouter do
 
   @impl true
   def terminate(_reason, state) do
+    stop_server(state.server_pid)
     Breeze.RemoteInspector.Supervisor.stop(state.remote_inspector_supervisor)
     Breeze.ChildViewSupervisor.stop(state.child_view_supervisor)
     IExShellProxy.stop(state.iex_shell_proxy)
@@ -557,10 +558,7 @@ defmodule Breeze.InputRouter do
   end
 
   defp stop(state) do
-    if Process.alive?(state.server_pid) do
-      Process.unlink(state.server_pid)
-      Process.exit(state.server_pid, :shutdown)
-    end
+    stop_server(state.server_pid)
 
     state.terminal
     |> maybe_disable_enhanced_keyboard(state)
@@ -571,6 +569,15 @@ defmodule Breeze.InputRouter do
     |> Termite.Terminal.write("\r")
 
     {:stop, :normal, state}
+  end
+
+  defp stop_server(server_pid) do
+    Process.unlink(server_pid)
+    if Process.alive?(server_pid), do: GenServer.stop(server_pid, :shutdown)
+    :ok
+  catch
+    :exit, :noproc -> :ok
+    :exit, {:noproc, {GenServer, :stop, _args}} -> :ok
   end
 
   defp maybe_exit_alt_screen(terminal, %{alt_screen?: true}),

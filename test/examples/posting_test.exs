@@ -1,12 +1,94 @@
 defmodule PostingTest do
-  use ExUnit.Case, async: true
-  import Breeze.TestSupport.WaitUntil
+  @moduledoc false
 
-  alias Breeze.Server.Diagnostics
+  defmodule FakeAdapter do
+    @behaviour Termite.Terminal.Adapter
+
+    def start(_opts) do
+      {:ok, %{ref: make_ref(), size: %{width: 80, height: 24}}}
+    end
+
+    def reader(term), do: {:ok, term.ref}
+    def write(term, _str), do: {:ok, term}
+    def resize(term), do: term.size
+  end
+
+  defmodule RecordingAdapter do
+    @behaviour Termite.Terminal.Adapter
+
+    def start(opts) do
+      {:ok,
+       %{ref: make_ref(), size: %{width: 80, height: 24}, owner: Keyword.fetch!(opts, :owner)}}
+    end
+
+    def reader(term), do: {:ok, term.ref}
+
+    def write(term, str) do
+      send(term.owner, {:terminal_write, str})
+      {:ok, term}
+    end
+
+    def resize(term), do: term.size
+  end
+end
+
+defmodule PostingTestHelpers do
+  @moduledoc false
+
+  import ExUnit.Assertions
+
+  def visible(content) do
+    String.replace(content, ~r/\e\[[0-9;]*m/u, "")
+  end
+
+  def drain_terminal_writes(writes \\ []) do
+    receive do
+      {:terminal_write, str} -> drain_terminal_writes([str | writes])
+    after
+      2 -> Enum.reverse(writes)
+    end
+  end
+
+  def assert_terminal_repaired_row(zero_based_row) do
+    payload =
+      drain_terminal_writes()
+      |> IO.iodata_to_binary()
+
+    assert payload =~ "\e[#{zero_based_row + 1};1H"
+  end
+end
+
+defmodule PostingTestCase do
+  @moduledoc false
+
+  use ExUnit.CaseTemplate
+
+  using do
+    quote do
+      import Breeze.TestSupport.WaitUntil
+      import PostingTestHelpers
+
+      import Breeze.TestSupport.ProcessHelpers,
+        only: [
+          start_app_server: 1,
+          start_child_server: 1,
+          start_server: 1,
+          stop_gen_server: 1
+        ]
+
+      alias Breeze.Server.Diagnostics
+      alias PostingTest.{FakeAdapter, RecordingAdapter}
+    end
+  end
+end
+
+defmodule Posting.LayoutTest do
+  use PostingTestCase, async: true
 
   test "compact layout hides header metadata and the collection panel below md" do
     compact_terminal = %Termite.Terminal{size: %{width: 59, height: 24}}
-    {:ok, compact_pid} = Breeze.ChildServer.start(view: Posting, terminal: compact_terminal)
+
+    {:ok, compact_pid} = start_child_server(view: Posting, terminal: compact_terminal)
 
     assert {:ok, _acc, compact_box} =
              Breeze.ChildServer.render(compact_pid, terminal: compact_terminal)
@@ -38,7 +120,8 @@ defmodule PostingTest do
            |> String.starts_with?("│")
 
     md_terminal = %Termite.Terminal{size: %{width: 60, height: 24}}
-    {:ok, md_pid} = Breeze.ChildServer.start(view: Posting, terminal: md_terminal)
+
+    {:ok, md_pid} = start_child_server(view: Posting, terminal: md_terminal)
 
     assert {:ok, _acc, md_box} = Breeze.ChildServer.render(md_pid, terminal: md_terminal)
 
@@ -50,7 +133,8 @@ defmodule PostingTest do
 
   test "F1 opens help modal and focuses it, Escape closes and restores url focus" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)
+
+    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert visible(box.content) =~ "https://jsonplaceholder.typicode.com/posts"
@@ -72,7 +156,8 @@ defmodule PostingTest do
 
   test "Ctrl-T opens the method dropdown" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)
+
+    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "method", true} = Breeze.ChildServer.dispatch_input(pid, "\x14")
@@ -87,7 +172,8 @@ defmodule PostingTest do
 
   test "Ctrl-T opens the method dropdown when the url input is focused via decoded key event" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)
+
+    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert %{focused: "url"} = Breeze.ChildServer.metadata(pid)
@@ -102,10 +188,15 @@ defmodule PostingTest do
     assert {Breeze.Implicit.Dropdown, %{open?: true}} =
              Breeze.ChildServer.metadata(pid).implicit_state["method"]
   end
+end
+
+defmodule Posting.HeadersLayoutTest do
+  use PostingTestCase, async: true
 
   test "headers form adds a request header" do
     terminal = %Termite.Terminal{size: %{width: 120, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)
+
+    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert visible(box.content) =~ "╱╱╱"
@@ -136,10 +227,15 @@ defmodule PostingTest do
     refute rendered =~ "╱╱╱"
     assert %{focused: "request-header-name"} = Breeze.ChildServer.metadata(pid)
   end
+end
+
+defmodule Posting.PersistentLayoutTest do
+  use PostingTestCase, async: true
 
   test "header input implicit state survives switching tabs away and back" do
     terminal = %Termite.Terminal{size: %{width: 120, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)
+
+    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
@@ -174,43 +270,17 @@ defmodule PostingTest do
     assert {Breeze.Implicit.Input, %{cursor: 3}} =
              Breeze.ChildServer.metadata(pid).implicit_state["request-header-name"]
   end
+end
 
-  defmodule FakeAdapter do
-    @behaviour Termite.Terminal.Adapter
-
-    def start(_opts) do
-      {:ok, %{ref: make_ref(), size: %{width: 80, height: 24}}}
-    end
-
-    def reader(term), do: {:ok, term.ref}
-    def write(term, _str), do: {:ok, term}
-    def resize(term), do: term.size
-  end
-
-  defmodule RecordingAdapter do
-    @behaviour Termite.Terminal.Adapter
-
-    def start(opts) do
-      {:ok,
-       %{ref: make_ref(), size: %{width: 80, height: 24}, owner: Keyword.fetch!(opts, :owner)}}
-    end
-
-    def reader(term), do: {:ok, term.ref}
-
-    def write(term, str) do
-      send(term.owner, {:terminal_write, str})
-      {:ok, term}
-    end
-
-    def resize(term), do: term.size
-  end
+defmodule Posting.ServerInputTest do
+  use PostingTestCase, async: true
 
   test "F2 renders the debug panel above the posting interface" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
@@ -225,7 +295,7 @@ defmodule PostingTest do
       Map.has_key?(state.children, "debug") and rendered =~ "│Debug"
     end)
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
 
   test "server input flush loop settles after a focus change" do
@@ -233,7 +303,7 @@ defmodule PostingTest do
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
@@ -251,7 +321,7 @@ defmodule PostingTest do
     refute state.input.flush_scheduled?
     assert :queue.is_empty(state.input.queued_input)
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
 
   test "server drains a burst of printable input for posting" do
@@ -259,7 +329,7 @@ defmodule PostingTest do
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
@@ -281,8 +351,12 @@ defmodule PostingTest do
     assert :queue.is_empty(state.input.queued_input)
     assert String.ends_with?(term.assigns.url, String.duplicate("x", 100))
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
+end
+
+defmodule Posting.ServerEditingInputTest do
+  use PostingTestCase, async: true
 
   test "server forwards ctrl-backspace variants to the focused posting input" do
     for raw_key <- [
@@ -297,7 +371,7 @@ defmodule PostingTest do
       terminal = Termite.Terminal.start(adapter: FakeAdapter)
 
       {:ok, pid} =
-        Breeze.Server.start_link(
+        start_server(
           view: Posting,
           alt_screen: false,
           enhanced_keyboard: false,
@@ -327,7 +401,8 @@ defmodule PostingTest do
 
   test "posting keeps repeated wide characters contiguous in the url row" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = Breeze.ChildServer.start(view: Posting, terminal: terminal)
+
+    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
@@ -351,7 +426,7 @@ defmodule PostingTest do
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
@@ -392,15 +467,19 @@ defmodule PostingTest do
     payload = drain_terminal_writes() |> IO.iodata_to_binary()
     assert payload =~ "postsこんにちは"
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
+end
+
+defmodule Posting.InspectorOptInTest do
+  use PostingTestCase, async: true
 
   test "inspector is opt-in and stays disabled by default" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
@@ -419,36 +498,19 @@ defmodule PostingTest do
     assert %{enabled?: false, visible?: false, selected_id: nil} =
              Diagnostics.inspector_snapshot(pid)
 
-    Process.exit(pid, :normal)
-  end
-
-  defp visible(content) do
-    String.replace(content, ~r/\e\[[0-9;]*m/u, "")
-  end
-
-  defp drain_terminal_writes(writes \\ []) do
-    receive do
-      {:terminal_write, str} -> drain_terminal_writes([str | writes])
-    after
-      10 -> Enum.reverse(writes)
-    end
+    stop_gen_server(pid)
   end
 end
 
-defmodule PostingInspectorTest do
-  use ExUnit.Case, async: true
-
-  import Breeze.TestSupport.WaitUntil
-
-  alias Breeze.Server.Diagnostics
-  alias PostingTest.{FakeAdapter, RecordingAdapter}
+defmodule Posting.InspectorSelectionTest do
+  use PostingTestCase, async: true
 
   test "posting inspector can be toggled and select an element with the mouse" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         inspector: [remote: false],
@@ -483,7 +545,7 @@ defmodule PostingInspectorTest do
     assert snapshot.selected.implicit_module == Breeze.Implicit.Dropdown
     assert snapshot.selected.fragment_preview =~ "POST"
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
 
   test "posting inspector can select anonymous non-focusable elements" do
@@ -491,7 +553,7 @@ defmodule PostingInspectorTest do
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         inspector: [remote: false],
@@ -535,7 +597,7 @@ defmodule PostingInspectorTest do
     assert is_binary(snapshot.selected.fragment_preview)
     assert is_binary(snapshot.selected.fragment_render)
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
 
   test "posting ignores mouse move events when inspector is closed" do
@@ -543,7 +605,7 @@ defmodule PostingInspectorTest do
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         mouse: [mode: :motion],
@@ -567,15 +629,19 @@ defmodule PostingInspectorTest do
     assert Process.alive?(pid)
     refute Diagnostics.inspector_snapshot(pid).visible?
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
+end
+
+defmodule Posting.InspectorInteractionTest do
+  use PostingTestCase, async: true
 
   test "posting inspector dock can move to the top" do
     terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         inspector: [remote: false],
@@ -611,7 +677,7 @@ defmodule PostingInspectorTest do
     assert %{panel_position: :bottom} = Diagnostics.inspector_snapshot(pid)
     assert_terminal_repaired_row(0)
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
 
   test "posting inspector highlights hovered elements without changing selection" do
@@ -619,7 +685,7 @@ defmodule PostingInspectorTest do
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         inspector: [remote: false],
@@ -650,15 +716,19 @@ defmodule PostingInspectorTest do
     assert snapshot.hovered_id == "method"
     assert snapshot.selected_id == "url"
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
+end
+
+defmodule Posting.InspectorMouseInteractionTest do
+  use PostingTestCase, async: true
 
   test "posting inspector ignores hover events over the inspector panel itself" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         inspector: [remote: false],
@@ -686,13 +756,16 @@ defmodule PostingInspectorTest do
 
     send(pid, {reader, {:data, "\e[<35;#{panel_x};#{panel_y}M"}})
 
-    Process.sleep(25)
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input)
+    end)
 
     snapshot = Diagnostics.inspector_snapshot(pid)
     assert snapshot.hovered_id == "method"
     assert snapshot.selected_id == "url"
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
 
   test "posting inspector only cycles outward when clicking the currently selected element again" do
@@ -700,7 +773,7 @@ defmodule PostingInspectorTest do
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         inspector: [remote: false],
@@ -755,7 +828,7 @@ defmodule PostingInspectorTest do
     assert snapshot.selected_id == "method"
     assert snapshot.selected.actual_id == "method"
 
-    Process.exit(pid, :normal)
+    stop_gen_server(pid)
   end
 
   test "posting inspector swallows mouse release events instead of bubbling them into the app" do
@@ -763,7 +836,7 @@ defmodule PostingInspectorTest do
     reader = terminal.reader
 
     {:ok, pid} =
-      Breeze.Server.start_app_link(
+      start_app_server(
         view: Posting,
         terminal: terminal,
         inspector: [remote: false],
@@ -790,22 +863,6 @@ defmodule PostingInspectorTest do
     assert Process.alive?(pid)
     assert Diagnostics.inspector_snapshot(pid).visible?
 
-    Process.exit(pid, :normal)
-  end
-
-  defp assert_terminal_repaired_row(zero_based_row) do
-    payload =
-      drain_terminal_writes()
-      |> IO.iodata_to_binary()
-
-    assert payload =~ "\e[#{zero_based_row + 1};1H"
-  end
-
-  defp drain_terminal_writes(writes \\ []) do
-    receive do
-      {:terminal_write, str} -> drain_terminal_writes([str | writes])
-    after
-      10 -> Enum.reverse(writes)
-    end
+    stop_gen_server(pid)
   end
 end

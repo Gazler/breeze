@@ -1,6 +1,8 @@
 defmodule Breeze.InitialRenderTest do
   use ExUnit.Case, async: true
 
+  import Breeze.TestSupport.ProcessHelpers, only: [start_child_server: 1]
+
   defmodule EmptyView do
     use Breeze.View
 
@@ -15,7 +17,7 @@ defmodule Breeze.InitialRenderTest do
 
   test "the initial render prepass only runs once when implicit state remains empty" do
     {:ok, pid} =
-      Breeze.ChildServer.start(view: EmptyView, assigns: %{count: 0, owner: self()})
+      start_child_server(view: EmptyView, assigns: %{count: 0, owner: self()})
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, [])
     initial_render_count = drain_view_renders()

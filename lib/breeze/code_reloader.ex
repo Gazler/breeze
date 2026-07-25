@@ -41,6 +41,16 @@ defmodule Breeze.CodeReloader do
     {:noreply, state}
   end
 
+  @impl true
+  def terminate(_reason, state) do
+    if is_pid(state.watcher_pid) and Process.alive?(state.watcher_pid) do
+      Process.unlink(state.watcher_pid)
+      Process.exit(state.watcher_pid, :shutdown)
+    end
+
+    :ok
+  end
+
   defp snapshot_files(files_fun, paths) do
     paths
     |> files_fun.()

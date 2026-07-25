@@ -1,6 +1,8 @@
 defmodule Breeze.Implicit.InputTest do
   use ExUnit.Case, async: true
 
+  import Breeze.TestSupport.ProcessHelpers, only: [start_child_server: 1]
+
   alias BackBreeze.Box
   alias Breeze.ChildServer
   alias Breeze.Implicit.Input
@@ -480,7 +482,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "child server accepts implicits that return {:ok, state}" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = ChildServer.start(view: InputView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: InputView, terminal: terminal)
 
     assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
 
@@ -495,7 +497,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "nested input layout stores screen-relative coordinates" do
     terminal = %Termite.Terminal{size: %{width: 40, height: 10}}
-    {:ok, pid} = ChildServer.start(view: NestedInputView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: NestedInputView, terminal: terminal)
 
     assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
 
@@ -508,7 +510,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "child server renders a fixed-width input with a scrolled visible slice" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = ChildServer.start(view: OverflowInputView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: OverflowInputView, terminal: terminal)
 
     assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
 
@@ -526,7 +528,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "child server keeps the cursor pinned when typing at the overflow edge" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = ChildServer.start(view: OverflowInputView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: OverflowInputView, terminal: terminal)
 
     assert {:ok, _acc, initial_box} = ChildServer.render(pid, terminal: terminal)
 
@@ -553,7 +555,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "child server scrolls back left after backspace from the overflow edge" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = ChildServer.start(view: OverflowInputView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: OverflowInputView, terminal: terminal)
 
     assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "website", true} = ChildServer.dispatch_input(pid, "!")
@@ -578,7 +580,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "child server reveals earlier content when moving left out of the overflow edge" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = ChildServer.start(view: OverflowInputView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: OverflowInputView, terminal: terminal)
 
     assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
 
@@ -596,7 +598,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "public input block keeps its left inset after change rerenders" do
     terminal = %Termite.Terminal{size: %{width: 40, height: 10}}
-    {:ok, pid} = ChildServer.start(view: BlockInputView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: BlockInputView, terminal: terminal)
 
     assert {:ok, _acc, initial_box} = ChildServer.render(pid, terminal: terminal)
     assert Regex.replace(~r/\e\[[0-9;]*m/u, initial_box.content, "") =~ " hello world"
@@ -610,7 +612,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "public input block keeps padding inside the box and cursor aligned" do
     terminal = %Termite.Terminal{size: %{width: 24, height: 10}}
-    {:ok, pid} = ChildServer.start(view: PaddedBlockInputView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: PaddedBlockInputView, terminal: terminal)
 
     assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
 
@@ -627,7 +629,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "child server delete updates a scrolled input through the normal key path" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = ChildServer.start(view: OverflowInputView, terminal: terminal)
+    {:ok, pid} = start_child_server(view: OverflowInputView, terminal: terminal)
 
     assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
     assert {:noreply, "website", true} = ChildServer.dispatch_input(pid, "ArrowLeft")
@@ -665,7 +667,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "focused inputs consume printable keys before global keybindings" do
     {:ok, pid} =
-      ChildServer.start(
+      start_child_server(
         view: OverflowInputView,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
@@ -678,7 +680,7 @@ defmodule Breeze.Implicit.InputTest do
 
   test "focused inputs consume batched printable chunks before global keybindings" do
     {:ok, pid} =
-      ChildServer.start(
+      start_child_server(
         view: OverflowInputView,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )

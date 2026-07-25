@@ -1,7 +1,7 @@
 defmodule Breeze.TestSupport.WaitUntil do
   @moduledoc false
 
-  def wait_until(fun, attempts \\ 20)
+  def wait_until(fun, attempts \\ 100)
 
   def wait_until(fun, attempts) when attempts > 0 do
     case fun.() do
@@ -9,7 +9,7 @@ defmodule Breeze.TestSupport.WaitUntil do
         :ok
 
       false ->
-        Process.sleep(10)
+        Process.sleep(2)
         wait_until(fun, attempts - 1)
 
       other ->

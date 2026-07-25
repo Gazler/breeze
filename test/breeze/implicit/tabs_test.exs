@@ -1,6 +1,8 @@
 defmodule Breeze.Implicit.TabsTest do
   use ExUnit.Case, async: true
 
+  import Breeze.TestSupport.ProcessHelpers, only: [start_child_server: 1]
+
   alias Breeze.Implicit.Tabs
 
   defmodule ClickableTabsView do
@@ -168,7 +170,7 @@ defmodule Breeze.Implicit.TabsTest do
 
     test "clicking a rendered tab label updates the selected tab" do
       terminal = %Termite.Terminal{size: %{width: 30, height: 10}}
-      {:ok, pid} = Breeze.ChildServer.start(view: ClickableTabsView, terminal: terminal)
+      {:ok, pid} = start_child_server(view: ClickableTabsView, terminal: terminal)
 
       assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
       state = :sys.get_state(pid)

@@ -1,6 +1,8 @@
 defmodule Breeze.Implicit.ScrollTest do
   use ExUnit.Case, async: true
 
+  import Breeze.TestSupport.ProcessHelpers, only: [start_child_server: 1]
+
   alias BackBreeze.TextSpan
   alias BackBreeze.VirtualText.Source
   alias Breeze.ChildServer
@@ -238,7 +240,7 @@ defmodule Breeze.Implicit.ScrollTest do
     test "scrolls root content while keeping absolute overlay children visible" do
       terminal = %Termite.Terminal{size: %{width: 24, height: 8}}
 
-      {:ok, pid} = ChildServer.start(view: VirtualScrollView, terminal: terminal)
+      {:ok, pid} = start_child_server(view: VirtualScrollView, terminal: terminal)
       assert {:ok, _acc, initial_box} = ChildServer.render(pid, terminal: terminal)
 
       assert initial_box.content =~ "Fixed overlay"
@@ -256,7 +258,7 @@ defmodule Breeze.Implicit.ScrollTest do
     test "scrolls nested grid virtual text content" do
       terminal = %Termite.Terminal{size: %{width: 24, height: 8}}
 
-      {:ok, pid} = ChildServer.start(view: NestedGridVirtualScrollView, terminal: terminal)
+      {:ok, pid} = start_child_server(view: NestedGridVirtualScrollView, terminal: terminal)
       assert {:ok, _acc, initial_box} = ChildServer.render(pid, terminal: terminal)
       assert Breeze.ChildServer.metadata(pid).focused == "large-scroll-content"
 
