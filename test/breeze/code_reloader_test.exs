@@ -96,6 +96,30 @@ defmodule Breeze.CodeReloaderTest do
     assert_receive {:reload, :code_changed, ^files}, 1_000
   end
 
+  test "does not pass missing default-style paths to the watcher" do
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "breeze-code-reloader-existing-paths-#{System.unique_integer([:positive])}"
+      )
+
+    lib = Path.join(dir, "lib")
+    File.mkdir_p!(lib)
+
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    {:ok, pid} =
+      Breeze.CodeReloader.start_link(
+        server_pid: self(),
+        paths: [lib, Path.join(dir, "examples"), Path.join(dir, "storybook")],
+        watcher_module: FakeWatcher
+      )
+
+    watcher_pid = :sys.get_state(pid).watcher_pid
+
+    assert %{dirs: [^lib]} = :sys.get_state(watcher_pid)
+  end
+
   test "raises when reload starts without a supported watcher module" do
     Process.flag(:trap_exit, true)
 

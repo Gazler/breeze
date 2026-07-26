@@ -137,13 +137,14 @@ defmodule Breeze.CodeReloader do
 
   defp start_watcher!(state) do
     watcher_module = state.watcher_module
+    paths = Enum.filter(state.paths, &File.dir?/1)
 
     unless watcher_supported?(watcher_module) do
       raise ArgumentError,
             "live reload requires a watcher module with start_link/1 and subscribe/1, got: #{inspect(watcher_module)}"
     end
 
-    case watcher_module.start_link(dirs: state.paths) do
+    case watcher_module.start_link(dirs: paths) do
       {:ok, watcher_pid} ->
         :ok = watcher_module.subscribe(watcher_pid)
         %{state | watcher_pid: watcher_pid}
