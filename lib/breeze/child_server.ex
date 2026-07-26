@@ -1990,9 +1990,9 @@ defmodule Breeze.ChildServer do
         is_integer(bounds[:bottom]) and x >= bounds.left and x <= bounds.right and
         y >= bounds.top and y <= bounds.bottom
     end)
-    |> Enum.sort_by(fn {_id, bounds} ->
+    |> Enum.sort_by(fn {id, bounds} ->
       area = (bounds.right - bounds.left + 1) * (bounds.bottom - bounds.top + 1)
-      {area, bounds.top, bounds.left}
+      {-mouse_target_layer(term, id), area, bounds.top, bounds.left}
     end)
     |> List.first()
     |> case do
@@ -2022,6 +2022,23 @@ defmodule Breeze.ChildServer do
   end
 
   defp mouse_target_bounds(_term, bounds), do: bounds
+
+  defp mouse_target_layer(term, id) do
+    owner = get_in(term.focus_meta, [id, :implicit_owner])
+
+    [id, owner]
+    |> Enum.map(&rendered_box_layer(term, &1))
+    |> Enum.max()
+  end
+
+  defp rendered_box_layer(_term, nil), do: 0
+
+  defp rendered_box_layer(term, id) do
+    case Map.get(term.rendered_boxes, id) do
+      %BackBreeze.Box{layer: layer} when is_integer(layer) -> layer
+      _box -> 0
+    end
+  end
 
   defp expand_full_mouse_axis(
          bounds,

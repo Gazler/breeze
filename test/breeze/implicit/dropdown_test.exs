@@ -81,6 +81,28 @@ defmodule Breeze.Implicit.DropdownTest do
     def handle_event(_, _, term), do: {:noreply, term}
   end
 
+  defmodule CoveredDropdownView do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_, term), do: {:ok, focus(term, "choice")}
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-screen height-screen">
+        <.dropdown id="choice" selected="one" class="width-20">
+          <:item value="one">One</:item>
+          <:item value="two">Two</:item>
+          <:item value="three">Three</:item>
+        </.dropdown>
+        <box id="covered" focusable class="absolute left-0 top-2 width-4 height-1">Base</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
   defmodule PanelDropdownView do
     use Breeze.View
     import Breeze.Blocks
@@ -324,6 +346,42 @@ defmodule Breeze.Implicit.DropdownTest do
     assert %{
              implicit_state: %{
                "method" => {Dropdown, %{open?: false, selected: "PUT", selected_index: 2}}
+             }
+           } = Breeze.ChildServer.metadata(pid)
+  end
+
+  test "dropdown items win mouse hit testing over smaller covered controls" do
+    terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
+    {:ok, pid} = start_child_server(view: CoveredDropdownView, terminal: terminal)
+
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert {:noreply, "choice", true} = Breeze.ChildServer.dispatch_input(pid, "Enter")
+    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    state = :sys.get_state(pid)
+    item_bounds = state.mouse_targets["choice-item-1"]
+    covered_bounds = state.mouse_targets["covered"]
+    x = max(item_bounds.left, covered_bounds.left) + 1
+    y = max(item_bounds.top, covered_bounds.top) + 1
+
+    assert x - 1 <= min(item_bounds.right, covered_bounds.right)
+    assert y - 1 <= min(item_bounds.bottom, covered_bounds.bottom)
+
+    assert {:noreply, "choice", true} =
+             Breeze.ChildServer.dispatch_input(pid, %{
+               "mouse" => %{
+                 button: :left,
+                 action: :press,
+                 x: x,
+                 y: y,
+                 modifiers: []
+               }
+             })
+
+    assert %{
+             focused: "choice",
+             implicit_state: %{
+               "choice" => {Dropdown, %{open?: false, selected: "two", selected_index: 1}}
              }
            } = Breeze.ChildServer.metadata(pid)
   end
