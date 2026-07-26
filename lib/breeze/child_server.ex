@@ -947,6 +947,7 @@ defmodule Breeze.ChildServer do
   defp put_mouse_target_fields(term, target, %{"mouse" => mouse} = event) do
     event
     |> Map.put("target", target)
+    |> Map.put("focused", term.focused)
     |> Map.put("row", mouse_row(term, target, mouse))
     |> Map.put("col", mouse_col(term, target, mouse))
   end

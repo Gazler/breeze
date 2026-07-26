@@ -28,7 +28,8 @@ defmodule Breeze.ChildServerTest do
   defmodule MouseTargetView do
     use Breeze.View
 
-    def mount(_opts, term), do: {:ok, assign(term, last_target: "none")}
+    def mount(_opts, term),
+      do: {:ok, assign(term, last_target: "none", event_focused: nil)}
 
     def render(assigns) do
       ~H"""
@@ -42,8 +43,12 @@ defmodule Breeze.ChildServerTest do
       """
     end
 
-    def handle_event(_, %{"target" => target}, term) do
-      {:noreply, assign(term, last_target: target)}
+    def handle_event(
+          _,
+          %{"target" => target, "focused" => focused},
+          term
+        ) do
+      {:noreply, assign(term, last_target: target, event_focused: focused)}
     end
 
     def handle_event(_, _, term), do: {:noreply, term}
@@ -209,11 +214,23 @@ defmodule Breeze.ChildServerTest do
     {:ok, pid} = start_child_server(view: MouseTargetView, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert %{focused: previously_focused} = Breeze.ChildServer.metadata(pid)
 
     assert {:noreply, "right", true} =
              Breeze.ChildServer.dispatch_input(pid, %{
                "mouse" => %{button: :left, action: :press, x: 11, y: 2, modifiers: []}
              })
+
+    assert %{assigns: %{last_target: "right", event_focused: ^previously_focused}} =
+             Breeze.ChildServer.metadata(pid)
+
+    assert {:noreply, "right", true} =
+             Breeze.ChildServer.dispatch_input(pid, %{
+               "mouse" => %{button: :left, action: :press, x: 11, y: 2, modifiers: []}
+             })
+
+    assert %{assigns: %{last_target: "right", event_focused: "right"}} =
+             Breeze.ChildServer.metadata(pid)
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
     assert box.content =~ "right"
