@@ -43,6 +43,27 @@ defmodule Breeze.LiveView.CrashTest do
     end)
   end
 
+  test "server preserves nested live render crashes" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+      {:ok, pid} = start_app_server(view: RenderCrashingRoot, terminal: terminal)
+
+      wait_until(fn -> :sys.get_state(pid).crash end)
+
+      state = :sys.get_state(pid)
+
+      assert Process.alive?(pid)
+      assert Process.alive?(state.view_pid)
+      assert %RuntimeError{message: "nested render boom"} = state.crash.reason
+      assert state.crash.stacktrace != []
+      assert state.frame.base_output =~ "nested render boom"
+      refute state.frame.base_output =~ "No structured stacktrace captured"
+
+      stop_gen_server(pid)
+    end)
+  end
+
   test "child server ignores missing optional view callbacks" do
     refute function_exported?(RenderOnlyChild, :handle_event, 3)
     refute function_exported?(RenderOnlyChild, :handle_info, 2)
@@ -150,6 +171,49 @@ defmodule Breeze.LiveView.CrashTest do
 
         is_nil(state.crash) &&
           state.frame.base_output =~ "ready"
+      end)
+
+      stop_gen_server(pid)
+    end)
+  end
+
+  test "custom error view supports a hard restart keybinding" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+      reader = terminal.reader
+
+      {:ok, pid} =
+        start_app_server(
+          view: StatefulCrashRoot,
+          terminal: terminal,
+          render_errors: [
+            view: KeybindingErrorView,
+            keybindings: [{"R", "Hard restart", :hard_restart}]
+          ]
+        )
+
+      root_pid = :sys.get_state(pid).view_pid
+
+      assert {:noreply, "child"} =
+               Breeze.ChildServer.dispatch_info(root_pid, {:set_slide, 7})
+
+      assert {:crash, %{} = _crash} = Breeze.Server.dispatch_live_input(pid, "child", "c")
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+
+        state.crash &&
+          state.frame.base_output =~ "Keybinding Error View" &&
+          state.frame.base_output =~ "Hard restart"
+      end)
+
+      send(pid, {reader, {:data, "R"}})
+
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+
+        is_nil(state.crash) &&
+          state.frame.base_output =~ "slide 1"
       end)
 
       stop_gen_server(pid)
@@ -484,7 +548,7 @@ defmodule Breeze.LiveView.CrashTest do
           output = IO.iodata_to_binary(writes)
 
           if output =~ "Crash Details" and output =~ "Clipboard copy failed: :timeout" and
-               output =~ "Press q to quit, r to restart." do
+               output =~ "Press q to quit, r to resume, R to hard restart." do
             output
           else
             false
@@ -521,7 +585,90 @@ defmodule Breeze.LiveView.CrashTest do
     end)
   end
 
-  test "server restarts from a clean slate after a crash when r is pressed" do
+  test "server preserves surviving root state across repeated live child crashes" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+      reader = terminal.reader
+
+      {:ok, pid} = start_app_server(view: StatefulCrashRoot, terminal: terminal)
+
+      root_pid = :sys.get_state(pid).view_pid
+
+      assert {:noreply, "child"} =
+               Breeze.ChildServer.dispatch_info(root_pid, {:set_slide, 7})
+
+      assert Breeze.ChildServer.metadata(root_pid).assigns.slide == 7
+
+      Enum.reduce(1..3, root_pid, fn _cycle, current_root_pid ->
+        assert {:crash, crash} = Breeze.Server.dispatch_live_input(pid, "child", "c")
+        assert %RuntimeError{message: "boom"} = crash.reason
+        assert Process.alive?(current_root_pid)
+
+        send(pid, {reader, {:data, "r"}})
+
+        restarted_state =
+          wait_until(fn ->
+            state = :sys.get_state(pid)
+
+            if is_nil(state.crash) and state.frame.base_output =~ "slide 7" do
+              state
+            else
+              false
+            end
+          end)
+
+        refute restarted_state.view_pid == current_root_pid
+        assert Breeze.ChildServer.metadata(restarted_state.view_pid).assigns.slide == 7
+        assert restarted_state.focused == "child"
+        assert Process.alive?(restarted_state.children["child"].pid)
+
+        restarted_state.view_pid
+      end)
+
+      stop_gen_server(pid)
+    end)
+  end
+
+  test "uppercase R hard restarts a surviving root from its original start options" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+      reader = terminal.reader
+
+      {:ok, pid} = start_app_server(view: StatefulCrashRoot, terminal: terminal)
+
+      root_pid = :sys.get_state(pid).view_pid
+
+      assert {:noreply, "child"} =
+               Breeze.ChildServer.dispatch_info(root_pid, {:set_slide, 7})
+
+      assert Breeze.ChildServer.metadata(root_pid).assigns.slide == 7
+      assert {:crash, %{} = _crash} = Breeze.Server.dispatch_live_input(pid, "child", "c")
+      assert Process.alive?(root_pid)
+      assert :sys.get_state(pid).frame.base_output =~ "R hard restarts"
+
+      send(pid, {reader, {:data, "R"}})
+
+      restarted_state =
+        wait_until(fn ->
+          state = :sys.get_state(pid)
+
+          if is_nil(state.crash) and state.frame.base_output =~ "slide 1" do
+            state
+          else
+            false
+          end
+        end)
+
+      refute restarted_state.view_pid == root_pid
+      assert Breeze.ChildServer.metadata(restarted_state.view_pid).assigns.slide == 1
+      assert restarted_state.focused == "child"
+      assert Process.alive?(restarted_state.children["child"].pid)
+
+      stop_gen_server(pid)
+    end)
+  end
+
+  test "server restarts from a clean slate when crashed root state is unavailable" do
     capture_log(fn ->
       terminal = Termite.Terminal.start(adapter: FakeAdapter)
       reader = terminal.reader

@@ -1,7 +1,7 @@
 defmodule Breeze.Server.Error do
   @moduledoc false
 
-  @actions [:restart, :stop, :copy_details]
+  @actions [:restart, :hard_restart, :stop, :copy_details]
 
   def safe_call(fun) when is_function(fun, 0) do
     try do
@@ -89,6 +89,7 @@ defmodule Breeze.Server.Error do
   defp dispatch_keybinding(config, crash, input) do
     case keybinding_action(input, keybindings(config)) do
       :restart -> :restart
+      :hard_restart -> :hard_restart
       :stop -> :stop
       :copy_details -> {:copy_details, crash}
       :continue -> :ignore

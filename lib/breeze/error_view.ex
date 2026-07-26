@@ -89,8 +89,11 @@ defmodule Breeze.ErrorView do
     entries = frame_entries(crash)
 
     case input do
-      {:key, key} when key in ["r", "R"] ->
+      {:key, "r"} ->
         :restart
+
+      {:key, "R"} ->
+        :hard_restart
 
       {:key, key} when key in ["q", "Q"] ->
         :stop
@@ -418,7 +421,7 @@ defmodule Breeze.ErrorView do
 
   defp footer_lines(width, height, crash) do
     default =
-      "Tab switches panes. Arrows or j/k move and scroll. y copies details. r restarts. q quits."
+      "Tab panes. Arrows/j/k. y copies details. r resumes. R hard restarts. q quits."
 
     [
       crash[:notice] || default

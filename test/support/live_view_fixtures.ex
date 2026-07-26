@@ -182,6 +182,46 @@ defmodule Breeze.LiveViewTest do
     end
   end
 
+  defmodule RenderCrashingChild do
+    use Breeze.View
+
+    def render(_assigns), do: raise("nested render boom")
+  end
+
+  defmodule RenderCrashingRoot do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <live id="child" view={RenderCrashingChild} start_opts={[]} focusable>
+        </live>
+      </box>
+      """
+    end
+  end
+
+  defmodule StatefulCrashRoot do
+    use Breeze.View
+
+    def mount(_opts, term) do
+      {:ok, term |> assign(slide: 1) |> focus("child::boom")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box>{"slide #{@slide}"}</box>
+        <live id="child" view={Breeze.LiveViewTest.CrashingView} start_opts={[]} focusable>
+        </live>
+      </box>
+      """
+    end
+
+    def handle_info({:set_slide, slide}, term), do: {:noreply, assign(term, slide: slide)}
+    def handle_info(_message, term), do: {:noreply, term}
+  end
+
   defmodule RenderOnlyChild do
     use Breeze.View
 

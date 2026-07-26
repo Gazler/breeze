@@ -51,7 +51,9 @@ defmodule Breeze.Server do
       `view: MyErrorView` to override the crash screen view. Defaults
       to the built-in crash view. Pass `keybindings: [...]` to configure
       custom crash screen actions as `{key, label, action}` tuples.
-      Supported actions are `:restart`, `:stop`, and `:copy_details`.
+      Supported actions are `:restart`, `:hard_restart`, `:stop`, and
+      `:copy_details`. A restart restores surviving runtime state when possible;
+      a hard restart remounts the root view from its original start options.
       Custom error views receive these assigns: `@view`, the crashed
       root view module; `@crash`, the crash map; `@kind`, the crash
       kind; `@reason`, the exception, exit reason, or thrown value;
@@ -976,12 +978,16 @@ defmodule Breeze.Server do
     |> schedule_input_flush()
   end
 
+  defp replace_runtime_state(state, runtime_state),
+    do: replace_runtime_state(state, runtime_state, :runtime_state_replaced)
+
   defp replace_runtime_state(
          %{view: view} = state,
          %Breeze.Runtime.State{
            view: view,
            root: %Breeze.Runtime.State.View{}
-         } = runtime_state
+         } = runtime_state,
+         render_cause
        ) do
     {state, replacement} = StateReplacement.prepare(state, runtime_state)
 
@@ -992,7 +998,7 @@ defmodule Breeze.Server do
            |> Map.put(:focused, focused)
            |> Map.put(:theme, theme),
          {:ok, state} <- StateReplacement.start_children(state, replacement.children) do
-      state = maybe_render_base(state, :runtime_state_replaced)
+      state = maybe_render_base(state, render_cause)
 
       if is_nil(state.crash) do
         state = StateReplacement.restore_hooks(state, replacement.hooks)
@@ -1015,7 +1021,7 @@ defmodule Breeze.Server do
     end
   end
 
-  defp replace_runtime_state(state, %Breeze.Runtime.State{view: view}) do
+  defp replace_runtime_state(state, %Breeze.Runtime.State{view: view}, _render_cause) do
     {:error, {:view_mismatch, state.view, view}, state}
   end
 
@@ -1305,6 +1311,9 @@ defmodule Breeze.Server do
           {:ok, acc, box, decorations} ->
             {acc, box, decorations}
 
+          {:crash, crash} ->
+            throw({:crash_state, enter_crash_state(state, crash)})
+
           :stopped ->
             throw({:stopped, state})
         end
@@ -1497,6 +1506,7 @@ defmodule Breeze.Server do
     )
     |> then(fn
       {:ok, acc, box, decorations} -> {:ok, acc, box, decorations}
+      {:crash, crash} -> {:crash, crash}
       _ -> :stopped
     end)
   catch
@@ -1673,8 +1683,11 @@ defmodule Breeze.Server do
       {:crash, %{reason: {:noproc, _}}} ->
         missing_live_child(ctx, tracking_ref)
 
+      {:ok, {:crash, crash}} ->
+        throw({:breeze_render_crash, crash})
+
       {:crash, crash} ->
-        throw({:crash_state, enter_crash_state(state, crash)})
+        throw({:breeze_render_crash, crash})
     end
   end
 
@@ -1858,6 +1871,9 @@ defmodule Breeze.Server do
          |> Map.put(:child_decorations, child_decorations)
          |> Map.put(:tracking, tracking)
          |> Map.put(:child_render_us, System.monotonic_time(:microsecond) - ctx.started_at)}
+
+      {:ok, {:crash, crash}} ->
+        throw({:crash_state, enter_crash_state(ctx.state, crash)})
 
       {:crash, crash} ->
         throw({:crash_state, enter_crash_state(ctx.state, crash)})
@@ -2525,6 +2541,9 @@ defmodule Breeze.Server do
       :restart ->
         {:noreply, restart_root(state, :restart)}
 
+      :hard_restart ->
+        {:noreply, hard_restart_root(state)}
+
       :stop ->
         {:stop, state}
 
@@ -2573,7 +2592,9 @@ defmodule Breeze.Server do
       |> Termite.Screen.disable_mouse()
       |> Termite.Screen.show_cursor()
       |> maybe_exit_alt_screen(state.alt_screen_active?)
-      |> Termite.Terminal.write("\r\n" <> details <> "\r\n\nPress q to quit, r to restart.\r\n")
+      |> Termite.Terminal.write(
+        "\r\n" <> details <> "\r\n\nPress q to quit, r to resume, R to hard restart.\r\n"
+      )
 
     {:noreply, %{state | terminal: terminal, alt_screen_active?: false, crash_scrollback?: true}}
   end
@@ -2615,12 +2636,41 @@ defmodule Breeze.Server do
   end
 
   defp restart_root(state, cause) do
-    state =
-      state
-      |> FrameDisplay.clear()
-      |> restore_terminal_after_crash_scrollback()
-      |> then(&%{&1 | terminal: apply_mouse_mode(&1.terminal, &1.mouse_mode)})
+    state = prepare_root_restart(state)
 
+    case capture_restart_state(state) do
+      {:ok, runtime_state} ->
+        case replace_runtime_state(state, runtime_state, cause) do
+          {:ok, state} -> state
+          {:error, _reason, state} -> restart_root_clean(state, cause)
+        end
+
+      :error ->
+        restart_root_clean(state, cause)
+    end
+  end
+
+  defp hard_restart_root(state) do
+    state
+    |> prepare_root_restart()
+    |> restart_root_clean(:hard_restart)
+  end
+
+  defp prepare_root_restart(state) do
+    state
+    |> FrameDisplay.clear()
+    |> restore_terminal_after_crash_scrollback()
+    |> then(&%{&1 | terminal: apply_mouse_mode(&1.terminal, &1.mouse_mode)})
+  end
+
+  defp capture_restart_state(state) do
+    case Breeze.Runtime.State.capture_server(state) do
+      {:ok, %Breeze.Runtime.State{} = runtime_state} -> {:ok, runtime_state}
+      _error -> :error
+    end
+  end
+
+  defp restart_root_clean(state, cause) do
     shutdown_view_processes(state)
 
     case start_root_view(state) do
