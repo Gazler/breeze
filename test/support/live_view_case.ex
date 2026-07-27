@@ -105,16 +105,15 @@ defmodule Breeze.TestSupport.LiveViewHelpers do
 
     %{
       "mouse" => %{
-        button: button,
-        action: :press,
-        modifiers: [],
-        x: x,
-        y: y
+        "button" => button,
+        "action" => "press",
+        "x" => x,
+        "y" => y
       }
     }
   end
 
   def mouse_center(bounds) do
-    {div(bounds.left + bounds.right, 2) + 1, div(bounds.top + bounds.bottom, 2) + 1}
+    {div(bounds.left + bounds.right, 2), div(bounds.top + bounds.bottom, 2)}
   end
 end

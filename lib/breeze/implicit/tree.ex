@@ -123,7 +123,7 @@ defmodule Breeze.Implicit.Tree do
   def handle_event(
         _,
         %{
-          "mouse" => %{button: :left, action: :press},
+          "mouse" => %{"button" => "left", "action" => "press"},
           "row" => row,
           "col" => col,
           "element" => element
@@ -134,11 +134,19 @@ defmodule Breeze.Implicit.Tree do
     handle_tree_click(row + state.offset, col, element, state)
   end
 
-  def handle_event(_, %{"mouse" => %{button: :wheel_down} = mouse, "element" => element}, state) do
+  def handle_event(
+        _,
+        %{"mouse" => %{"button" => "wheel_down"} = mouse, "element" => element},
+        state
+      ) do
     scroll_by_mouse(state, element, Common.wheel_repeat(mouse))
   end
 
-  def handle_event(_, %{"mouse" => %{button: :wheel_up} = mouse, "element" => element}, state) do
+  def handle_event(
+        _,
+        %{"mouse" => %{"button" => "wheel_up"} = mouse, "element" => element},
+        state
+      ) do
     scroll_by_mouse(state, element, -Common.wheel_repeat(mouse))
   end
 

@@ -95,10 +95,10 @@ defmodule Demo do
     """
   end
 
-  def handle_event(_, %{"key" => "ArrowUp"}, term), do:
+  def handle_event(:input, %{"key" => "ArrowUp"}, term), do:
     {:noreply, assign(term, counter: term.assigns.counter + 1)}
 
-  def handle_event(_, %{"key" => "ArrowDown"}, term), do:
+  def handle_event(:input, %{"key" => "ArrowDown"}, term), do:
     {:noreply, assign(term, counter: term.assigns.counter - 1)}
 
   def handle_event(_, _, term), do: {:noreply, term}

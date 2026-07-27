@@ -68,7 +68,11 @@ defmodule Breeze.Implicit.Scroll do
     {:noreply, put_offset(state, offset_y, viewport)}
   end
 
-  def handle_event(_, %{"mouse" => %{button: :wheel_down} = mouse, "element" => element}, state) do
+  def handle_event(
+        _,
+        %{"mouse" => %{"button" => "wheel_down"} = mouse, "element" => element},
+        state
+      ) do
     viewport = Viewport.from_dimensions(element)
     current_offset_y = effective_offset_y(state, viewport)
 
@@ -81,7 +85,11 @@ defmodule Breeze.Implicit.Scroll do
     {:noreply, put_offset(state, offset_y, viewport)}
   end
 
-  def handle_event(_, %{"mouse" => %{button: :wheel_up} = mouse, "element" => element}, state) do
+  def handle_event(
+        _,
+        %{"mouse" => %{"button" => "wheel_up"} = mouse, "element" => element},
+        state
+      ) do
     viewport = Viewport.from_dimensions(element)
     current_offset_y = effective_offset_y(state, viewport)
 

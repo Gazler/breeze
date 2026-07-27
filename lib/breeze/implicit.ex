@@ -43,14 +43,17 @@ defmodule Breeze.Implicit do
   ## Events
 
   `handle_event/3` receives a reserved event-kind argument, the event payload,
-  and the current implicit state. Breeze adds the target's `Breeze.Viewport` to
-  the payload as `"element"` when one is available.
+  and the current implicit state. Input payloads use string keys. Breeze adds
+  the target's `Breeze.Viewport` to the payload as `"element"` when one is
+  available.
 
   Every reply stores the returned state. `{:noreply, state}` stops there.
   `{{:change, event}, state}` and `{{:submit, event}, state}` route `event` through
-  the root element's `br-change` or `br-submit` handler. A change reply may also
-  contain `focus: id` (or `focus: nil`) as its third element. Finally,
-  `{{:delegate, id}, state}` sends the original event to another implicit.
+  the root element's `br-change` or `br-submit` handler. The event payload may
+  be any term; Breeze's built-in implicits currently use atom-keyed maps. A
+  change reply may also contain `focus: id` (or `focus: nil`) as its third
+  element. Finally, `{{:delegate, id}, state}` sends the original input event to
+  another implicit.
 
   ## Render modifiers
 
@@ -98,6 +101,12 @@ defmodule Breeze.Implicit do
   @typedoc "The kind of input event dispatched to an implicit."
   @type event_type :: :input
 
+  @typedoc "A string-keyed terminal input payload supplied to an implicit."
+  @type input_event :: %{optional(String.t()) => term()}
+
+  @typedoc "An unrestricted named-event payload emitted by an implicit."
+  @type event_payload :: term()
+
   @typedoc "An option returned while initializing implicit state."
   @type init_option ::
           {:rerender_every, pos_integer()}
@@ -119,9 +128,9 @@ defmodule Breeze.Implicit do
   @typedoc "A valid return value from `c:handle_event/3`."
   @type event_reply ::
           {:noreply, state()}
-          | {{:change, map()}, state()}
-          | {{:change, map()}, state(), [event_option()]}
-          | {{:submit, map()}, state()}
+          | {{:change, event_payload()}, state()}
+          | {{:change, event_payload()}, state(), [event_option()]}
+          | {{:submit, event_payload()}, state()}
           | {{:delegate, String.t()}, state()}
   @typedoc "A style, scroll, or state modifier returned during rendering."
   @type modifier ::
@@ -160,7 +169,7 @@ defmodule Breeze.Implicit do
   @doc """
   Handles an event captured by the implicit and returns its next state and action.
   """
-  @callback handle_event(event_type(), map(), state()) :: event_reply()
+  @callback handle_event(event_type(), input_event(), state()) :: event_reply()
 
   @doc """
   Returns renderer modifiers for the implicit root or one of its children.

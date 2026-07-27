@@ -287,12 +287,17 @@ defmodule Breeze.Implicit.DropdownTest do
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     bounds = :sys.get_state(pid).mouse_targets["method"]
-    x = div(bounds.left + bounds.right, 2) + 1
-    y = div(bounds.top + bounds.bottom, 2) + 1
+    x = div(bounds.left + bounds.right, 2)
+    y = div(bounds.top + bounds.bottom, 2)
 
     assert {:noreply, "method", true} =
              Breeze.ChildServer.dispatch_input(pid, %{
-               "mouse" => %{button: :left, action: :press, x: x, y: y, modifiers: []}
+               "mouse" => %{
+                 "button" => "left",
+                 "action" => "press",
+                 "x" => x,
+                 "y" => y
+               }
              })
 
     assert %{implicit_state: %{"method" => {Dropdown, %{open?: true}}}} =
@@ -300,7 +305,12 @@ defmodule Breeze.Implicit.DropdownTest do
 
     assert {:noreply, "method", true} =
              Breeze.ChildServer.dispatch_input(pid, %{
-               "mouse" => %{button: :left, action: :press, x: x, y: y, modifiers: []}
+               "mouse" => %{
+                 "button" => "left",
+                 "action" => "press",
+                 "x" => x,
+                 "y" => y
+               }
              })
 
     assert %{implicit_state: %{"method" => {Dropdown, %{open?: false}}}} =
@@ -313,33 +323,31 @@ defmodule Breeze.Implicit.DropdownTest do
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     trigger_bounds = :sys.get_state(pid).mouse_targets["method"]
-    trigger_x = div(trigger_bounds.left + trigger_bounds.right, 2) + 1
-    trigger_y = div(trigger_bounds.top + trigger_bounds.bottom, 2) + 1
+    trigger_x = div(trigger_bounds.left + trigger_bounds.right, 2)
+    trigger_y = div(trigger_bounds.top + trigger_bounds.bottom, 2)
 
     assert {:noreply, "method", true} =
              Breeze.ChildServer.dispatch_input(pid, %{
                "mouse" => %{
-                 button: :left,
-                 action: :press,
-                 x: trigger_x,
-                 y: trigger_y,
-                 modifiers: []
+                 "button" => "left",
+                 "action" => "press",
+                 "x" => trigger_x,
+                 "y" => trigger_y
                }
              })
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     item_bounds = :sys.get_state(pid).mouse_targets["method-item-2"]
-    item_x = div(item_bounds.left + item_bounds.right, 2) + 1
-    item_y = div(item_bounds.top + item_bounds.bottom, 2) + 1
+    item_x = div(item_bounds.left + item_bounds.right, 2)
+    item_y = div(item_bounds.top + item_bounds.bottom, 2)
 
     assert {:noreply, "method", true} =
              Breeze.ChildServer.dispatch_input(pid, %{
                "mouse" => %{
-                 button: :left,
-                 action: :press,
-                 x: item_x,
-                 y: item_y,
-                 modifiers: []
+                 "button" => "left",
+                 "action" => "press",
+                 "x" => item_x,
+                 "y" => item_y
                }
              })
 
@@ -361,20 +369,19 @@ defmodule Breeze.Implicit.DropdownTest do
     state = :sys.get_state(pid)
     item_bounds = state.mouse_targets["choice-item-1"]
     covered_bounds = state.mouse_targets["covered"]
-    x = max(item_bounds.left, covered_bounds.left) + 1
-    y = max(item_bounds.top, covered_bounds.top) + 1
+    x = max(item_bounds.left, covered_bounds.left)
+    y = max(item_bounds.top, covered_bounds.top)
 
-    assert x - 1 <= min(item_bounds.right, covered_bounds.right)
-    assert y - 1 <= min(item_bounds.bottom, covered_bounds.bottom)
+    assert x <= min(item_bounds.right, covered_bounds.right)
+    assert y <= min(item_bounds.bottom, covered_bounds.bottom)
 
     assert {:noreply, "choice", true} =
              Breeze.ChildServer.dispatch_input(pid, %{
                "mouse" => %{
-                 button: :left,
-                 action: :press,
-                 x: x,
-                 y: y,
-                 modifiers: []
+                 "button" => "left",
+                 "action" => "press",
+                 "x" => x,
+                 "y" => y
                }
              })
 

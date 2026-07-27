@@ -153,7 +153,7 @@ defmodule Breeze.Implicit.TreeTest do
       {:noreply, scrolled} =
         Implicit.Tree.handle_event(
           :ignore,
-          %{"mouse" => %{button: :wheel_down}, "element" => element},
+          %{"mouse" => %{"button" => "wheel_down"}, "element" => element},
           state
         )
 

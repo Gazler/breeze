@@ -112,7 +112,11 @@ defmodule Breeze.Implicit.List do
 
   def handle_event(
         _,
-        %{"mouse" => %{button: :left, action: :press}, "row" => row, "element" => element},
+        %{
+          "mouse" => %{"button" => "left", "action" => "press"},
+          "row" => row,
+          "element" => element
+        },
         state
       )
       when is_integer(row) and row >= 0 do
@@ -129,13 +133,21 @@ defmodule Breeze.Implicit.List do
     end
   end
 
-  def handle_event(_, %{"mouse" => %{button: :wheel_down} = mouse, "element" => element}, state) do
+  def handle_event(
+        _,
+        %{"mouse" => %{"button" => "wheel_down"} = mouse, "element" => element},
+        state
+      ) do
     viewport = Viewport.from_dimensions(element)
     offset = Viewport.clamp_scroll_y(state.offset + Common.wheel_repeat(mouse), viewport)
     {:noreply, %{state | offset: offset}}
   end
 
-  def handle_event(_, %{"mouse" => %{button: :wheel_up} = mouse, "element" => element}, state) do
+  def handle_event(
+        _,
+        %{"mouse" => %{"button" => "wheel_up"} = mouse, "element" => element},
+        state
+      ) do
     viewport = Viewport.from_dimensions(element)
     offset = Viewport.clamp_scroll_y(state.offset - Common.wheel_repeat(mouse), viewport)
     {:noreply, %{state | offset: offset}}

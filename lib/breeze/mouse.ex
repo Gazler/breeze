@@ -3,32 +3,30 @@ defmodule Breeze.Mouse do
 
   import Bitwise
 
+  @type button :: String.t()
+  @type action :: String.t()
   @type event :: %{
-          button: :left | :middle | :right | :release | :wheel_up | :wheel_down,
-          action: :press | :release | :move,
-          x: pos_integer(),
-          y: pos_integer(),
-          modifiers: [:shift | :alt | :ctrl]
+          required(String.t()) => button() | action() | non_neg_integer() | boolean()
         }
 
   @spec decode(binary()) :: {:ok, event()} | :error
   def decode("\e[<" <> rest) do
     with [raw_code, raw_x, raw_tail] <- String.split(rest, ";", parts: 3),
          {code, ""} <- Integer.parse(raw_code),
-         {x, ""} <- Integer.parse(raw_x),
+         {x, ""} when x > 0 <- Integer.parse(raw_x),
          tail_size when tail_size > 0 <- byte_size(raw_tail),
          raw_y_size = tail_size - 1,
          <<raw_y::binary-size(^raw_y_size), suffix>> <- raw_tail,
-         {y, ""} <- Integer.parse(raw_y),
+         {y, ""} when y > 0 <- Integer.parse(raw_y),
          true <- suffix in [?M, ?m] do
-      {:ok,
-       %{
-         button: button(code),
-         action: action(code, suffix),
-         x: x,
-         y: y,
-         modifiers: modifiers(code)
-       }}
+      event = %{
+        "button" => button(code),
+        "action" => action(code, suffix),
+        "x" => x - 1,
+        "y" => y - 1
+      }
+
+      {:ok, Map.merge(event, modifier_flags(code))}
     else
       _ -> :error
     end
@@ -39,41 +37,36 @@ defmodule Breeze.Mouse do
   defp button(code) do
     cond do
       (code &&& 64) != 0 -> wheel_button(code)
-      (code &&& 3) == 3 -> :release
-      (code &&& 3) == 0 -> :left
-      (code &&& 3) == 1 -> :middle
-      true -> :right
+      (code &&& 3) == 3 -> "release"
+      (code &&& 3) == 0 -> "left"
+      (code &&& 3) == 1 -> "middle"
+      true -> "right"
     end
   end
 
-  defp modifiers(code) do
-    []
-    |> maybe_add_modifier(code, 4, :shift)
-    |> maybe_add_modifier(code, 8, :alt)
-    |> maybe_add_modifier(code, 16, :ctrl)
+  defp modifier_flags(code) do
+    %{}
+    |> maybe_put_modifier("shiftKey", (code &&& 4) != 0)
+    |> maybe_put_modifier("altKey", (code &&& 8) != 0)
+    |> maybe_put_modifier("ctrlKey", (code &&& 16) != 0)
   end
 
-  defp maybe_add_modifier(modifiers, code, mask, modifier) do
-    if (code &&& mask) != 0 do
-      modifiers ++ [modifier]
-    else
-      modifiers
-    end
-  end
+  defp maybe_put_modifier(event, _key, false), do: event
+  defp maybe_put_modifier(event, key, true), do: Map.put(event, key, true)
 
   defp action(code, suffix) do
     cond do
-      (code &&& 32) != 0 -> :move
-      suffix == ?m -> :release
-      true -> :press
+      (code &&& 32) != 0 -> "move"
+      suffix == ?m -> "release"
+      true -> "press"
     end
   end
 
   defp wheel_button(code) do
     case code &&& 3 do
-      0 -> :wheel_up
-      1 -> :wheel_down
-      _ -> :release
+      0 -> "wheel_up"
+      1 -> "wheel_down"
+      _ -> "release"
     end
   end
 end

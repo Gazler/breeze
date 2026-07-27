@@ -137,7 +137,7 @@ defmodule Breeze.Implicit.ListTest do
         Implicit.List.handle_event(
           :ignore,
           %{
-            "mouse" => %{button: :left, action: :press},
+            "mouse" => %{"button" => "left", "action" => "press"},
             "row" => 2,
             "element" => viewport
           },
@@ -165,7 +165,7 @@ defmodule Breeze.Implicit.ListTest do
       assert {:noreply, next_state} =
                Implicit.List.handle_event(
                  :ignore,
-                 %{"mouse" => %{button: :wheel_down}, "element" => viewport},
+                 %{"mouse" => %{"button" => "wheel_down"}, "element" => viewport},
                  state
                )
 
@@ -190,7 +190,10 @@ defmodule Breeze.Implicit.ListTest do
       assert {:noreply, next_state} =
                Implicit.List.handle_event(
                  :ignore,
-                 %{"mouse" => %{button: :wheel_down, repeat: 3}, "element" => viewport},
+                 %{
+                   "mouse" => %{"button" => "wheel_down", "repeat" => 3},
+                   "element" => viewport
+                 },
                  state
                )
 

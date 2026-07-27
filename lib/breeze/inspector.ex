@@ -164,7 +164,7 @@ defmodule Breeze.Inspector do
   end
 
   @doc false
-  def hover_at(state, %{x: x, y: y}) do
+  def hover_at(state, %{"x" => x, "y" => y}) do
     if inside_panel?(state, x, y) do
       state
     else
@@ -178,7 +178,7 @@ defmodule Breeze.Inspector do
   end
 
   @doc false
-  def select_at(state, %{x: x, y: y}) do
+  def select_at(state, %{"x" => x, "y" => y}) do
     if inside_panel?(state, x, y) do
       state
     else
@@ -317,8 +317,7 @@ defmodule Breeze.Inspector do
     |> Enum.filter(fn {_id, bounds} ->
       is_integer(bounds[:left]) and is_integer(bounds[:right]) and
         is_integer(bounds[:top]) and is_integer(bounds[:bottom]) and
-        x - 1 >= bounds.left and x - 1 <= bounds.right and
-        y - 1 >= bounds.top and y - 1 <= bounds.bottom
+        x >= bounds.left and x <= bounds.right and y >= bounds.top and y <= bounds.bottom
     end)
     |> Enum.sort_by(fn {_id, bounds} ->
       area = (bounds.right - bounds.left + 1) * (bounds.bottom - bounds.top + 1)
@@ -332,8 +331,6 @@ defmodule Breeze.Inspector do
       false
     else
       screen = Map.get(state.terminal, :size, %{width: 0, height: 0})
-      row = y - 1
-      col = x - 1
 
       panel_top =
         case panel_position(state) do
@@ -343,7 +340,7 @@ defmodule Breeze.Inspector do
 
       panel_bottom = panel_top + @panel_height - 1
 
-      row >= panel_top and row <= panel_bottom and col >= 0 and col < screen.width
+      y >= panel_top and y <= panel_bottom and x >= 0 and x < screen.width
     end
   end
 

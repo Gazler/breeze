@@ -1681,7 +1681,9 @@ defmodule Breeze.ChildServer do
 
   defp mouse_child_focus(_focused, _child_id, current_focused, false), do: current_focused
 
-  defp live_mouse_focus_event?(%{"mouse" => %{button: :left, action: :press}}), do: true
+  defp live_mouse_focus_event?(%{"mouse" => %{"button" => "left", "action" => "press"}}),
+    do: true
+
   defp live_mouse_focus_event?(_event), do: false
 
   defp translate_mouse_event_for_child(term, child_id, %{"mouse" => mouse} = event) do
@@ -1689,15 +1691,15 @@ defmodule Breeze.ChildServer do
       %{left: left, top: top} ->
         mouse =
           mouse
-          |> Map.put(:x, max(mouse.x - left, 1))
-          |> Map.put(:y, max(mouse.y - top, 1))
+          |> Map.put("x", max(mouse["x"] - left, 0))
+          |> Map.put("y", max(mouse["y"] - top, 0))
 
         event
         |> Map.put("mouse", mouse)
-        |> Map.drop(["target", "row", "col"])
+        |> Map.drop(["target", "focused", "row", "col"])
 
       nil ->
-        Map.drop(event, ["target", "row", "col"])
+        Map.drop(event, ["target", "focused", "row", "col"])
     end
   end
 
@@ -2085,10 +2087,7 @@ defmodule Breeze.ChildServer do
     end
   end
 
-  defp mouse_target(term, %{x: x, y: y}) do
-    x = x - 1
-    y = y - 1
-
+  defp mouse_target(term, %{"x" => x, "y" => y}) do
     term.mouse_targets
     |> Enum.map(fn {id, bounds} -> {id, mouse_target_bounds(term, bounds)} end)
     |> Enum.filter(fn {_id, bounds} ->
@@ -2181,18 +2180,18 @@ defmodule Breeze.ChildServer do
   defp term_height(%{terminal: %Termite.Terminal{size: %{height: height}}}), do: height
   defp term_height(_term), do: nil
 
-  defp mouse_row(term, target, %{y: y}) do
+  defp mouse_row(term, target, %{"y" => y}) do
     bounds = Map.fetch!(term.mouse_targets, target)
     box = Map.get(term.rendered_boxes, target)
     top_inset = border_inset(box, :top)
-    max(y - 1 - bounds.top - top_inset, 0)
+    max(y - bounds.top - top_inset, 0)
   end
 
-  defp mouse_col(term, target, %{x: x}) do
+  defp mouse_col(term, target, %{"x" => x}) do
     bounds = Map.fetch!(term.mouse_targets, target)
     box = Map.get(term.rendered_boxes, target)
     left_inset = border_inset(box, :left)
-    max(x - 1 - bounds.left - left_inset, 0)
+    max(x - bounds.left - left_inset, 0)
   end
 
   defp border_inset(%BackBreeze.Box{style: %{border: border}}, side) do
@@ -2201,7 +2200,7 @@ defmodule Breeze.ChildServer do
 
   defp border_inset(_, _side), do: 0
 
-  defp mouse_focus_target(target, %{button: :left, action: :press}, term) do
+  defp mouse_focus_target(target, %{"button" => "left", "action" => "press"}, term) do
     cond do
       target in term.focusables ->
         target

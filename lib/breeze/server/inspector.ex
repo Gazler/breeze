@@ -3,11 +3,11 @@ defmodule Breeze.Server.Inspector do
 
   def picks_mouse?(state), do: Breeze.Inspector.picks_mouse?(state)
 
-  def select_target(state, %{button: :left, action: :press} = event) do
+  def select_target(state, %{"button" => "left", "action" => "press"} = event) do
     Breeze.Inspector.select_at(state, event)
   end
 
-  def select_target(state, %{action: :move} = event) do
+  def select_target(state, %{"action" => "move"} = event) do
     Breeze.Inspector.hover_at(state, event)
   end
 

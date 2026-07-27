@@ -160,7 +160,10 @@ defmodule Breeze.Implicit.TabsTest do
       assert {{:change, %{value: "details", index: 1}}, next_state} =
                Tabs.handle_event(
                  nil,
-                 %{"mouse" => %{button: :left, action: :press}, "target" => "tabs-tab-details"},
+                 %{
+                   "mouse" => %{"button" => "left", "action" => "press"},
+                   "target" => "tabs-tab-details"
+                 },
                  state
                )
 
@@ -176,12 +179,17 @@ defmodule Breeze.Implicit.TabsTest do
       state = :sys.get_state(pid)
 
       bounds = state.mouse_targets["tabs-tab-details"]
-      x = div(bounds.left + bounds.right, 2) + 1
-      y = div(bounds.top + bounds.bottom, 2) + 1
+      x = div(bounds.left + bounds.right, 2)
+      y = div(bounds.top + bounds.bottom, 2)
 
       assert {_status, "tabs", _changed} =
                Breeze.ChildServer.dispatch_input(pid, %{
-                 "mouse" => %{button: :left, action: :press, x: x, y: y, modifiers: []}
+                 "mouse" => %{
+                   "button" => "left",
+                   "action" => "press",
+                   "x" => x,
+                   "y" => y
+                 }
                })
 
       assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)

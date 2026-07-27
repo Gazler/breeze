@@ -38,7 +38,7 @@ defmodule Breeze.Implicit.Dropdown do
 
   def handle_event(
         _,
-        %{"mouse" => %{button: :left, action: :press}, "target" => target},
+        %{"mouse" => %{"button" => "left", "action" => "press"}, "target" => target},
         %{open?: true} = state
       ) do
     case clicked_item_index(state, target) do
@@ -47,7 +47,11 @@ defmodule Breeze.Implicit.Dropdown do
     end
   end
 
-  def handle_event(_, %{"mouse" => %{button: :left, action: :press}}, %{open?: false} = state) do
+  def handle_event(
+        _,
+        %{"mouse" => %{"button" => "left", "action" => "press"}},
+        %{open?: false} = state
+      ) do
     {:noreply, open(state)}
   end
 

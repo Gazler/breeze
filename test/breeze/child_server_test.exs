@@ -139,8 +139,22 @@ defmodule Breeze.ChildServerTest do
 
     assert {:noreply, nil, true} =
              Breeze.ChildServer.dispatch_input(pid, %{
-               "mouse" => %{button: :left, action: :press, x: 3, y: 4, modifiers: []}
+               "mouse" => %{
+                 "button" => "left",
+                 "action" => "press",
+                 "x" => 2,
+                 "y" => 3
+               }
              })
+
+    assert :sys.get_state(pid).assigns.clicks == [
+             %{
+               "button" => "left",
+               "action" => "press",
+               "x" => 2,
+               "y" => 3
+             }
+           ]
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, [])
     assert box.content == "1"
@@ -203,7 +217,12 @@ defmodule Breeze.ChildServerTest do
 
     assert {:noreply, "left", false} =
              Breeze.ChildServer.dispatch_input(wheel_pid, %{
-               "mouse" => %{button: :wheel_down, action: :press, x: 14, y: 2, modifiers: []}
+               "mouse" => %{
+                 "button" => "wheel_down",
+                 "action" => "press",
+                 "x" => 13,
+                 "y" => 1
+               }
              })
 
     assert %{focused: "left"} = Breeze.ChildServer.metadata(wheel_pid)
@@ -218,7 +237,12 @@ defmodule Breeze.ChildServerTest do
 
     assert {:noreply, "right", true} =
              Breeze.ChildServer.dispatch_input(pid, %{
-               "mouse" => %{button: :left, action: :press, x: 11, y: 2, modifiers: []}
+               "mouse" => %{
+                 "button" => "left",
+                 "action" => "press",
+                 "x" => 10,
+                 "y" => 1
+               }
              })
 
     assert %{assigns: %{last_target: "right", event_focused: ^previously_focused}} =
@@ -226,7 +250,12 @@ defmodule Breeze.ChildServerTest do
 
     assert {:noreply, "right", true} =
              Breeze.ChildServer.dispatch_input(pid, %{
-               "mouse" => %{button: :left, action: :press, x: 11, y: 2, modifiers: []}
+               "mouse" => %{
+                 "button" => "left",
+                 "action" => "press",
+                 "x" => 10,
+                 "y" => 1
+               }
              })
 
     assert %{assigns: %{last_target: "right", event_focused: "right"}} =
@@ -244,7 +273,12 @@ defmodule Breeze.ChildServerTest do
 
     assert {:noreply, "full", true} =
              Breeze.ChildServer.dispatch_input(pid, %{
-               "mouse" => %{button: :left, action: :press, x: 12, y: 2, modifiers: []}
+               "mouse" => %{
+                 "button" => "left",
+                 "action" => "press",
+                 "x" => 11,
+                 "y" => 1
+               }
              })
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
