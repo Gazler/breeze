@@ -512,6 +512,68 @@ end
 defmodule Breeze.Storybook.InteractionLayoutTest do
   use Breeze.TestSupport.StorybookCase, async: true
 
+  @focused_panel_color {131, 165, 152}
+  @unfocused_panel_color {146, 131, 116}
+
+  defp panel_title_color?(header, title, {red, green, blue}) do
+    color = "#{red};#{green};#{blue}"
+
+    Regex.match?(
+      ~r/38;2;#{color}m╭.\e\[0m\e\[[0-9;]*38;2;#{color}m#{Regex.escape(title)}/u,
+      header
+    )
+  end
+
+  test "tabbing into the button preview moves the focused panel state" do
+    {terminal, pid} =
+      start_storybook_server!("button.story.exs", theme: Breeze.Theme.builtin(:gruvbox))
+
+    reader = terminal.reader
+
+    wait_for_preview_child(pid, "button")
+
+    initial_header =
+      wait_until(fn ->
+        case :sys.get_state(pid).frame.last_lines do
+          [header | _lines] ->
+            if panel_title_color?(header, "Storybook", @focused_panel_color) and
+                 panel_title_color?(header, "Preview: Button", @unfocused_panel_color) do
+              header
+            else
+              false
+            end
+
+          _lines ->
+            false
+        end
+      end)
+
+    assert panel_title_color?(initial_header, "Storybook", @focused_panel_color)
+    assert panel_title_color?(initial_header, "Preview: Button", @unfocused_panel_color)
+
+    send(pid, {reader, {:data, "\t"}})
+
+    focused_header =
+      wait_until(
+        fn ->
+          state = :sys.get_state(pid)
+
+          with "storybook-preview::storybook-button-primary" <- state.focused,
+               [header | _lines] <- state.frame.last_lines,
+               true <- panel_title_color?(header, "Storybook", @unfocused_panel_color),
+               true <- panel_title_color?(header, "Preview: Button", @focused_panel_color) do
+            header
+          else
+            _other -> false
+          end
+        end,
+        500
+      )
+
+    assert panel_title_color?(focused_header, "Storybook", @unfocused_panel_color)
+    assert panel_title_color?(focused_header, "Preview: Button", @focused_panel_color)
+  end
+
   test "server lets storybook F3 run before focused preview live child input" do
     terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
 
@@ -1211,10 +1273,10 @@ defmodule Breeze.Storybook.PreviewPatchInputRenderingTest do
     assert redraw_or_full_viewport_patch?(writes, viewport)
   end
 
-  test "tabbing out of a focused story preview control patches the preview instead of redrawing the frame" do
+  test "tabbing a focused preview control avoids a full redraw" do
     {terminal, pid} = start_storybook_server!("tabs.story.exs")
 
-    {preview_pid, viewport} = wait_for_preview_child(pid, "tabs")
+    {preview_pid, _viewport} = wait_for_preview_child(pid, "tabs")
     reader = terminal.reader
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(preview_pid, terminal: terminal)
@@ -1239,8 +1301,5 @@ defmodule Breeze.Storybook.PreviewPatchInputRenderingTest do
       end)
 
     refute Enum.any?(writes, &String.contains?(&1, "\e[2J\e[H"))
-
-    assert patched_rows(writes, viewport.left + 1) ==
-             Enum.to_list((viewport.top + 1)..(viewport.top + viewport.height))
   end
 end

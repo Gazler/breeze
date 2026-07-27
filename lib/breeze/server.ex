@@ -1602,6 +1602,21 @@ defmodule Breeze.Server do
   defp maybe_render_after_input(%{input: %{pending_ref: ref}} = state) when not is_nil(ref),
     do: state
 
+  defp maybe_render_after_input(
+         %{input: %{render_after_flush?: true, render_boundary?: true}} = state
+       ) do
+    cause = state.input.render_cause || :input_flush
+
+    state
+    |> update_input(
+      pending_sync_child_render_id: nil,
+      render_after_flush?: false,
+      render_boundary?: false,
+      render_cause: nil
+    )
+    |> maybe_render_base(cause)
+  end
+
   defp maybe_render_after_input(%{input: %{pending_sync_child_render_id: child_id}} = state)
        when is_binary(child_id) do
     state
