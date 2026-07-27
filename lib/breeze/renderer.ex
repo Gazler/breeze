@@ -1772,18 +1772,28 @@ defmodule Breeze.Renderer do
   end
 
   defp focused_within?(flags, root_id, focused_target, acc) do
+    focus_within = Keyword.get(flags, :"focus-within")
     focus_within_target = focus_within_target(flags, root_id)
 
-    Keyword.get(flags, :"focus-within") in [true, "true"] and is_binary(focus_within_target) and
-      focused_descends_from?(focused_target, focus_within_target, acc)
+    focus_within not in [nil, false, "false"] and
+      is_binary(focus_within_target) and
+      (focused_target == focus_within_target or
+         focused_descends_from?(focused_target, focus_within_target, acc))
   end
 
-  defp focus_within_target(_flags, root_id) when is_binary(root_id), do: root_id
+  defp focus_within_target(flags, root_id) do
+    case Keyword.get(flags, :"focus-within") do
+      target when is_binary(target) and target not in ["true", "false"] ->
+        target
 
-  defp focus_within_target(flags, _root_id) do
-    flags
-    |> Keyword.get(:"focus-within-path", [])
-    |> List.last()
+      _ when is_binary(root_id) ->
+        root_id
+
+      _ ->
+        flags
+        |> Keyword.get(:"focus-within-path", [])
+        |> List.last()
+    end
   end
 
   defp focused_descends_from?(nil, _root_id, _acc), do: false

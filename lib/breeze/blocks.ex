@@ -1519,6 +1519,7 @@ defmodule Breeze.Blocks do
   attr :scroll_class, :string, default: nil
   attr :scroll_style, :any, default: nil
   attr :focus_within, :boolean, default: true
+  attr :hide_focus_indicator, :boolean, default: false, doc: "Disables the panel focus marker."
   attr :rest, :global
 
   slot :title
@@ -1532,16 +1533,34 @@ defmodule Breeze.Blocks do
       )
 
     title? = panel_slot_present?(assigns[:title])
+    focus_within = Map.get(assigns, :focus_within, true)
+    panel_focus_target = panel_focus_target(Map.get(assigns, :id), focus_within)
+
+    focus_indicator_target =
+      if Map.get(assigns, :hide_focus_indicator, false) in [true, "true", ""] do
+        nil
+      else
+        panel_focus_target
+      end
+
     frame_style = inline_style(assigns)
     title_style = panel_title_style(frame_style, Map.get(assigns, :title_style))
-    title_wrapper? = title? and panel_frame_clips_title?(panel_class, frame_style)
+
+    title_wrapper? =
+      (title? or not is_nil(focus_indicator_target)) and
+        panel_frame_clips_title?(panel_class, frame_style)
 
     assigns =
       assigns
       |> assign(
-        focus_within: Map.get(assigns, :focus_within, true),
+        focus_within: focus_within,
+        standalone_focus_indicator?: not title? and not is_nil(focus_indicator_target),
+        focus_indicator_target: focus_indicator_target,
+        panel_focus_target: panel_focus_target,
         class: panel_class,
         frame_style: frame_style,
+        title_present: title?,
+        title_offset_class: if(is_nil(focus_indicator_target), do: "left-2", else: "left-1"),
         title_style: title_style,
         title_wrapper?: title_wrapper?,
         title_class:
@@ -1549,6 +1568,12 @@ defmodule Breeze.Blocks do
             "bold #{panel_title_class(panel_class)}",
             class_override(assigns, :title_class, :title_style)
           )
+      )
+      |> assign(
+        focus_indicator_class: "inline width-1 height-1 overflow-hidden",
+        focus_indicator_color_class: panel_title_class(panel_class),
+        standalone_focus_indicator_class:
+          "absolute left-1 top-0 layer-1 inline width-1 height-1 overflow-hidden"
       )
       |> assign(
         scroll_class:
@@ -1593,24 +1618,58 @@ defmodule Breeze.Blocks do
             </.scroll>
           </box>
           <box
+            :if={@title_present}
             focus-within="true"
-            class={"absolute left-2 top-0 layer-1 #{@title_class}"}
+            class={"absolute #{@title_offset_class} top-0 layer-1 inline #{@title_class}"}
             style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
           >
-            {render_slot(@title)}
+            <.panel_focus_indicator
+              :if={not is_nil(@focus_indicator_target)}
+              focus_within={@focus_indicator_target}
+              class={@focus_indicator_class}
+              color_class={@focus_indicator_color_class}
+              style={@title_style}
+            />
+            <box
+              focus-within={@panel_focus_target}
+              class={"inline #{@title_class}"}
+              style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
+            >
+              {render_slot(@title)}
+            </box>
           </box>
+          <.panel_focus_indicator
+            :if={@standalone_focus_indicator?}
+            focus_within={@focus_indicator_target}
+            class={@standalone_focus_indicator_class}
+            color_class={@focus_indicator_color_class}
+            style={@title_style}
+          />
         </box>
         """
       else
         ~H"""
         <box class={@frame_class} style={@frame_style} focus-within={@focus_within} {@rest}>
           <box
-            :if={assigns[:title]}
+            :if={@title_present}
             focus-within="true"
-            class={"absolute left-2 top-0 layer-1 #{@title_class}"}
+            class={"absolute #{@title_offset_class} top-0 layer-1 inline #{@title_class}"}
             style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
           >
-            {render_slot(@title)}
+            <.panel_focus_indicator
+              :if={not is_nil(@focus_indicator_target)}
+              focus_within={@focus_indicator_target}
+              class={@focus_indicator_class}
+              color_class={@focus_indicator_color_class}
+              style={@title_style}
+            />
+            <box
+              focus-within={@panel_focus_target}
+              class={"inline #{@title_class}"}
+              style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
+            >
+              {render_slot(@title)}
+            </box>
           </box>
           <.scroll
             id={@id}
@@ -1619,6 +1678,13 @@ defmodule Breeze.Blocks do
           >
             {render_slot(@inner_block)}
           </.scroll>
+          <.panel_focus_indicator
+            :if={@standalone_focus_indicator?}
+            focus_within={@focus_indicator_target}
+            class={@standalone_focus_indicator_class}
+            color_class={@focus_indicator_color_class}
+            style={@title_style}
+          />
         </box>
         """
       end
@@ -1630,12 +1696,33 @@ defmodule Breeze.Blocks do
             {render_slot(@inner_block)}
           </box>
           <box
+            :if={@title_present}
             focus-within="true"
-            class={"absolute left-2 top-0 layer-1 #{@title_class}"}
+            class={"absolute #{@title_offset_class} top-0 layer-1 inline #{@title_class}"}
             style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
           >
-            {render_slot(@title)}
+            <.panel_focus_indicator
+              :if={not is_nil(@focus_indicator_target)}
+              focus_within={@focus_indicator_target}
+              class={@focus_indicator_class}
+              color_class={@focus_indicator_color_class}
+              style={@title_style}
+            />
+            <box
+              focus-within={@panel_focus_target}
+              class={"inline #{@title_class}"}
+              style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
+            >
+              {render_slot(@title)}
+            </box>
           </box>
+          <.panel_focus_indicator
+            :if={@standalone_focus_indicator?}
+            focus_within={@focus_indicator_target}
+            class={@standalone_focus_indicator_class}
+            color_class={@focus_indicator_color_class}
+            style={@title_style}
+          />
         </box>
         """
       else
@@ -1643,18 +1730,69 @@ defmodule Breeze.Blocks do
         <box id={@id} class={@frame_class} style={@frame_style} focus-within={@focus_within} {@rest}>
           {render_slot(@inner_block)}
           <box
-            :if={assigns[:title]}
+            :if={@title_present}
             focus-within="true"
-            class={"absolute left-2 top-0 layer-1 #{@title_class}"}
+            class={"absolute #{@title_offset_class} top-0 layer-1 inline #{@title_class}"}
             style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
           >
-            {render_slot(@title)}
+            <.panel_focus_indicator
+              :if={not is_nil(@focus_indicator_target)}
+              focus_within={@focus_indicator_target}
+              class={@focus_indicator_class}
+              color_class={@focus_indicator_color_class}
+              style={@title_style}
+            />
+            <box
+              focus-within={@panel_focus_target}
+              class={"inline #{@title_class}"}
+              style={Breeze.Blocks.inline_style(assigns, :title_class, :title_style)}
+            >
+              {render_slot(@title)}
+            </box>
           </box>
+          <.panel_focus_indicator
+            :if={@standalone_focus_indicator?}
+            focus_within={@focus_indicator_target}
+            class={@standalone_focus_indicator_class}
+            color_class={@focus_indicator_color_class}
+            style={@title_style}
+          />
         </box>
         """
       end
     end
   end
+
+  attr :focus_within, :any, required: true
+  attr :class, :string, required: true
+  attr :color_class, :string, required: true
+  attr :style, :any, default: nil
+
+  defp panel_focus_indicator(assigns) do
+    ~H"""
+    <box focus-within={@focus_within} class={@class} style={@style}>
+      <box
+        focus-within={@focus_within}
+        class={"hidden focus:width-1 focus:height-1 overflow-hidden #{@color_class}"}
+      >
+        ▶
+      </box>
+      <box
+        focus-within={@focus_within}
+        class={"width-1 height-1 overflow-hidden focus:hidden #{@color_class}"}
+      >
+        ─
+      </box>
+    </box>
+    """
+  end
+
+  defp panel_focus_target(id, _focus_within) when is_binary(id), do: id
+
+  defp panel_focus_target(_id, focus_within) when focus_within in [false, "false"],
+    do: nil
+
+  defp panel_focus_target(_id, focus_within), do: focus_within
 
   defp panel_slot_present?(slot), do: slot not in [nil, []]
 

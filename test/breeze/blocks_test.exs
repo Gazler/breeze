@@ -132,6 +132,59 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule UntitledPanelFocusWithinExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.panel id="panel" class="width-16 height-4">
+        <.button id="confirm" class="width-10">{" Confirm "}</.button>
+      </.panel>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule PanelFocusIndicatorOptOutExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.panel id="panel" hide_focus_indicator class="width-16 height-4">
+        <:title>Details</:title>
+        <.button id="confirm" class="width-10">{" Confirm "}</.button>
+      </.panel>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
+  defmodule ScrollPanelFocusExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.panel id="panel" scroll class="width-16 height-4 overflow-hidden">Scroll body</.panel>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule PanelTitleOverlayExample do
     use Breeze.View
     import Breeze.Blocks
@@ -886,12 +939,74 @@ defmodule Breeze.BlocksTest do
   test "panel highlights when a descendant is focused" do
     {:ok, pid} = start_child_server(view: PanelFocusWithinExample, start_opts: [])
 
+    {:ok, _acc, unfocused_box} =
+      ChildServer.render(pid, focused: "not-focused", implicit_state: %{})
+
     {:ok, _acc, box} = ChildServer.render(pid, focused: "confirm", implicit_state: %{})
+
+    unfocused_content = BackBreeze.Utils.strip_escape_chars(unfocused_box.content)
+    focused_content = BackBreeze.Utils.strip_escape_chars(box.content)
 
     assert box.content =~ "Confirm"
     assert box.content =~ "Details"
     assert box.content =~ ~r/\e\[[0-9;]*38;5;4m[╭│╰]/
+    assert box.content =~ ~r/\e\[[0-9;]*38;5;4m╭▶/
     assert box.content =~ ~r/\e\[[0-9;]*38;5;4mDetails/
+    assert unfocused_content =~ "╭─Details"
+    refute unfocused_content =~ "▶"
+    assert focused_content =~ "╭▶Details"
+    assert String.replace(focused_content, "▶", "─") == unfocused_content
+  end
+
+  test "panel focus marker remains visible without a title and does not move content" do
+    {:ok, pid} = start_child_server(view: UntitledPanelFocusWithinExample, start_opts: [])
+
+    {:ok, _acc, unfocused_box} =
+      ChildServer.render(pid, focused: "not-focused", implicit_state: %{})
+
+    {:ok, _acc, focused_box} = ChildServer.render(pid, focused: "confirm", implicit_state: %{})
+
+    unfocused_content = BackBreeze.Utils.strip_escape_chars(unfocused_box.content)
+    focused_content = BackBreeze.Utils.strip_escape_chars(focused_box.content)
+
+    refute unfocused_content =~ "▶"
+    assert focused_content =~ "╭▶"
+    assert String.replace(focused_content, "▶", "─") == unfocused_content
+  end
+
+  test "panel focus marker can be disabled without disabling focused panel styling" do
+    {:ok, pid} = start_child_server(view: PanelFocusIndicatorOptOutExample, start_opts: [])
+
+    {:ok, _acc, unfocused_box} =
+      ChildServer.render(pid, focused: "not-focused", implicit_state: %{})
+
+    {:ok, _acc, focused_box} = ChildServer.render(pid, focused: "confirm", implicit_state: %{})
+
+    unfocused_content = BackBreeze.Utils.strip_escape_chars(unfocused_box.content)
+    focused_content = BackBreeze.Utils.strip_escape_chars(focused_box.content)
+
+    refute unfocused_content =~ "▶"
+    refute focused_content =~ "▶"
+    assert unfocused_content =~ "╭─Details"
+    assert focused_content == unfocused_content
+    assert focused_box.content =~ ~r/\e\[[0-9;]*38;5;4m[╭│╰]/
+    assert focused_box.content =~ ~r/\e\[[0-9;]*38;5;4mDetails/
+  end
+
+  test "panel focus marker follows the focus owner of a clipped scroll panel" do
+    {:ok, pid} = start_child_server(view: ScrollPanelFocusExample, start_opts: [])
+
+    {:ok, _acc, unfocused_box} =
+      ChildServer.render(pid, focused: "not-focused", implicit_state: %{})
+
+    {:ok, _acc, focused_box} = ChildServer.render(pid, focused: "panel", implicit_state: %{})
+
+    unfocused_content = BackBreeze.Utils.strip_escape_chars(unfocused_box.content)
+    focused_content = BackBreeze.Utils.strip_escape_chars(focused_box.content)
+
+    refute unfocused_content =~ "▶"
+    assert focused_content =~ "╭▶"
+    assert String.replace(focused_content, "▶", "─") == unfocused_content
   end
 
   test "panel title renders above full-size panel content" do

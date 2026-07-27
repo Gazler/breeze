@@ -60,6 +60,7 @@ defmodule Breeze.Storybook.SnapshotTest do
 
   test "list story snapshots selection change" do
     session = start_storybook!("list.story.exs")
+    Breeze.Test.render!(session)
 
     focused = "storybook-preview::storybook-list-muted"
     set_focus!(session, focused)
@@ -72,6 +73,7 @@ defmodule Breeze.Storybook.SnapshotTest do
 
   test "scroll story snapshots scroll movement" do
     session = start_storybook!("scroll.story.exs")
+    Breeze.Test.render!(session)
 
     focused = "storybook-preview::storybook-scroll"
     set_focus!(session, focused)

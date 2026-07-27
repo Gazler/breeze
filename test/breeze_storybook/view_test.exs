@@ -430,7 +430,7 @@ defmodule Breeze.Storybook.LayoutTest do
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
-    assert box.content =~ ~r/\e\[[0-9;]*38;5;4m╭─/
+    assert box.content =~ ~r/\e\[[0-9;]*38;5;4m╭▶/
     assert box.content =~ "Preview: Button"
   end
 
@@ -444,6 +444,40 @@ defmodule Breeze.Storybook.LayoutTest do
     plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
 
     assert plain_content =~ ">Button"
+  end
+
+  test "panel focus moves from the story nav to the button preview" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
+
+    assert {:ok, _acc, nav_box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    nav_header =
+      nav_box.content
+      |> BackBreeze.Utils.strip_escape_chars()
+      |> String.split("\n")
+      |> hd()
+
+    assert nav_header =~ "╭▶Storybook"
+    assert nav_header =~ "╭─Preview: Button"
+
+    assert {:noreply, "storybook-preview::storybook-button-primary", true} =
+             Breeze.ChildServer.set_focus(
+               pid,
+               "storybook-preview::storybook-button-primary"
+             )
+
+    assert {:ok, _acc, preview_box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    preview_header =
+      preview_box.content
+      |> BackBreeze.Utils.strip_escape_chars()
+      |> String.split("\n")
+      |> hd()
+
+    assert preview_header =~ "╭─Storybook"
+    assert preview_header =~ "╭▶Preview: Button"
   end
 
   test "F2 toggles the debug pane" do
@@ -944,7 +978,7 @@ defmodule Breeze.Storybook.PreviewFocusNavigationTest do
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
-    assert box.content =~ ~r/\e\[[0-9;]*38;5;4m╭─/
+    assert box.content =~ ~r/\e\[[0-9;]*38;5;4m╭▶/
     assert box.content =~ "Preview: Dropdown"
   end
 
@@ -965,7 +999,7 @@ defmodule Breeze.Storybook.PreviewFocusNavigationTest do
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
-    assert box.content =~ ~r/\e\[[0-9;]*38;5;4m╭─/
+    assert box.content =~ ~r/\e\[[0-9;]*38;5;4m╭▶/
     assert box.content =~ "Preview: Scroll"
   end
 end
