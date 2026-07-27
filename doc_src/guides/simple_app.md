@@ -375,9 +375,10 @@ The template already uses semantic classes such as `bg`, `bg-panel`,
 `text-primary`, and `text-muted`. Those tokens resolve through the active theme,
 so changing the theme changes the app without rewriting the view.
 
-Built-in theme names include `:system16`, `:system`, `:nebula`, `:catppuccin`,
-`:dracula`, `:gruvbox`, `:nord`, `:solarized_light`, and `:solarized_dark`. To
-define a project-specific palette later, we can use `Breeze.Theme`.
+Built-in theme names include `:system16`, `:system`, `:greenscreen`, `:nebula`,
+`:catppuccin`, `:dracula`, `:commander`, `:gruvbox`, `:nord`,
+`:solarized_light`, and `:solarized_dark`. To define a project-specific palette
+later, we can use `Breeze.Theme`.
 
 ## Start the app
 

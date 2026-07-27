@@ -665,6 +665,19 @@ defmodule Breeze.RendererTest do
       assert foreground_rgb(text_style) == nil
     end
 
+    test "screen dim remains disabled when the theme prohibits color blending" do
+      theme = Breeze.Theme.builtin(:greenscreen)
+
+      {_acc, box} =
+        Renderer.render(ScreenDimBackdropExample, %{},
+          theme: theme,
+          terminal: %Termite.Terminal{size: %{width: 12, height: 5}}
+        )
+
+      assert {"H", text_style} = layer_point(box.layer_map, 1, 1)
+      assert foreground_rgb(text_style) == {0, 255, 0}
+    end
+
     test "theme: false preserves legacy unthemed defaults" do
       assert Renderer.render_to_string(ThemeDefaultsExample, %{}, theme: false) ==
                "┌─────┐\n│Hello│\n└─────┘"

@@ -8,6 +8,9 @@ defmodule Breeze.Theme do
   * `:system` for richer themes derived from the terminal palette when available
   * custom maps/keywords/structs with explicit defaults, palette entries, and extras
 
+  Set `color_blending: false` on a custom theme when tone modifiers and screen
+  dimming must not synthesize additional colors.
+
   ## Theme variables
 
   Color classes such as `text-primary`, `bg-panel`, `border-warning`,
@@ -80,6 +83,7 @@ defmodule Breeze.Theme do
 
   Pass these names to `builtin/2`:
 
+    * `:greenscreen`
     * `:nebula`
     * `:catppuccin` or `:catppuccin` with the `:dark` variant
     * `:dracula`
@@ -94,6 +98,7 @@ defmodule Breeze.Theme do
   defstruct name: nil,
             mode: :custom,
             dark: nil,
+            color_blending: true,
             defaults: %{},
             palette: %{},
             extras: %{},
@@ -132,6 +137,7 @@ defmodule Breeze.Theme do
           name: String.t() | nil,
           mode: :custom | :system | :system16,
           dark: boolean() | nil,
+          color_blending: boolean(),
           defaults: %{optional(atom()) => color()},
           palette: %{optional(atom()) => color()},
           extras: %{optional(atom()) => color()},
@@ -148,6 +154,7 @@ defmodule Breeze.Theme do
 
   The available themes are:
 
+    * `:greenscreen`
     * `:nebula`
     * `:catppuccin` or `:catppuccin` with the `:dark` variant
     * `:dracula`
@@ -160,6 +167,7 @@ defmodule Breeze.Theme do
   ## Examples
 
       Breeze.Theme.builtin(:nebula)
+      Breeze.Theme.builtin(:greenscreen)
       Breeze.Theme.builtin(:commander, :blue)
       Breeze.Theme.builtin(:solarized, :light)
   """
@@ -173,6 +181,7 @@ defmodule Breeze.Theme do
     [
       :system16,
       :system,
+      :greenscreen,
       :nebula,
       :catppuccin,
       :dracula,
@@ -468,13 +477,15 @@ defmodule Breeze.Theme do
     blend(color, {0, 0, 0}, max(0.0, min(amount * 1.0, 1.0)))
   end
 
-  @doc "Returns whether a theme supports RGB color blending."
+  @doc "Returns whether a theme permits synthesized colors."
+  @spec color_blending?(t() | map() | keyword() | atom() | nil) :: boolean()
+  def color_blending?(theme), do: new(theme).color_blending != false
+
+  @doc "Returns whether a theme supports general RGB tone blending."
   @spec blendable?(t() | map() | keyword() | atom() | nil) :: boolean()
   def blendable?(theme) do
-    case new(theme).mode do
-      mode when mode in [:system, :system16] -> false
-      _ -> true
-    end
+    theme = new(theme)
+    color_blending?(theme) and theme.mode not in [:system, :system16]
   end
 
   defp build_custom(theme) do
@@ -482,6 +493,7 @@ defmodule Breeze.Theme do
       name: theme[:name],
       mode: :custom,
       dark: theme[:dark],
+      color_blending: Map.get(theme, :color_blending, true) != false,
       defaults: explicit_defaults(theme),
       palette: explicit_palette(theme),
       extras: explicit_extras(theme),

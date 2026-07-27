@@ -546,6 +546,23 @@ defmodule Breeze.StyleTest do
     assert focused.style.foreground_color == 7
   end
 
+  test "greenscreen theme ignores tone and scrollbar color blending" do
+    theme = Breeze.Theme.builtin(:greenscreen)
+
+    element =
+      Style.empty()
+      |> Style.put_class(
+        "bg-panel text-muted border-error overflow-scroll scrollbar-arrows lighten-20 darken-20 mute-40 text-emphasize-30 bg-emphasize-20 mute-scrollbar-20 placeholder:mute-40"
+      )
+      |> Style.to_element(theme: theme, placeholder: true)
+
+    assert element.style.foreground_color == {0, 255, 0}
+    assert element.style.background_color == {0, 0, 0}
+    assert element.style.border_color == {0, 255, 0}
+    assert element.style.scrollbar.vertical.thumb.foreground_color == {0, 255, 0}
+    assert element.style.scrollbar.vertical.track.foreground_color == {0, 255, 0}
+  end
+
   test "system16 ignores semantic tone transforms" do
     unfocused =
       Style.empty()

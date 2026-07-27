@@ -425,6 +425,7 @@ defmodule Breeze.Storybook do
   end
 
   defp theme_id(%Breeze.Theme{name: "nebula"}), do: :nebula
+  defp theme_id(%Breeze.Theme{name: "greenscreen"}), do: :greenscreen
   defp theme_id(%Breeze.Theme{name: "catppuccin-mocha"}), do: :catppuccin
   defp theme_id(%Breeze.Theme{name: "dracula"}), do: :dracula
   defp theme_id(%Breeze.Theme{name: "commander-blue"}), do: :commander

@@ -1343,10 +1343,9 @@ defmodule Breeze.Renderer do
   defp maybe_dim_screen_backdrop(box, _acc, _dimensions, _root_children, _opts), do: box
 
   defp screen_dimming_supported?(theme) do
-    case theme.mode do
-      :system16 -> false
-      _ -> rgb_color?(Theme.resolve_color(theme, :background_color))
-    end
+    Theme.color_blending?(theme) and
+      theme.mode != :system16 and
+      rgb_color?(Theme.resolve_color(theme, :background_color))
   end
 
   defp screen_dim_regions(acc, dimensions) do

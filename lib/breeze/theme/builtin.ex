@@ -7,6 +7,7 @@ defmodule Breeze.Theme.Builtin do
   @spec fetch!(atom(), atom() | nil) :: Theme.t()
   def fetch!(name, variant \\ nil)
 
+  def fetch!(:greenscreen, nil), do: greenscreen()
   def fetch!(:nebula, nil), do: nebula()
   def fetch!(:catppuccin, nil), do: catppuccin()
   def fetch!(:catppuccin, :dark), do: catppuccin()
@@ -25,6 +26,31 @@ defmodule Breeze.Theme.Builtin do
     raise ArgumentError,
           "unknown built-in theme #{inspect(name)}" <>
             if(variant, do: " with variant #{inspect(variant)}", else: "")
+  end
+
+  defp greenscreen do
+    Theme.new(
+      name: "greenscreen",
+      dark: true,
+      color_blending: false,
+      defaults: %{
+        foreground_color: "#00FF00",
+        background_color: "#000000",
+        border_color: "#00FF00"
+      },
+      palette: %{
+        muted: "#00FF00",
+        primary: "#00FF00",
+        secondary: "#00FF00",
+        warning: "#00FF00",
+        error: "#00FF00",
+        success: "#00FF00",
+        accent: "#00FF00",
+        surface: "#000000",
+        panel: "#000000"
+      },
+      extras: %{cursor: "#00FF00"}
+    )
   end
 
   defp nebula do

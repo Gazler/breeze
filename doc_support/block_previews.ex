@@ -11,6 +11,7 @@ defmodule Breeze.Docs.BlockPreviews do
   def snapshot_dir, do: @snapshot_dir
 
   @themes [
+    {:greenscreen, "Greenscreen"},
     {:nebula, "Nebula"},
     {:catppuccin, "Catppuccin Mocha"},
     {:dracula, "Dracula"},

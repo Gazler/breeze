@@ -871,12 +871,17 @@ defmodule Breeze.Style do
   defp normalize_percent(_value), do: 1.0
 
   defp apply_tone(style, attrs, theme) do
-    if Theme.blendable?(theme) do
-      style
-      |> apply_blendable_tones(attrs, theme)
-      |> apply_placeholder_blendable_tones(attrs, theme)
-    else
-      apply_semantic_tone_fallback(style, attrs, Theme.new(theme))
+    cond do
+      not Theme.color_blending?(theme) ->
+        style
+
+      Theme.blendable?(theme) ->
+        style
+        |> apply_blendable_tones(attrs, theme)
+        |> apply_placeholder_blendable_tones(attrs, theme)
+
+      true ->
+        apply_semantic_tone_fallback(style, attrs, Theme.new(theme))
     end
   end
 
@@ -1002,30 +1007,34 @@ defmodule Breeze.Style do
     do: style
 
   defp maybe_adjust_scrollbar_tone(%{scrollbar: scrollbar} = style, theme, direction, amount) do
-    {scrollbar, style} = BackBreeze.Scrollbar.normalize(scrollbar, style)
-    defaults = Theme.default_style(theme)
+    if Theme.color_blending?(theme) do
+      {scrollbar, style} = BackBreeze.Scrollbar.normalize(scrollbar, style)
+      defaults = Theme.default_style(theme)
 
-    source =
-      (scrollbar.vertical[:thumb] && scrollbar.vertical[:thumb].foreground_color) ||
-        (scrollbar.vertical[:track] && scrollbar.vertical[:track].foreground_color) ||
-        style.foreground_color
+      source =
+        (scrollbar.vertical[:thumb] && scrollbar.vertical[:thumb].foreground_color) ||
+          (scrollbar.vertical[:track] && scrollbar.vertical[:track].foreground_color) ||
+          style.foreground_color
 
-    target =
-      case direction do
-        :mute -> Map.get(defaults, :background_color)
-        :emphasize -> Map.get(defaults, :foreground_color)
-      end
+      target =
+        case direction do
+          :mute -> Map.get(defaults, :background_color)
+          :emphasize -> Map.get(defaults, :foreground_color)
+        end
 
-    scrollbar =
-      case {source, target} do
-        {{_, _, _} = color, {_, _, _} = target_color} ->
-          BackBreeze.Scrollbar.put_color(scrollbar, Theme.blend(color, target_color, amount))
+      scrollbar =
+        case {source, target} do
+          {{_, _, _} = color, {_, _, _} = target_color} ->
+            BackBreeze.Scrollbar.put_color(scrollbar, Theme.blend(color, target_color, amount))
 
-        _ ->
-          scrollbar
-      end
+          _ ->
+            scrollbar
+        end
 
-    %{style | scrollbar: scrollbar}
+      %{style | scrollbar: scrollbar}
+    else
+      style
+    end
   end
 
   defp maybe_put_tone_background(%{background_color: nil} = style, theme) do

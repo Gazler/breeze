@@ -81,6 +81,7 @@ defmodule Breeze.ThemeTest do
     assert Theme.default_cycle() == [
              :system16,
              :system,
+             :greenscreen,
              :nebula,
              :catppuccin,
              :dracula,
@@ -381,9 +382,33 @@ defmodule Breeze.ThemeTest do
 
   test "built-in constructors stay behind the Theme.builtin API" do
     for constructor <-
-          ~w(nebula catppuccin dracula commander gruvbox nord solarized_light solarized_dark)a do
+          ~w(greenscreen nebula catppuccin dracula commander gruvbox nord solarized_light solarized_dark)a do
       refute function_exported?(Breeze.Theme.Builtin, constructor, 0)
     end
+  end
+
+  test "greenscreen builtin theme uses only green and black without color blending" do
+    theme = Theme.builtin(:greenscreen)
+
+    assert theme.name == "greenscreen"
+    assert theme.dark == true
+    refute Theme.color_blending?(theme)
+    refute Theme.blendable?(theme)
+
+    assert Theme.color(theme, :text) == {0, 255, 0}
+    assert Theme.color(theme, :background) == {0, 0, 0}
+    assert Theme.color(theme, :border) == {0, 255, 0}
+    assert Theme.color(theme, :surface) == {0, 0, 0}
+    assert Theme.color(theme, :panel) == {0, 0, 0}
+
+    colors =
+      theme.defaults
+      |> Map.values()
+      |> Kernel.++(Map.values(theme.palette))
+      |> Kernel.++(Map.values(theme.extras))
+      |> MapSet.new()
+
+    assert colors == MapSet.new([{0, 0, 0}, {0, 255, 0}])
   end
 
   test "commander builtin theme matches classic blue TUI colors" do
