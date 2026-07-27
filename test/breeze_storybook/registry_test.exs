@@ -5,6 +5,7 @@ defmodule Breeze.Storybook.RegistryTest do
 
   @block_story_ids %{
     button: "button",
+    checkbox: "checkbox",
     dropdown: "dropdown",
     flash_group: "flash",
     input: "input",
