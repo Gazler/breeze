@@ -258,6 +258,24 @@ defmodule Breeze.RuntimeTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule DeferredPauseRoot do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, assign(term, count: 0)}
+
+    def render(assigns) do
+      ~H"""
+      <box>count={@count}</box>
+      """
+    end
+
+    def handle_event(_, %{"key" => "+"}, term) do
+      {:noreply, assign(term, count: term.assigns.count + 1)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term, invalidate: false}
+  end
+
   defmodule AnimatedImplicit do
     def init(_children, _attrs, state), do: {:ok, state, rerender_every: 10_000}
     def handle_modifiers(_, _, _state), do: []
@@ -405,6 +423,7 @@ defmodule Breeze.RuntimeTestCase do
         AnimatedRoot,
         BlockingView,
         CaptureHook,
+        DeferredPauseRoot,
         FailingHook,
         FakeAdapter,
         FocusChild,

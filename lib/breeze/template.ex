@@ -56,11 +56,79 @@ defmodule Breeze.Template do
 
   def compile!(source, %Macro.Env{} = env, opts) when is_binary(source) and is_list(opts) do
     %Syntax{nodes: nodes} = parse!(source, env)
+    nodes = normalize_static_implicits(nodes, env)
 
     %__MODULE__{
       nodes: compile_nodes(nodes, env, opts),
       env: Macro.Env.prune_compile_info(env)
     }
+  end
+
+  defp normalize_static_implicits(nodes, env) do
+    Enum.map(nodes, &normalize_static_implicit_node(&1, env))
+  end
+
+  defp normalize_static_implicit_node({:element, name, attrs, directives, children}, env) do
+    children = normalize_static_implicits(children, env)
+
+    if implicit_host_element?(name) do
+      attrs =
+        Enum.map(attrs, fn
+          {:dynamic, "implicit", expr} ->
+            {:static, "implicit", static_implicit_module!(expr, env)}
+
+          {:static, "implicit", _value} ->
+            static_implicit_module_error!(env)
+
+          {:boolean, "implicit"} ->
+            static_implicit_module_error!(env)
+
+          attr ->
+            attr
+        end)
+
+      {:element, name, attrs, directives, children}
+    else
+      {:element, name, attrs, directives, children}
+    end
+  end
+
+  defp normalize_static_implicit_node(node, _env), do: node
+
+  defp implicit_host_element?("." <> _component), do: false
+  defp implicit_host_element?(":" <> _slot), do: false
+  defp implicit_host_element?("live"), do: false
+  defp implicit_host_element?(_name), do: true
+
+  defp static_implicit_module!(expr, env) do
+    expanded =
+      case expr do
+        mod when is_atom(mod) -> mod
+        {:__aliases__, _meta, _parts} -> Macro.expand(expr, env)
+        {:__MODULE__, _meta, _context} -> Macro.expand(expr, env)
+        _ -> nil
+      end
+
+    if is_atom(expanded) and expanded not in [nil, true, false] do
+      expanded
+    else
+      static_implicit_module_error!(env, expr)
+    end
+  end
+
+  defp static_implicit_module_error!(env, expr \\ nil) do
+    line =
+      case expr do
+        {_form, meta, _args} when is_list(meta) -> Keyword.get(meta, :line, env.line)
+        _ -> env.line
+      end
+
+    raise CompileError,
+      file: env.file,
+      line: line,
+      description:
+        "the implicit attribute must be a static module, for example " <>
+          "implicit={MyApp.Implicit}; use :if to add or remove the element dynamically"
   end
 
   defp compile_nodes(nodes, env, opts) do
@@ -608,10 +676,19 @@ defmodule Breeze.Template do
         end
 
       {:spread, expr} ->
-        expr
-        |> eval_expr(ctx)
-        |> spread_pairs(:string)
+        pairs = expr |> eval_expr(ctx) |> spread_pairs(:string)
+
+        reject_spread_implicit!(pairs)
+        pairs
     end)
+  end
+
+  defp reject_spread_implicit!(pairs) do
+    if Enum.any?(pairs, fn {name, _value} -> name == "implicit" end) do
+      raise ArgumentError,
+            "the implicit attribute cannot be supplied through a spread; " <>
+              "write implicit={MyApp.Implicit} directly in the template"
+    end
   end
 
   defp eval_component_attrs(attrs, ctx) do

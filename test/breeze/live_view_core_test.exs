@@ -595,6 +595,35 @@ defmodule Breeze.LiveView.CoreTest do
     stop_gen_server(pid)
   end
 
+  test "live snapshot settles a deferred root render before resolving the child" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+    {:ok, pid} = start_app_server(view: SwitchableLiveRoot, terminal: terminal)
+    previous_child = :sys.get_state(pid).children["preview"].pid
+
+    :sys.replace_state(pid, fn state ->
+      put_in(state.frame.last_render_at, System.monotonic_time(:millisecond) + 5_000)
+    end)
+
+    send(pid, {terminal.reader, {:data, "s"}})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      Breeze.ChildServer.metadata(state.view_pid).assigns.child_view == AlternateChild and
+        is_nil(state.input.pending_ref) and state.input.render_after_flush?
+    end)
+
+    assert {:ok, snapshot} = Breeze.Server.live_snapshot(pid, "preview")
+    assert snapshot.content =~ "Alternate child"
+
+    state = :sys.get_state(pid)
+    assert state.children["preview"].view == AlternateChild
+    refute Process.alive?(previous_child)
+
+    stop_gen_server(pid)
+  end
+
   test "live snapshot call adopts crash state when child render crashes" do
     capture_log(fn ->
       terminal = Termite.Terminal.start(adapter: FakeAdapter)
@@ -684,7 +713,9 @@ defmodule Breeze.LiveView.CoreTest do
 
     wait_until(fn ->
       state = :sys.get_state(pid)
-      not state.input.flush_scheduled? and :queue.is_empty(state.input.queued_input)
+
+      not state.input.flush_scheduled? and is_nil(state.input.render_timer) and
+        :queue.is_empty(state.input.queued_input)
     end)
 
     %{view_pid: view_pid} = :sys.get_state(pid)

@@ -1391,7 +1391,6 @@ defmodule Breeze.Blocks do
       assigns
       |> assign(disabled: disabled?)
       |> assign(focusable: !disabled?)
-      |> assign(implicit: if(disabled?, do: nil, else: Breeze.Implicit.Textarea))
       |> assign(
         textarea_value: textarea_display_value(assigns[:"textarea-value"], prefix, disabled?)
       )
@@ -1407,9 +1406,23 @@ defmodule Breeze.Blocks do
     end}>
       <box :if={@textarea_prefix} class={@prefix_class}>{@textarea_prefix}</box>
       <box
+        :if={!@disabled}
         id={@id}
         focusable={@focusable}
-        implicit={@implicit}
+        implicit={Breeze.Implicit.Textarea}
+        class={@class}
+        style={Breeze.Blocks.inline_style(assigns)}
+        textarea-value={assigns[:"textarea-value"]}
+        textarea-cursor={assigns[:"textarea-cursor"]}
+        textarea-placeholder={assigns[:"textarea-placeholder"]}
+        textarea-submit-on-enter={assigns[:"textarea-submit-on-enter"]}
+        {@rest}
+      >
+        {@textarea_value}
+      </box>
+      <box
+        :if={@disabled}
+        id={@id}
         class={@class}
         style={Breeze.Blocks.inline_style(assigns)}
         textarea-value={assigns[:"textarea-value"]}

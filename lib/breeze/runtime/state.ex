@@ -150,7 +150,8 @@ defmodule Breeze.Runtime.State do
         reader: nil,
         assigns: assigns,
         children: %{},
-        render_timer: nil
+        render_timer: nil,
+        input_routing_signature: nil
     }
   end
 

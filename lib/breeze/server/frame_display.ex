@@ -1,7 +1,7 @@
 defmodule Breeze.Server.FrameDisplay do
   @moduledoc false
 
-  alias Breeze.Server.Frame
+  alias Breeze.Server.{Frame, Input}
 
   @sys_timeout 1_000
 
@@ -29,14 +29,7 @@ defmodule Breeze.Server.FrameDisplay do
     state
     |> suspend_runtime()
     |> put_owner(owner)
-    |> update_input(
-      pending_ref: nil,
-      pending_started_at: nil,
-      pending_sync_child_render_id: nil,
-      queued_input: :queue.new(),
-      flush_scheduled?: false,
-      render_after_flush?: false
-    )
+    |> Input.reset_pipeline()
     |> update_frame(display: frame, resume_on_input?: false, last_payload: nil)
     |> cancel_animation()
   end
@@ -57,14 +50,7 @@ defmodule Breeze.Server.FrameDisplay do
   def clear(state) do
     state
     |> release()
-    |> update_input(
-      pending_ref: nil,
-      pending_started_at: nil,
-      pending_sync_child_render_id: nil,
-      queued_input: :queue.new(),
-      flush_scheduled?: false,
-      render_after_flush?: false
-    )
+    |> Input.reset_pipeline()
     |> update_frame(
       display: nil,
       display_owner: nil,
@@ -293,6 +279,5 @@ defmodule Breeze.Server.FrameDisplay do
   defp cancel_timer(nil), do: :ok
   defp cancel_timer(timer), do: Process.cancel_timer(timer)
 
-  defp update_input(state, updates), do: %{state | input: struct!(state.input, updates)}
   defp update_frame(state, updates), do: %{state | frame: struct!(state.frame, updates)}
 end

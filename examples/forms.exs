@@ -95,7 +95,7 @@ defmodule FormsDemo do
         {:noreply, term}
 
       field ->
-        {:noreply, assign(term, String.to_atom(field), value)}
+        {:noreply, assign(term, %{String.to_atom(field) => value})}
     end
   end
 

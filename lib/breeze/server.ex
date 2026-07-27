@@ -80,6 +80,8 @@ defmodule Breeze.Server do
   alias Breeze.Server.State
 
   @flush_input_batch :flush_input_batch
+  @flush_input_render :flush_input_render
+  @input_render_interval_ms 16
   @logger_collector_attempts 3
   defstruct [
     :terminal,
@@ -495,6 +497,7 @@ defmodule Breeze.Server do
       {:ok, frame} ->
         state =
           state
+          |> settle_deferred_input_render()
           |> FrameDisplay.activate(frame, Keyword.get(opts, :owner))
           |> render_frame()
 
@@ -510,7 +513,7 @@ defmodule Breeze.Server do
   end
 
   def handle_call(:pause_runtime, _from, state) do
-    {:reply, :ok, FrameDisplay.pause_current(state)}
+    {:reply, :ok, state |> settle_deferred_input_render() |> FrameDisplay.pause_current()}
   end
 
   def handle_call(
@@ -530,6 +533,7 @@ defmodule Breeze.Server do
   end
 
   def handle_call({:runtime_state, opts}, _from, state) do
+    state = settle_deferred_input_render(state)
     {:reply, Breeze.Runtime.State.capture_server(state, opts), state}
   end
 
@@ -539,6 +543,7 @@ defmodule Breeze.Server do
   end
 
   def handle_call({:live_snapshot, child_id, opts}, _from, state) do
+    state = settle_deferred_input_render(state)
     {reply, state} = render_live_snapshot(state, child_id, opts)
     {:reply, reply, state}
   end
@@ -559,19 +564,23 @@ defmodule Breeze.Server do
   end
 
   def handle_call({:live_input, child_id, input, opts}, _from, state) do
+    state = settle_deferred_input_render(state)
     {reply, state} = dispatch_live_child_input(state, child_id, input, opts)
     {:reply, reply, state}
   end
 
   def handle_call(:inspector_snapshot, _from, state) do
+    state = settle_deferred_input_render(state)
     {:reply, Breeze.Inspector.snapshot(state), state}
   end
 
   def handle_call({:inspector_render_tree, opts}, _from, state) do
+    state = settle_deferred_input_render(state)
     {:reply, Breeze.Inspector.render_tree(state, opts), state}
   end
 
   def handle_call(:focused_implicit_meta, _from, state) do
+    state = maybe_settle_deferred_input_routing(state)
     metadata = if is_nil(state.frame.display), do: focused_implicit_meta(state), else: %{}
     {:reply, metadata, state}
   end
@@ -591,6 +600,7 @@ defmodule Breeze.Server do
 
   def handle_cast({:live_snapshot, child_id, recipient, ref, opts}, state) do
     if is_pid(recipient) do
+      state = settle_deferred_input_render(state)
       {reply, state} = render_live_snapshot(state, child_id, opts)
 
       send(
@@ -624,9 +634,9 @@ defmodule Breeze.Server do
     if is_pid(subscriber), do: Process.monitor(subscriber)
 
     state =
-      update_inspector(state,
-        subscribers: MapSet.put(state.inspector_state.subscribers, subscriber)
-      )
+      state
+      |> settle_deferred_input_render()
+      |> update_inspector(subscribers: MapSet.put(state.inspector_state.subscribers, subscriber))
 
     {:noreply, Inspector.push_snapshot_now(state)}
   end
@@ -655,12 +665,7 @@ defmodule Breeze.Server do
 
   def handle_info({reader, {:data, _data}}, %{reader: reader, frame: %{display: display}} = state)
       when not is_nil(display) do
-    {:noreply,
-     update_input(state,
-       queued_input: :queue.new(),
-       flush_scheduled?: false,
-       render_after_flush?: false
-     )}
+    {:noreply, Input.reset_pipeline(state)}
   end
 
   def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
@@ -765,11 +770,7 @@ defmodule Breeze.Server do
     state =
       state
       |> Debug.increment_stat(:flush_input_batch_count)
-      |> update_input(
-        flush_scheduled?: false,
-        queued_input: :queue.new(),
-        render_after_flush?: false
-      )
+      |> Input.reset_pipeline()
       |> render_frame()
 
     {:noreply, state}
@@ -777,7 +778,8 @@ defmodule Breeze.Server do
 
   def handle_info(@flush_input_batch, state) do
     state = Debug.increment_stat(state, :flush_input_batch_count)
-    state = update_input(state, flush_scheduled?: false)
+
+    state = state |> update_input(flush_scheduled?: false) |> maybe_render_before_input_boundary()
 
     case flush_input_batch(state) do
       {:stop, state} ->
@@ -786,12 +788,33 @@ defmodule Breeze.Server do
       {:noreply, state} ->
         state =
           state
-          |> maybe_render_after_input()
+          |> maybe_render_or_schedule_input()
           |> schedule_input_flush()
 
         {:noreply, state}
     end
   end
+
+  def handle_info(
+        {@flush_input_render, token},
+        %{input: %{render_timer_token: token}, frame: %{display: display}} = state
+      )
+      when not is_nil(display) do
+    state = update_input(state, render_timer: nil, render_timer_token: nil)
+
+    {:noreply, state}
+  end
+
+  def handle_info({@flush_input_render, token}, %{input: %{render_timer_token: token}} = state) do
+    state =
+      state
+      |> update_input(render_timer: nil, render_timer_token: nil)
+      |> maybe_render_after_input()
+
+    {:noreply, state}
+  end
+
+  def handle_info({@flush_input_render, _stale_token}, state), do: {:noreply, state}
 
   def handle_info(
         {:animation_tick, generation},
@@ -872,8 +895,11 @@ defmodule Breeze.Server do
 
   def handle_info({:event_reply, ref, reply}, %{input: %{pending_ref: ref}} = state) do
     case apply_event_reply(state, reply) do
-      {:noreply, state} -> {:noreply, schedule_input_flush(state)}
-      other -> other
+      {:noreply, state} ->
+        {:noreply, state |> maybe_render_or_schedule_input() |> schedule_input_flush()}
+
+      other ->
+        other
     end
   end
 
@@ -952,9 +978,7 @@ defmodule Breeze.Server do
   end
 
   defp resume_frame_for_interaction(state) do
-    state
-    |> FrameDisplay.release()
-    |> schedule_animation()
+    state |> FrameDisplay.release() |> settle_deferred_input_render() |> schedule_animation()
   end
 
   defp restore_live_frame(%{frame: %{display: nil}} = state, _cause), do: state
@@ -1123,10 +1147,10 @@ defmodule Breeze.Server do
         {:stop, state}
 
       {:noreply, focused} ->
-        {:noreply, state |> Map.put(:focused, focused) |> mark_input_render_after_flush(true)}
+        {:noreply, state |> put_input_focus(focused) |> mark_input_render_after_flush(true)}
 
       {:noreply, focused, render?} ->
-        {:noreply, state |> Map.put(:focused, focused) |> mark_input_render_after_flush(render?)}
+        {:noreply, state |> put_input_focus(focused) |> mark_input_render_after_flush(render?)}
     end
   end
 
@@ -1140,10 +1164,16 @@ defmodule Breeze.Server do
     end
   end
 
-  defp mark_input_render_after_flush(state, true),
-    do: update_input(state, render_after_flush?: true)
+  defp mark_input_render_after_flush(state, render?, cause \\ :input_flush)
 
-  defp mark_input_render_after_flush(state, _render?), do: state
+  defp mark_input_render_after_flush(state, true, cause) do
+    update_input(state,
+      render_after_flush?: true,
+      render_cause: state.input.render_cause || cause
+    )
+  end
+
+  defp mark_input_render_after_flush(state, _render?, _cause), do: state
 
   defp apply_event_reply(state, {:crash, crash}) do
     {:noreply, enter_crash_state(state, crash)}
@@ -1163,7 +1193,7 @@ defmodule Breeze.Server do
   defp finish_event_reply(state, focused, true) do
     state
     |> finish_event_reply_state(focused)
-    |> maybe_render_base(:event_reply)
+    |> mark_input_render_after_flush(true, :event_reply)
   end
 
   defp finish_event_reply(state, focused, _render?) do
@@ -1171,8 +1201,12 @@ defmodule Breeze.Server do
   end
 
   defp finish_event_reply_state(state, focused) do
+    state |> update_input(pending_ref: nil, pending_started_at: nil) |> put_input_focus(focused)
+  end
+
+  defp put_input_focus(state, focused) do
     state
-    |> update_input(pending_ref: nil, pending_started_at: nil)
+    |> update_input(render_boundary?: state.input.render_boundary? or state.focused != focused)
     |> Map.put(:focused, focused)
   end
 
@@ -1181,8 +1215,7 @@ defmodule Breeze.Server do
       stop_global_key?(key, state) -> :global_stop
       Inspector.toggle_key?(key, state) -> :inspector_toggle
       Inspector.move_key?(key, state) -> :inspector_move
-      focused_implicit_captures_key?(state, key) -> :hierarchy
-      tab_input?(key) -> :tab
+      tab_input?(key) and not focused_implicit_captures_key?(state, key) -> :tab
       true -> :hierarchy
     end
   end
@@ -1282,14 +1315,23 @@ defmodule Breeze.Server do
   end
 
   defp handle_mouse(event, state) do
-    state
-    |> touch_interaction()
-    |> safe_apply_input_reply(fn state ->
-      Breeze.ChildServer.dispatch_input(state.view_pid, %{"mouse" => event},
-        live_children: state.children,
-        invalidate: false
-      )
-    end)
+    result =
+      state
+      |> touch_interaction()
+      |> safe_apply_input_reply(fn state ->
+        Breeze.ChildServer.dispatch_input(state.view_pid, %{"mouse" => event},
+          live_children: state.children,
+          invalidate: false
+        )
+      end)
+
+    case result do
+      {:noreply, %{input: %{render_after_flush?: true}} = state} ->
+        {:noreply, update_input(state, render_boundary?: true)}
+
+      other ->
+        other
+    end
   end
 
   defp render_base(state, cause \\ :unknown, attempts \\ 1)
@@ -1409,6 +1451,16 @@ defmodule Breeze.Server do
     decorations =
       RenderTracking.dedupe_decorations(result.decorations ++ result.child_decorations)
 
+    state =
+      state
+      |> cancel_input_render_timer()
+      |> update_input(
+        pending_sync_child_render_id: nil,
+        render_after_flush?: false,
+        render_boundary?: false,
+        render_cause: nil
+      )
+
     previous_theme = state.theme
     previous_apply_theme_defaults? = state.apply_theme_defaults?
 
@@ -1437,7 +1489,7 @@ defmodule Breeze.Server do
       |> Debug.increment_stat(:render_base_count)
       |> update_frame(base_output: base_output)
       |> update_rendered(elements: viewports_from_acc(result.acc), boxes: result.acc.boxes)
-      |> Inspector.merge_render_data(result.acc, safe_root_metadata(state))
+      |> maybe_merge_inspector_render_data(result.acc)
       |> update_frame(decorations: decorations)
       |> Map.put(:focused, result.focused)
       |> update_frame(last_render_at: System.monotonic_time(:millisecond))
@@ -1498,7 +1550,7 @@ defmodule Breeze.Server do
       render_tree?: Breeze.Inspector.enabled?(state),
       render_tracking_ref: tracking_ref,
       profile_scope: profile_scope,
-      profile_label: inspect(root_view_module(state)),
+      profile_label: inspect(state.view),
       compact_snapshot: true,
       live_view: fn attrs, opts ->
         render_live_child(attrs, opts, state, profile_scope, tracking_ref)
@@ -1537,23 +1589,148 @@ defmodule Breeze.Server do
     end
   end
 
+  defp maybe_merge_inspector_render_data(
+         %{inspector_state: %{config: false}} = state,
+         _render_acc
+       ),
+       do: state
+
+  defp maybe_merge_inspector_render_data(state, render_acc) do
+    Inspector.merge_render_data(state, render_acc, safe_root_metadata(state))
+  end
+
   defp maybe_render_after_input(%{input: %{pending_ref: ref}} = state) when not is_nil(ref),
     do: state
 
   defp maybe_render_after_input(%{input: %{pending_sync_child_render_id: child_id}} = state)
        when is_binary(child_id) do
     state
-    |> update_input(pending_sync_child_render_id: nil, render_after_flush?: false)
+    |> update_input(
+      pending_sync_child_render_id: nil,
+      render_after_flush?: false,
+      render_boundary?: false,
+      render_cause: nil
+    )
     |> maybe_render_invalidated_child(child_id)
   end
 
   defp maybe_render_after_input(%{input: %{render_after_flush?: true}} = state) do
+    cause = state.input.render_cause || :input_flush
+
     state
-    |> update_input(render_after_flush?: false)
-    |> maybe_render_base(:input_flush)
+    |> update_input(render_after_flush?: false, render_boundary?: false, render_cause: nil)
+    |> maybe_render_base(cause)
   end
 
-  defp maybe_render_after_input(state), do: update_input(state, render_after_flush?: false)
+  defp maybe_render_after_input(state) do
+    update_input(state, render_after_flush?: false, render_boundary?: false, render_cause: nil)
+  end
+
+  defp maybe_render_or_schedule_input(%{input: %{render_after_flush?: false}} = state), do: state
+
+  defp maybe_render_or_schedule_input(%{input: %{pending_ref: ref}} = state)
+       when not is_nil(ref),
+       do: state
+
+  defp maybe_render_or_schedule_input(state) do
+    case input_render_delay(state) do
+      0 -> state |> cancel_input_render_timer() |> maybe_render_after_input()
+      delay -> schedule_input_render(state, delay)
+    end
+  end
+
+  defp input_render_delay(%{frame: %{last_render_at: nil}}), do: 0
+
+  defp input_render_delay(state) do
+    elapsed = System.monotonic_time(:millisecond) - state.frame.last_render_at
+    max(@input_render_interval_ms - elapsed, 0)
+  end
+
+  defp schedule_input_render(%{input: %{render_timer: timer}} = state, _delay)
+       when is_reference(timer),
+       do: state
+
+  defp schedule_input_render(state, delay) do
+    token = make_ref()
+    timer = Process.send_after(self(), {@flush_input_render, token}, delay)
+
+    update_input(state, render_timer: timer, render_timer_token: token)
+  end
+
+  defp cancel_input_render_timer(%{input: %{render_timer: timer}} = state)
+       when is_reference(timer) do
+    Process.cancel_timer(timer)
+
+    update_input(state, render_timer: nil, render_timer_token: nil)
+  end
+
+  defp cancel_input_render_timer(state), do: state
+
+  defp maybe_render_before_input_boundary(
+         %{input: %{render_after_flush?: true, pending_ref: nil}} = state
+       ) do
+    case :queue.peek(state.input.queued_input) do
+      {:value, decoded} ->
+        case input_render_boundary(state, decoded) do
+          :boundary -> state |> cancel_input_render_timer() |> maybe_render_after_input()
+          :continue -> state
+        end
+
+      :empty ->
+        state
+    end
+  end
+
+  defp maybe_render_before_input_boundary(state), do: state
+
+  defp input_render_boundary(%{input: %{render_boundary?: true}}, _decoded), do: :boundary
+
+  defp input_render_boundary(state, decoded) do
+    if input_render_boundary?(decoded, state) or input_routing_changed?(state),
+      do: :boundary,
+      else: :continue
+  end
+
+  defp input_render_boundary?({:mouse, _event}, _state), do: true
+
+  defp input_render_boundary?({:key, key}, state) do
+    input_key = Input.key_name(key)
+
+    tab_input?(key) or input_key in ["PageUp", "PageDown", "Home", "End"] or
+      Inspector.toggle_key?(input_key, state) or
+      Inspector.move_key?(input_key, state)
+  end
+
+  defp input_render_boundary?(_decoded, _state), do: false
+
+  defp input_routing_changed?(state) do
+    case safe_call(fn ->
+           Breeze.ChildServer.input_routing_changed?(state.view_pid,
+             live_children: state.children
+           )
+         end) do
+      {:ok, changed?} -> changed?
+      {:crash, _crash} -> true
+    end
+  end
+
+  defp settle_deferred_input_render(%{input: %{pending_ref: ref}} = state)
+       when not is_nil(ref),
+       do: state
+
+  defp settle_deferred_input_render(state) do
+    state |> cancel_input_render_timer() |> maybe_render_after_input()
+  end
+
+  defp maybe_settle_deferred_input_routing(
+         %{input: %{render_after_flush?: true, pending_ref: nil}} = state
+       ) do
+    if state.input.render_boundary? or input_routing_changed?(state),
+      do: settle_deferred_input_render(state),
+      else: state
+  end
+
+  defp maybe_settle_deferred_input_routing(state), do: state
 
   defp force_full_redraw(state, cause) do
     state
@@ -2479,7 +2656,7 @@ defmodule Breeze.Server do
   defp crash_info(kind, reason, stacktrace), do: Error.crash_info(kind, reason, stacktrace)
 
   defp enter_crash_state(state, crash) do
-    state = FrameDisplay.clear(state)
+    state = state |> cancel_input_render_timer() |> FrameDisplay.clear()
     cancel_timer(state.frame.animation_timer)
     terminal = apply_mouse_mode(state.terminal, false)
     crash = Error.prepare_crash(state.render_errors, state.view, crash, terminal.size)
@@ -2487,12 +2664,7 @@ defmodule Breeze.Server do
     state
     |> Map.put(:terminal, terminal)
     |> Map.put(:crash, crash)
-    |> update_input(
-      pending_ref: nil,
-      pending_started_at: nil,
-      flush_scheduled?: false,
-      queued_input: :queue.new()
-    )
+    |> Input.reset_pipeline()
     |> update_frame(
       animation_timer: nil,
       animation_generation: nil,
@@ -2689,12 +2861,7 @@ defmodule Breeze.Server do
           last_lines: nil,
           last_overlays: []
         )
-        |> update_input(
-          pending_ref: nil,
-          pending_started_at: nil,
-          queued_input: :queue.new(),
-          flush_scheduled?: false
-        )
+        |> Input.reset_pipeline()
         |> maybe_render_base(cause)
 
       {:error, crash} ->
@@ -3105,15 +3272,6 @@ defmodule Breeze.Server do
 
   defp schedule_input_flush(state) do
     Input.schedule_flush(state, @flush_input_batch)
-  end
-
-  defp root_view_module(%{children: _} = state) do
-    case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
-      {:ok, %{view: view}} -> view
-      _ -> nil
-    end
-  catch
-    :exit, _reason -> nil
   end
 
   defp dispatch_input_hierarchy(state, key) do

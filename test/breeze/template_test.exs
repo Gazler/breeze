@@ -195,6 +195,13 @@ defmodule Breeze.TemplateTest do
     end
   end
 
+  defmodule SpreadImplicitView do
+    use Breeze.View
+
+    def render(assigns), do: ~H"<box {@attrs}>
+</box>"
+  end
+
   describe "rendering" do
     test "supports @assign interpolation and eex expressions" do
       assert render(InterpolationView, %{name: "world"}) == "<box>Hello world WORLD</box>"
@@ -292,9 +299,37 @@ defmodule Breeze.TemplateTest do
     test "supports private function components" do
       assert render(PrivateComponentView, %{value: "ok"}) == "<box>secret ok</box>"
     end
+
+    test "rejects an implicit supplied through a spread" do
+      assert_raise ArgumentError,
+                   ~r/implicit attribute cannot be supplied through a spread/,
+                   fn ->
+                     render(SpreadImplicitView, %{attrs: %{implicit: Breeze.Implicit.Input}})
+                   end
+    end
   end
 
   describe "compile errors" do
+    test "implicit modules must be static" do
+      assert_raise CompileError, ~r/implicit attribute must be a static module/, fn ->
+        Breeze.Template.compile!("<box implicit={@implicit}></box>", __ENV__)
+      end
+
+      assert_raise CompileError, ~r/implicit attribute must be a static module/, fn ->
+        Breeze.Template.compile!("<box implicit={choose_implicit()}></box>", __ENV__)
+      end
+    end
+
+    test "implicit modules cannot use string or boolean attribute syntax" do
+      assert_raise CompileError, ~r/implicit attribute must be a static module/, fn ->
+        Breeze.Template.compile!("<box implicit=\"MyApp.Implicit\"></box>", __ENV__)
+      end
+
+      assert_raise CompileError, ~r/implicit attribute must be a static module/, fn ->
+        Breeze.Template.compile!("<box implicit></box>", __ENV__)
+      end
+    end
+
     test ":if requires an expression" do
       assert_raise RuntimeError, ~r/the :if directive requires an expression/, fn ->
         Breeze.Template.compile!("<box :if=\"true\"></box>", __ENV__)
