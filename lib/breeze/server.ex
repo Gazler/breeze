@@ -1248,7 +1248,7 @@ defmodule Breeze.Server do
 
   defp handle_sync_key_action(state, :hierarchy, key) do
     safe_apply_hierarchy_input_reply(state, fn state ->
-      dispatch_input_hierarchy(state, key)
+      dispatch_input_hierarchy_with_origin(state, key)
     end)
   end
 
@@ -2612,8 +2612,9 @@ defmodule Breeze.Server do
 
   defp safe_apply_hierarchy_input_reply(state, fun) do
     case safe_call(fn -> fun.(state) end) do
-      {:ok, {:crash, crash}} -> {:noreply, enter_crash_state(state, crash)}
-      {:ok, reply} -> apply_hierarchy_input_reply(state, reply)
+      {:ok, {_origin, {:crash, crash}}} -> {:noreply, enter_crash_state(state, crash)}
+      {:ok, {:root, reply}} -> apply_input_reply(state, reply)
+      {:ok, {:live_child, reply}} -> apply_hierarchy_input_reply(state, reply)
       {:crash, crash} -> {:noreply, enter_crash_state(state, crash)}
     end
   end
@@ -3275,6 +3276,11 @@ defmodule Breeze.Server do
   end
 
   defp dispatch_input_hierarchy(state, key) do
+    {_origin, reply} = dispatch_input_hierarchy_with_origin(state, key)
+    reply
+  end
+
+  defp dispatch_input_hierarchy_with_origin(state, key) do
     state =
       case safe_root_metadata(state) do
         %{focused: focused} -> %{state | focused: focused}
@@ -3297,7 +3303,7 @@ defmodule Breeze.Server do
       end
 
     if root_global_reply do
-      root_global_reply
+      {:root, root_global_reply}
     else
       dispatch_focused_input_hierarchy(state, key)
     end
@@ -3325,7 +3331,7 @@ defmodule Breeze.Server do
 
     case child_reply do
       {:crash, _crash} = crash ->
-        crash
+        {:live_child, crash}
 
       nil ->
         case safe_call(fn ->
@@ -3336,12 +3342,12 @@ defmodule Breeze.Server do
                  invalidate: false
                )
              end) do
-          {:ok, reply} -> reply
-          {:crash, crash} -> {:crash, crash}
+          {:ok, reply} -> {:root, reply}
+          {:crash, crash} -> {:root, {:crash, crash}}
         end
 
       reply ->
-        reply
+        {:live_child, reply}
     end
   end
 

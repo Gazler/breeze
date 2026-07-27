@@ -545,6 +545,53 @@ defmodule Breeze.Storybook.InteractionLayoutTest do
       Breeze.ChildServer.metadata(view_pid).theme.name == "nord"
     end)
   end
+
+  for {name, file, focus_id, open?} <- [
+        {"open dropdown", "dropdown.story.exs", "storybook-dropdown", true},
+        {"focused list", "list.story.exs", "storybook-list-muted", false}
+      ] do
+    test "server cascades the storybook F3 theme through #{name}" do
+      terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+
+      {:ok, pid} =
+        start_app_server(
+          view: Breeze.Storybook,
+          terminal: terminal,
+          theme: Breeze.Theme.builtin(:gruvbox),
+          start_opts: [directory: "storybook", file: unquote(file)]
+        )
+
+      on_exit(fn -> stop_server(pid) end)
+
+      view_pid = :sys.get_state(pid).view_pid
+      focused = "storybook-preview::" <> unquote(focus_id)
+
+      wait_until(fn ->
+        Map.has_key?(:sys.get_state(pid).children, "storybook-preview")
+      end)
+
+      preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
+
+      assert {:noreply, ^focused, true} = Breeze.ChildServer.set_focus(view_pid, focused)
+
+      if unquote(open?) do
+        assert {:noreply, ^focused, true} = Breeze.ChildServer.dispatch_input(view_pid, "Enter")
+      end
+
+      send(pid, :child_invalidated)
+
+      wait_until(fn ->
+        :sys.get_state(pid).focused == focused
+      end)
+
+      send(pid, {terminal.reader, {:data, "\e[13~"}})
+
+      wait_until(fn ->
+        Breeze.ChildServer.metadata(view_pid).theme.name == "nord" and
+          Breeze.ChildServer.metadata(preview_pid).theme.name == "nord"
+      end)
+    end
+  end
 end
 
 defmodule Breeze.Storybook.VariantInteractionLayoutTest do
