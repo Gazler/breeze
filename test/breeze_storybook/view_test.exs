@@ -47,13 +47,31 @@ defmodule Breeze.Storybook.RenderingTest do
     assert :sys.get_state(child).assigns.selected == "lib"
   end
 
+  test "checkbox story renders checked, unchecked, and disabled controls" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    {:ok, pid} =
+      start_child_server(
+        view: Breeze.Storybook,
+        terminal: terminal,
+        start_opts: [directory: "storybook", file: "checkbox.story.exs"]
+      )
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+
+    assert plain_content =~ "[x] Mouse input"
+    assert plain_content =~ "[ ] Inspector"
+    assert plain_content =~ "⟦x⟧ Unavailable"
+  end
+
   test "dropdown story renders a single visible closed indicator" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
 
     {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    select_story!(pid, "dropdown")
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
@@ -114,7 +132,7 @@ defmodule Breeze.Storybook.DetailRenderingTest do
     {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    select_story!(pid, "dropdown")
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
@@ -131,7 +149,7 @@ defmodule Breeze.Storybook.DetailRenderingTest do
     {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    select_story!(pid, "dropdown")
 
     assert {:noreply, "storybook-preview::storybook-dropdown", true} =
              Breeze.ChildServer.set_focus(
@@ -643,6 +661,7 @@ defmodule Breeze.Storybook.InteractionLayoutTest do
   end
 
   for {name, file, focus_id, open?} <- [
+        {"focused checkbox", "checkbox.story.exs", "storybook-checkbox-mouse", false},
         {"open dropdown", "dropdown.story.exs", "storybook-dropdown", true},
         {"focused list", "list.story.exs", "storybook-list-muted", false}
       ] do
@@ -836,7 +855,7 @@ defmodule Breeze.Storybook.NavigationTest do
 
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
     plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
-    assert plain_content =~ "Preview: Dropdown"
+    assert plain_content =~ "Preview: Checkbox"
 
     assert {:noreply, "storybook-nav", true} =
              Breeze.ChildServer.dispatch_input(pid, %{"ctrlKey" => true, "key" => "ArrowUp"})
@@ -912,6 +931,12 @@ defmodule Breeze.Storybook.PreviewNavigationTest do
     send(pid, {reader, {:data, "\e[B"}})
 
     wait_until(fn ->
+      :sys.get_state(view_pid).assigns.current_story_id == "checkbox"
+    end)
+
+    send(pid, {reader, {:data, "\e[B"}})
+
+    wait_until(fn ->
       :sys.get_state(view_pid).assigns.current_story_id == "dropdown"
     end)
 
@@ -967,7 +992,7 @@ defmodule Breeze.Storybook.PreviewFocusNavigationTest do
     {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+    select_story!(pid, "dropdown")
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
     assert {:noreply, "storybook-preview::storybook-dropdown", true} =

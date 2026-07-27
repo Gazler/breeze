@@ -138,7 +138,7 @@ defmodule Breeze.Blocks do
       list-values={@list_values}
       focusable
       class={@class}
-      style={Breeze.Blocks.inline_style(assigns)}
+      style={inline_style(assigns)}
       {@rest}
     >
       <box :if={@top_spacer > 0} class={"width-full height-#{@top_spacer} overflow-hidden"}>
@@ -1324,6 +1324,85 @@ defmodule Breeze.Blocks do
 
   defp normalize_button_focusable(value) when value in [false, "false"], do: false
   defp normalize_button_focusable(_value), do: true
+
+  attr :id, :string, required: true
+
+  attr :checked, :boolean,
+    default: nil,
+    doc: "Controlled checked state; omit it to let the checkbox retain its own state"
+
+  attr :disabled, :boolean, default: false
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :rest, :global
+
+  slot :inner_block, required: true
+
+  def checkbox(assigns) do
+    checked = normalize_checkbox_checked(Map.get(assigns, :checked))
+    disabled? = normalize_checkbox_disabled(Map.get(assigns, :disabled, false))
+
+    assigns =
+      assigns
+      |> assign(checked: checked)
+      |> assign(checked_attr: if(is_nil(checked), do: nil, else: to_string(checked)))
+      |> assign(disabled: disabled?)
+      |> assign(unchecked_indicator: if(disabled?, do: "⟦ ⟧ ", else: "[ ] "))
+      |> assign(checked_indicator: if(disabled?, do: "⟦x⟧ ", else: "[x] "))
+
+    ~H"""
+    <box
+      id={@id}
+      implicit={Breeze.Implicit.Checkbox}
+      checkbox-checked={@checked_attr}
+      checkbox-disabled={@disabled}
+      focusable={!@disabled}
+      class={[
+      "inline height-1 overflow-hidden",
+      @disabled && "text-muted",
+      !@disabled && "focus:text-primary",
+      class_override(assigns)
+    ]}
+      style={Breeze.Blocks.inline_style(assigns)}
+      {@rest}
+    >
+      <box
+        checkbox-state="unchecked"
+        focus-with-owner
+        class="inline width-0 selected:width-4 focus:selected:width-0 height-1 overflow-hidden"
+      >
+        {@unchecked_indicator}
+      </box>
+      <box
+        checkbox-state="unchecked"
+        focus-with-owner
+        class="inline width-0 focus:selected:width-4 height-1 overflow-hidden focus:text-primary"
+      >
+        | |
+      </box>
+      <box
+        checkbox-state="checked"
+        focus-with-owner
+        class="inline width-0 selected:width-4 focus:selected:width-0 height-1 overflow-hidden"
+      >
+        {@checked_indicator}
+      </box>
+      <box
+        checkbox-state="checked"
+        focus-with-owner
+        class="inline width-0 focus:selected:width-4 height-1 overflow-hidden focus:text-primary"
+      >
+        |x|
+      </box>
+      <box focus-with-owner class="inline focus:text-primary">{render_slot(@inner_block)}</box>
+    </box>
+    """
+  end
+
+  defp normalize_checkbox_checked(nil), do: nil
+  defp normalize_checkbox_checked(value), do: value in [true, "true", "1", ""]
+
+  defp normalize_checkbox_disabled(value), do: value in [true, "true", "1", ""]
 
   attr :id, :string, required: true
   attr :class, :string, default: nil
