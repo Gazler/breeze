@@ -2,8 +2,12 @@ defmodule Breeze.Storybook do
   @moduledoc """
   Root view for the interactive Breeze Storybook browser.
 
-  Start it like any other Breeze application and pass Storybook configuration
-  through `:start_opts`:
+  Start a project's Storybook with the included Mix task:
+
+      mix breeze.storybook
+
+  It can also be started like any other Breeze application by passing Storybook
+  configuration through `:start_opts`:
 
       Breeze.Server.start_link(
         view: Breeze.Storybook,

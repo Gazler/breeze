@@ -116,6 +116,20 @@ Breeze.Example.run(
 Explore more applications in the
 [examples directory](https://github.com/Gazler/breeze/tree/master/examples).
 
+## Storybook
+
+Place stories in `storybook/*.story.exs`, then launch the interactive browser
+from your project:
+
+```bash
+mix breeze.storybook
+```
+
+Use `--directory` to load another story directory or `--file` to open a single
+story. The task inherits the project's development reload, inspector, error,
+logger, and `:storybook_theme` configuration. Use `--theme`, `--[no-]reload`,
+or `--[no-]inspector` to override the corresponding settings.
+
 ## SSH
 
 Breeze applications can run over SSH. Each client receives an independent
