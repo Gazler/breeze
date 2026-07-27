@@ -33,12 +33,12 @@ defmodule Docs do
 
   def render(assigns) do
     ~H"""
-    <box style="grid grid-cols-2 height-screen width-screen">
-      <box style="grid grid-cols-1 grid-rows-2 width-full height-full">
-        <.list id="docs" br-change="change" style="width-full height-full">
+    <box class="grid grid-cols-2 h-screen w-screen">
+      <box class="grid grid-cols-1 grid-rows-2 w-full h-full">
+        <.list id="docs" br-change="change" class="w-full h-full">
           <:item :for={doc <- @docs} value={inspect(doc)}>{inspect(doc)}</:item>
         </.list>
-        <.list id="functions" br-change="function" style="width-full height-full">
+        <.list id="functions" br-change="function" class="w-full h-full">
           <:item :for={function <- @functions || []} value={function}>{function}</:item>
         </.list>
       </box>
@@ -47,7 +47,7 @@ defmodule Docs do
         id="doc"
         content={@fun_doc}
         width={@doc_width}
-        style="border focus:border-3"
+        class="border focus:border-3"
       />
     </box>
     """

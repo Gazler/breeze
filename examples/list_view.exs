@@ -9,7 +9,7 @@ defmodule ListViewDemo do
   def render(assigns) do
     ~H"""
     <box>
-      <.list id="languages" br-change="change" style="focus:border-1 width-32">
+      <.list id="languages" br-change="change" class="focus:border-1 w-32">
         <:item value="elixir">Elixir</:item>
         <:item value="erlang">Erlang</:item>
         <:item value="rust">Rust</:item>
@@ -20,7 +20,7 @@ defmodule ListViewDemo do
         <:item value="gleam">Gleam</:item>
         <:item value="haskell">Haskell</:item>
       </.list>
-      <box :if={@selected} style="border width-24">Selected: {@selected}</box>
+      <box :if={@selected} class="border w-24">Selected: {@selected}</box>
     </box>
     """
   end

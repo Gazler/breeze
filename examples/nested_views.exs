@@ -13,8 +13,8 @@ defmodule CounterPanel do
 
   def render(assigns) do
     ~H"""
-    <box id="panel" focusable style="border-rounded width-24 height-6 focus:border-4">
-      <box style="bold">{@label}</box>
+    <box id="panel" focusable class="rounded w-24 h-6 focus:border-4">
+      <box class="font-bold">{@label}</box>
       <box>Count: {@count}</box>
       <box>Up/down changes this panel.</box>
     </box>
@@ -42,15 +42,15 @@ defmodule NestedViewsExample do
 
   def render(assigns) do
     ~H"""
-    <box style="width-screen height-screen">
-      <box style="bold">Nested views example</box>
+    <box class="w-screen h-screen">
+      <box class="font-bold">Nested views example</box>
       <box>Tab moves focus between child views.</box>
       <box>Arrow up/down updates the focused child view.</box>
       <box>Press "t" to toggle the right view. Press "q" to quit.</box>
-      <box style="inline">
+      <box class="inline">
         <live id="left" view={CounterPanel} start_opts={[label: "Left panel", initial: 0]}>
         </live>
-        <box style="width-2">
+        <box class="w-2">
         </box>
         <live
           :if={@show_right}

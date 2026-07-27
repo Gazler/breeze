@@ -43,46 +43,46 @@ defmodule FormsDemo do
               label: label,
               width: width,
               value: value,
-              row_style: row_style(id)
+              row_class: row_class(id)
             }
           end),
         message_height: message_height(assigns.message)
       )
 
     ~H"""
-    <box style="width-screen height-screen">
-      <box style="bold">Forms Demo</box>
-      <box style="text-24">Focused example for horizontal input overflow.</box>
-      <box style="text-24">Tab between fields. The website field is fixed to 24 cells.</box>
-      <box style="text-24">The message field uses the new textarea block.</box>
-      <box style="height-1">
+    <box class="w-screen h-screen">
+      <box class="font-bold">Forms Demo</box>
+      <box class="text-24">Focused example for horizontal input overflow.</box>
+      <box class="text-24">Tab between fields. The website field is fixed to 24 cells.</box>
+      <box class="text-24">The message field uses the new textarea block.</box>
+      <box class="h-1">
       </box>
-      <box style="border-rounded width-72">
-        <box style="bold">Example Form</box>
-        <box style="height-1">
+      <box class="rounded w-72">
+        <box class="font-bold">Example Form</box>
+        <box class="h-1">
         </box>
-        <box :for={field <- @fields} style={field.row_style}>
-          <box style="text-4 bold">{field.label}</box>
+        <box :for={field <- @fields} class={field.row_class}>
+          <box class="text-4 font-bold">{field.label}</box>
           <.input
             id={field.id}
             input-value={field.value}
             br-change={"#{field.id}_changed"}
-            style={"width-#{field.width} focus:inverse"}
+            class={"w-#{field.width} focus:inverse"}
           >
             {field.value}
           </.input>
-          <box style="text-24">width={field.width} value={field.value}</box>
+          <box class="text-24">width={field.width} value={field.value}</box>
         </box>
-        <box style="height-8">
-          <box style="text-4 bold">Message</box>
+        <box class="h-8">
+          <box class="text-4 font-bold">Message</box>
           <.textarea
             id="message"
             textarea-value={@message}
             textarea-placeholder="Add some context"
             br-change="message_changed"
-            style={"width-#{@field_width} height-#{@message_height} focus:inverse"}
+            class={"w-#{@field_width} h-#{@message_height} focus:inverse"}
           />
-          <box style="text-24">height={@message_height} value={inspect(@message)}</box>
+          <box class="text-24">height={@message_height} value={inspect(@message)}</box>
         </box>
       </box>
     </box>
@@ -116,8 +116,8 @@ defmodule FormsDemo do
   defp field_width("website", _default_width), do: 24
   defp field_width(_id, default_width), do: default_width
 
-  defp row_style("path"), do: "height-4"
-  defp row_style(_id), do: "height-5"
+  defp row_class("path"), do: "h-4"
+  defp row_class(_id), do: "h-5"
 
   defp message_height(value) do
     value

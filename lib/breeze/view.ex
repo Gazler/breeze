@@ -55,7 +55,7 @@ defmodule Breeze.View do
   * `default-focus` - marks the preferred focus target when a view or focus scope becomes active
   * `focus-scope` - defines a focus region. Set `focus-scope="trap"` to keep tab traversal inside it
   * `class` - token-based styling for the box. This is covered in the [Style](`m:Breeze.View#module-style`) section.
-  * `style` - inline style maps or `%BackBreeze.Style{}` values for the box. Passing a binary remains backwards compatible.
+  * `style` - inline style maps or `%BackBreeze.Style{}` values for the box
   * `implicit` - this is a module that will be used for implicit state. This is covered
    in the [Implicits](`m:Breeze.View#module-implicits`) section.
 
@@ -150,15 +150,14 @@ defmodule Breeze.View do
 
   Breeze supports two styling inputs:
 
-  * `class` - string tokens such as `border`, `width-15`, `text-3`
+  * `class` - string tokens such as `border`, `w-15`, `text-3`
   * `style` - a `%BackBreeze.Style{}` struct or a map for inline values
 
-  Passing a binary to `style` remains supported for backwards compatibility.
-
-  A box can be styled similar to CSS using the class attribute:
+  A box can be styled with Tailwind-compatible utility names using the class
+  attribute. Numeric sizing and spacing values are literal terminal cells:
 
   ```heex
-  <box class="bold text-3 border width-15">Hello World</box>
+  <box class="font-bold text-3 border w-15">Hello World</box>
   ```
 
   Inline maps can be used when you want direct `BackBreeze` values:
@@ -167,38 +166,34 @@ defmodule Breeze.View do
   <box style={%{border: :rounded, border_color: 3, width: 15}}>Hello World</box>
   ```
 
-  The following styles are supported:
+  The following utility groups are supported:
 
-   * `border` - add a line border to the box
-   * `border-square` - add a square block border to the box
-   * `bold` - make the text bold
-   * `italic` - make the text italic
-   * `inverse` - reverse the foreground-background
-   * `reverse` - reverse the foreground-background
-   * `block` - display the element as a block
-   * `inline` - display the elements inline (join horizontally)
-   * `hidden` - collapse the element and hide its contents
-   * `grid` - lay out child elements in a grid
-   * `grid-cols-n` - set the number of grid columns
-   * `grid-rows-n` - set the number of grid rows
-   * `gap-x-n` - set the horizontal gap between grid cells
-   * `gap-y-n` - set the vertical gap between grid cells
-   * `width-x` - set the width of the element
-   * `height-x` - set the height of the element
-   * `overflow-hidden` - clip child content to the viewport
-   * `offset-top-x` - vertically scroll content by x rows
-   * `offset-left-x` - horizontally scroll content by x columns
-   * `absolute` - position the elements absolute relative to the parent
+   * sizing - `w-n`, `h-n`, `max-h-n`, and `size-n`; `w-*` and `h-*` also
+     accept `auto`, `full`, and `screen`, while `size-*` accepts `auto` and
+     `full`
+   * padding - `p-n`, `px-n`, `py-n`, `pt-n`, `pr-n`, `pb-n`, and `pl-n`
+   * typography - `font-bold`, `font-normal`, `italic`, `not-italic`, and
+     `text-left|center|right`
+   * layout - `block`, `inline`, `hidden`, `grid`, `grid-cols-n`,
+     `grid-rows-n`, `gap-n`, `gap-x-n`, and `gap-y-n`
+   * positioning - `absolute`, `fixed`, `inset-n`, `inset-x-n`, `inset-y-n`,
+     `top-n`, `right-n`, `bottom-n`, `left-n`, and `z-n`
+   * borders - `border`, `border-t`, `border-r`, `border-b`, `border-l`, and
+     `rounded`, plus terminal-specific
+     `border-square`, `border-none`, and `border-invisible`
+   * overflow - `overflow-auto`, `overflow-hidden`, and `overflow-scroll`
+
+  Breeze also provides terminal-specific utilities for colors, scrollbars,
+  content repetition, scroll offsets, and foreground/background inversion.
 
   ### Grid layout
 
   Grid children flow from left to right and then onto the next row. Use
   `grid-cols-n` and, when a fixed row count is useful, `grid-rows-n` to define
-  the tracks. `gap-x-n` and `gap-y-n` add horizontal and vertical spacing in
-  terminal cells.
+  the tracks. `gap-n`, `gap-x-n`, and `gap-y-n` add spacing in terminal cells.
 
   ```heex
-  <box class="grid grid-cols-2 grid-rows-2 gap-x-1 gap-y-1 width-full">
+  <box class="grid grid-cols-2 grid-rows-2 gap-x-1 gap-y-1 w-full">
     <box>One</box>
     <box>Two</box>
     <box>Three</box>

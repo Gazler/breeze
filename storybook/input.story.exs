@@ -21,22 +21,22 @@ defmodule Breeze.Storybook.Stories.Blocks.InputStory do
 
   def render(assigns) do
     ~H"""
-    <box class="width-full bg-panel">
+    <box class="w-full bg-panel">
       <box class="text-muted">Focused</box>
       <.input
         id="storybook-input-active"
         input-value={@email}
         br-change="storybook_input_active_changed"
-        class="width-32"
+        class="w-32"
       />
-      <box class="padding-top-1">
+      <box class="pt-1">
         <box class="text-muted">Placeholder</box>
         <.input
           id="storybook-input-placeholder"
           input-value={@placeholder_email}
           input-placeholder="Email address"
           br-change="storybook_input_placeholder_changed"
-          class="width-32"
+          class="w-32"
         />
       </box>
     </box>

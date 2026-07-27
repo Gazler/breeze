@@ -14,11 +14,11 @@ defmodule Demo do
 
   def render(assigns) do
     ~H"""
-    <box style="grid grid-cols-1 grid-rows-2 width-screen height-screen">
+    <box class="grid grid-cols-1 grid-rows-2 w-screen h-screen">
       <box>
-        <box style="text-5 bold">Counter: {@counter}</box>
+        <box class="text-5 font-bold">Counter: {@counter}</box>
       </box>
-      <box style="height-1 bg-panel overflow-hidden">
+      <box class="h-1 bg-panel overflow-hidden">
         <.keybinding_bar keybindings={@breeze.keybindings}/>
       </box>
     </box>

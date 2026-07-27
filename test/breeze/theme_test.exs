@@ -348,6 +348,18 @@ defmodule Breeze.ThemeTest do
     assert_raise ArgumentError, fn -> String.to_existing_atom(unknown_key) end
   end
 
+  test "resolves renderable class colors and ignores unmatched values" do
+    theme = Theme.new(extras: %{brand: "#9B8AFB"})
+
+    assert Theme.resolve_class_color(theme, "brand") == {155, 138, 251}
+    assert Theme.resolve_class_color(theme, "255") == 255
+
+    assert Theme.resolve_class_color(theme, "lol") == nil
+    assert Theme.resolve_class_color(theme, "256") == nil
+    assert Theme.resolve_class_color(theme, "#abc") == nil
+    assert Theme.resolve_class_color(theme, "#xyz") == nil
+  end
+
   test "nebula uses a quieter default border than its focus color" do
     theme = Theme.builtin(:nebula)
 

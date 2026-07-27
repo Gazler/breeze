@@ -17,7 +17,7 @@ defmodule Breeze.Storybook.Stories.Blocks.ScrollStory do
     assigns = %{lines: Enum.map(1..12, &"Log line #{&1}")}
 
     ~H"""
-    <.scroll id="storybook-scroll" class="width-40 height-7 bg-panel focus:scrollbar-primary">
+    <.scroll id="storybook-scroll" class="w-40 h-7 bg-panel focus:scrollbar-primary">
       <box :for={line <- @lines}>{line}</box>
     </.scroll>
     """

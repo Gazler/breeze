@@ -41,15 +41,15 @@ defmodule SSHCounter do
 
   def render(assigns) do
     ~H"""
-    <box style="grid grid-cols-1 grid-rows-2 width-screen height-screen">
+    <box class="grid grid-cols-1 grid-rows-2 w-screen h-screen">
       <box>
-        <box style="flex_direction-column p-1">
-          <box style="bold">Breeze over SSH</box>
+        <box class="p-1">
+          <box class="font-bold">Breeze over SSH</box>
           <box>User: {@username}</box>
           <box>Counter: {@counter}</box>
         </box>
       </box>
-      <box style="height-1 bg-panel overflow-hidden">
+      <box class="h-1 bg-panel overflow-hidden">
         <.keybinding_bar keybindings={@breeze.keybindings}/>
       </box>
     </box>

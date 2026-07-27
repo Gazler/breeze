@@ -30,42 +30,42 @@ defmodule MouseExample do
       )
 
     ~H"""
-    <box style="width-screen height-screen padding-left-1 padding-top-1">
-      <box style="bold">Mouse example</box>
+    <box class="w-screen h-screen pl-1 pt-1">
+      <box class="font-bold">Mouse example</box>
       <box>Left click either panel to focus it. Scroll over a panel to inspect wheel events.</box>
       <box>Press c to clear, q to quit.</box>
       <box>Last mouse event: {@last_mouse}</box>
       <box>Clicks: {@clicks}  Wheel up: {@wheel_up}  Wheel down: {@wheel_down}</box>
       <box>
       </box>
-      <box style="inline">
-        <box id="left-panel" focusable style="border-rounded width-24 height-6 focus:border-4">
-          <box style="bold">Left panel</box>
+      <box class="inline">
+        <box id="left-panel" focusable class="rounded w-24 h-6 focus:border-4">
+          <box class="font-bold">Left panel</box>
           <box>Expected target: left-panel</box>
           <box>Wheel here</box>
         </box>
         <box>
         </box>
-        <box id="right-panel" focusable style="border-rounded width-24 height-6 focus:border-4">
-          <box style="bold">Right panel</box>
+        <box id="right-panel" focusable class="rounded w-24 h-6 focus:border-4">
+          <box class="font-bold">Right panel</box>
           <box>Expected target: right-panel</box>
           <box>Wheel here</box>
         </box>
       </box>
       <box>
       </box>
-      <box style="bold">Recent events</box>
-      <box style="text-muted">
+      <box class="font-bold">Recent events</box>
+      <box class="text-muted">
         #    dt   button/action       x,y      row,col  target       repeat  modifiers
       </box>
-      <box :for={event <- @events} style="inline width-full overflow-hidden">
-        <box style="width-5">{event.seq}</box>
-        <box style="width-5">{event.dt}</box>
-        <box style="width-20">{event.button_action}</box>
-        <box style="width-9">{event.xy}</box>
-        <box style="width-9">{event.row_col}</box>
-        <box style="width-13">{event.target}</box>
-        <box style="width-8">{event.repeat}</box>
+      <box :for={event <- @events} class="inline w-full overflow-hidden">
+        <box class="w-5">{event.seq}</box>
+        <box class="w-5">{event.dt}</box>
+        <box class="w-20">{event.button_action}</box>
+        <box class="w-9">{event.xy}</box>
+        <box class="w-9">{event.row_col}</box>
+        <box class="w-13">{event.target}</box>
+        <box class="w-8">{event.repeat}</box>
         <box>{event.modifiers}</box>
       </box>
     </box>

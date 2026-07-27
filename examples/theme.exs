@@ -9,29 +9,29 @@ defmodule ThemeDemo do
 
   def render(assigns) do
     ~H"""
-    <box class="width-screen height-screen bg text">
+    <box class="w-screen h-screen bg text">
       <.panel id="theme-demo" width={85} height={20} class="border bg-panel">
         <:title>
           Theme Demo ({@breeze.theme.name}/{@breeze.theme.actual_mode} - {@breeze.theme.status})
         </:title>
-        <box class="text-primary bold width-full">Semantic theme tokens</box>
-        <box class="text-muted width-full">
+        <box class="text-primary font-bold w-full">Semantic theme tokens</box>
+        <box class="text-muted w-full">
           1 system16  2 system  3 nebula  4 catppuccin  5 dracula  6 commander  7 gruvbox  8 nord  9 solarized-light  0 solarized-dark
         </box>
-        <box class="text-muted width-full">
+        <box class="text-muted w-full">
           Semantic `class` tokens and inline `style` maps work together.
         </box>
-        <box class="height-1">
+        <box class="h-1">
         </box>
         <box class="inline">
-          <box class="width-12 text-primary">Primary</box>
-          <box class="width-12 text-secondary">Secondary</box>
-          <box class="width-12 text-success">Success</box>
-          <box class="width-12 text-warning">Warning</box>
-          <box class="width-12 text-error">Error</box>
-          <box class="width-12 text-accent">Accent</box>
+          <box class="w-12 text-primary">Primary</box>
+          <box class="w-12 text-secondary">Secondary</box>
+          <box class="w-12 text-success">Success</box>
+          <box class="w-12 text-warning">Warning</box>
+          <box class="w-12 text-error">Error</box>
+          <box class="w-12 text-accent">Accent</box>
         </box>
-        <box class="height-1">
+        <box class="h-1">
         </box>
         <box class="inline">
           <box
@@ -39,14 +39,14 @@ defmodule ThemeDemo do
           >
             Text
           </box>
-          <box class="width-1">
+          <box class="w-1">
           </box>
           <box
             style={%{width: 12, height: 3, background_color: :background, foreground_color: :muted, border: :line}}
           >
             Muted
           </box>
-          <box class="width-1">
+          <box class="w-1">
           </box>
           <box
             style={%{
@@ -60,14 +60,14 @@ defmodule ThemeDemo do
           >
             Border
           </box>
-          <box class="width-1">
+          <box class="w-1">
           </box>
           <box
             style={%{width: 12, height: 3, background_color: :background, foreground_color: :text, border: :line}}
           >
             Background
           </box>
-          <box class="width-1">
+          <box class="w-1">
           </box>
           <box
             style={%{width: 12, height: 3, background_color: :surface, foreground_color: :text, border: :line}}
@@ -75,28 +75,28 @@ defmodule ThemeDemo do
             Surface
           </box>
         </box>
-        <box class="height-1">
+        <box class="h-1">
         </box>
         <box class="inline">
-          <box class="width-14 height-3 border text-fg bg-surface">text-fg</box>
-          <box class="width-2">
+          <box class="w-14 h-3 border text-fg bg-surface">text-fg</box>
+          <box class="w-2">
           </box>
-          <box class="width-14 height-3 border text-bg bg-primary">text-bg</box>
-          <box class="width-2">
+          <box class="w-14 h-3 border text-bg bg-primary">text-bg</box>
+          <box class="w-2">
           </box>
           <box
             style={%{width: 14, height: 3, background_color: :surface, foreground_color: :text, border: :line}}
           >
             surface
           </box>
-          <box class="width-2">
+          <box class="w-2">
           </box>
           <box
             style={%{width: 14, height: 3, background_color: :panel, foreground_color: :text, border: :line}}
           >
             panel
           </box>
-          <box class="width-2">
+          <box class="w-2">
           </box>
           <box
             style={%{
@@ -110,7 +110,7 @@ defmodule ThemeDemo do
             inline style map
           </box>
         </box>
-        <box class="height-1">
+        <box class="h-1">
         </box>
       </.panel>
     </box>

@@ -65,30 +65,30 @@ defmodule FlashExample do
       )
 
     ~H"""
-    <box class="grid grid-cols-1 grid-rows-2 width-screen height-screen bg">
-      <box class="width-full height-full padding-left-2 padding-top-1">
-        <box class="bold">Flash Messages</box>
+    <box class="grid grid-cols-1 grid-rows-2 w-screen h-screen bg">
+      <box class="w-full h-full pl-2 pt-1">
+        <box class="font-bold">Flash Messages</box>
         <box class="text-muted">Enter adds the focused message. 1-4 add directly.</box>
         <box class="text-muted">c clears all, x clears latest, e clears errors.</box>
         <box class="text-muted">p moves the stack, v changes variant.</box>
         <box class="text-muted">F3 cycles theme. Max three show; queued messages wait.</box>
         <box>
         </box>
-        <box class="grid grid-cols-4 gap-x-1 width-72">
+        <box class="grid grid-cols-4 gap-x-1 w-72">
           <box
             :for={{id, label, key} <- @actions}
             id={id}
             focusable
-            class="border-rounded width-17 height-4 focus:border-primary"
+            class="rounded w-17 h-4 focus:border-primary"
           >
-            <box class="bold text-center">{label}</box>
+            <box class="font-bold text-center">{label}</box>
             <box class="text-center text-muted">{key}</box>
           </box>
         </box>
         <box>
         </box>
-        <box class="border-rounded width-50 height-10">
-          <box class="bold">State</box>
+        <box class="rounded w-50 h-10">
+          <box class="font-bold">State</box>
           <box>Visible: {@flash_count}</box>
           <box>Queued: {@queued_count}</box>
           <box>Latest id: {inspect(@last_id)}</box>
@@ -104,10 +104,10 @@ defmodule FlashExample do
           offset={1}
         />
       </box>
-      <box class="height-1 width-full bg-panel overflow-hidden">
+      <box class="h-1 w-full bg-panel overflow-hidden">
         <.keybinding_bar
           keybindings={@breeze.keybindings}
-          class="inline width-full overflow-hidden padding-left-1"
+          class="inline w-full overflow-hidden pl-1"
         />
       </box>
     </box>

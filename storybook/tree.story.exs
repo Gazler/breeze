@@ -58,7 +58,7 @@ defmodule Breeze.Storybook.Stories.Blocks.TreeStory do
       selected={@selected}
       expanded={@expanded}
       br-change="storybook_tree_changed"
-      class="width-42 height-full bg-panel"
+      class="w-42 h-full bg-panel"
     />
     """
   end

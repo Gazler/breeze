@@ -38,7 +38,7 @@ defmodule Breeze.Storybook.Stories.Blocks.MarkdownStory do
       id="storybook-markdown"
       content={@content}
       width={44}
-      class="width-46 height-full bg-panel focus:scrollbar-primary"
+      class="w-46 h-full bg-panel focus:scrollbar-primary"
     />
     """
   end

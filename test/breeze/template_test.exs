@@ -330,6 +330,14 @@ defmodule Breeze.TemplateTest do
       end
     end
 
+    test "color names are left for the active theme to resolve" do
+      assert %Breeze.Template{} =
+               Breeze.Template.compile!(~s(<box class="text-lol"></box>), __ENV__)
+
+      assert %Breeze.Template{} =
+               Breeze.Template.compile!(~s(<box class={"text-lol"}></box>), __ENV__)
+    end
+
     test ":if requires an expression" do
       assert_raise RuntimeError, ~r/the :if directive requires an expression/, fn ->
         Breeze.Template.compile!("<box :if=\"true\"></box>", __ENV__)

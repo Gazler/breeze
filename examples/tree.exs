@@ -26,7 +26,7 @@ defmodule TreeExample do
 
   def render(assigns) do
     ~H"""
-    <box class="width-screen height-screen bg-panel">
+    <box class="w-screen h-screen bg-panel">
       <.tree
         id="repo-tree"
         nodes={@nodes}
@@ -34,7 +34,7 @@ defmodule TreeExample do
         expanded={@expanded}
         virtual
         br-change="select"
-        class="width-full height-full"
+        class="w-full h-full"
       >
         <:item :let={row}>{icon_label(row.node.icon, row.node.icon_color, row.label)}</:item>
       </.tree>

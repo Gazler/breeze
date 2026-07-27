@@ -31,27 +31,25 @@ defmodule ExCodexEx do
       )
 
     ~H"""
-    <box class="width-screen height-screen bg overflow-hidden">
+    <box class="w-screen h-screen bg overflow-hidden">
       <.scroll
         id="scrollback"
         scroll-autoscroll="bottom"
-        class={"width-full height-#{@scrollback_height} overflow-scroll bg padding-left-2 padding-right-2 padding-top-1 padding-bottom-1"}
+        class={"w-full h-#{@scrollback_height} overflow-scroll bg pl-2 pr-2 pt-1 pb-1"}
       >
-        <box :for={entry <- @transcript_entries} class="width-full padding-bottom-1">
+        <box :for={entry <- @transcript_entries} class="w-full pb-1">
           <.textarea
             :if={entry.role == :user}
             id={entry.id}
             textarea-value={entry.text}
             textarea-prefix="› "
             disabled
-            class={"width-full height-#{entry.height} bg-surface border-none padding-left-0 padding-top-0 padding-bottom-0"}
+            class={"w-full h-#{entry.height} bg-surface border-none pl-0 pt-0 pb-0"}
           />
           <box :if={entry.role != :user} class={entry.class}>{entry.text}</box>
         </box>
       </.scroll>
-      <box
-        class={"fixed left-0 bottom-0 width-screen height-#{@prompt_height} bg-panel padding-left-2 padding-right-2 padding-top-1"}
-      >
+      <box class={"fixed left-0 bottom-0 w-screen h-#{@prompt_height} bg-panel pl-2 pr-2 pt-1"}>
         <.textarea
           id="composer"
           textarea-value={@prompt}
@@ -60,7 +58,7 @@ defmodule ExCodexEx do
           textarea-submit-on-enter
           br-change="prompt_changed"
           br-submit="prompt_submitted"
-          class={"width-full height-#{@composer_height} bg-panel border-none padding-left-0 padding-top-0 padding-bottom-0"}
+          class={"w-full h-#{@composer_height} bg-panel border-none pl-0 pt-0 pb-0"}
         />
       </box>
     </box>

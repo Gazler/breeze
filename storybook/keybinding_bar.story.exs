@@ -26,9 +26,9 @@ defmodule Breeze.Storybook.Stories.Blocks.KeybindingBarStory do
     }
 
     ~H"""
-    <box class="width-full bg-panel">
+    <box class="w-full bg-panel">
       <box class="text-muted">Active keybindings</box>
-      <box class="height-1 bg-surface overflow-hidden">
+      <box class="h-1 bg-surface overflow-hidden">
         <.keybinding_bar keybindings={@keybindings}/>
       </box>
     </box>

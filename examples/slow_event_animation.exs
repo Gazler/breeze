@@ -7,21 +7,21 @@ defmodule SlowEventAnimationDemo do
 
   def render(assigns) do
     ~H"""
-    <box style="width-screen height-screen">
-      <box style="bold">Async Server Demo</box>
+    <box class="w-screen h-screen">
+      <box class="font-bold">Async Server Demo</box>
       <box>
         This view blocks in handle_event/3 for three seconds, while the spinner implicit keeps animating.
       </box>
-      <box style="height-1">
+      <box class="h-1">
       </box>
       <box>Press r to start blocking work.</box>
       <box>Press q to quit.</box>
-      <box style="height-1">
+      <box class="h-1">
       </box>
-      <box style="inline">
-        <box id="spinner" implicit={Breeze.Implicit.AsyncSpinner} style="width-1">
+      <box class="inline">
+        <box id="spinner" implicit={Breeze.Implicit.AsyncSpinner} class="w-1">
         </box>
-        <box style="width-2">
+        <box class="w-2">
         </box>
         <box>Animation stays live during blocking work.</box>
       </box>

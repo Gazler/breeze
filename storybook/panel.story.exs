@@ -17,11 +17,11 @@ defmodule Breeze.Storybook.Stories.Blocks.PanelStory do
     assigns = %{}
 
     ~H"""
-    <.panel id="storybook-panel" class="width-42 height-8">
+    <.panel id="storybook-panel" class="w-42 h-8">
       <:title>Details</:title>
       <box>Status: Draft</box>
       <box>Owner: Storybook</box>
-      <box class="text-muted width-full">Panels compose cleanly with scrolls, lists, and forms.</box>
+      <box class="text-muted w-full">Panels compose cleanly with scrolls, lists, and forms.</box>
     </.panel>
     """
   end

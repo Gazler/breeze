@@ -60,7 +60,7 @@ defmodule Breeze.Style do
       |> Enum.map(&String.split(&1, ":"))
       |> Enum.sort_by(&length/1)
       |> Enum.reduce({%BackBreeze.Style{}, %{}}, fn style, acc ->
-        style = resolve_style_token(style, [])
+        style = style |> resolve_style_token([]) |> normalize_utility_alias()
         apply_style(style, acc, theme)
       end)
 
@@ -87,7 +87,7 @@ defmodule Breeze.Style do
       |> Enum.map(&String.split(&1, ":"))
       |> Enum.sort_by(&length/1)
       |> Enum.reduce({%BackBreeze.Style{}, %{}}, fn style, acc ->
-        style = resolve_style_token(style, opts)
+        style = style |> resolve_style_token(opts) |> normalize_utility_alias()
 
         apply_style(style, acc, theme)
       end)
@@ -198,6 +198,22 @@ defmodule Breeze.Style do
     {style, Map.put(attrs, :display, %{display | gap_y: String.to_integer(num)})}
   end
 
+  defp apply_style("gap-" <> value, {style, attrs} = acc, _theme) do
+    case non_negative_integer(value) do
+      {:ok, gap} ->
+        display =
+          case Map.get(attrs, :display) do
+            %BackBreeze.Grid{} = grid -> grid
+            _ -> %BackBreeze.Grid{}
+          end
+
+        {style, Map.put(attrs, :display, %{display | gap_x: gap, gap_y: gap})}
+
+      :error ->
+        acc
+    end
+  end
+
   defp apply_style("layer-" <> num, {style, attrs}, _theme) do
     {style, Map.put(attrs, :layer, String.to_integer(num))}
   end
@@ -299,8 +315,43 @@ defmodule Breeze.Style do
   defp apply_style("height-full", {style, attrs}, _theme),
     do: {BackBreeze.Style.height(style, :full), attrs}
 
+  defp apply_style("max-height-" <> num, {style, attrs}, _theme),
+    do: {BackBreeze.Style.max_height(style, String.to_integer(num)), attrs}
+
   defp apply_style("height-" <> num, {style, attrs}, _theme),
     do: {BackBreeze.Style.height(style, String.to_integer(num)), attrs}
+
+  defp apply_style("size-auto", {style, attrs}, _theme),
+    do: {style |> BackBreeze.Style.width(:auto) |> BackBreeze.Style.height(:auto), attrs}
+
+  defp apply_style("size-full", {style, attrs}, _theme),
+    do: {style |> BackBreeze.Style.width(:full) |> BackBreeze.Style.height(:full), attrs}
+
+  defp apply_style("size-" <> value, {style, attrs} = acc, _theme) do
+    case non_negative_integer(value) do
+      {:ok, size} ->
+        {style |> BackBreeze.Style.width(size) |> BackBreeze.Style.height(size), attrs}
+
+      :error ->
+        acc
+    end
+  end
+
+  defp apply_style("padding-x-" <> num, {style, attrs}, _theme) do
+    padding = String.to_integer(num)
+
+    {style
+     |> BackBreeze.Style.padding_left(padding)
+     |> BackBreeze.Style.padding_right(padding), attrs}
+  end
+
+  defp apply_style("padding-y-" <> num, {style, attrs}, _theme) do
+    padding = String.to_integer(num)
+
+    {style
+     |> BackBreeze.Style.padding_top(padding)
+     |> BackBreeze.Style.padding_bottom(padding), attrs}
+  end
 
   defp apply_style("padding-top-" <> num, {style, attrs}, _theme),
     do: {BackBreeze.Style.padding_top(style, String.to_integer(num)), attrs}
@@ -317,6 +368,12 @@ defmodule Breeze.Style do
   defp apply_style("padding-" <> num, {style, attrs}, _theme),
     do: {BackBreeze.Style.padding(style, String.to_integer(num)), attrs}
 
+  defp apply_style("font-normal", {style, attrs}, _theme),
+    do: {%{style | bold: false}, attrs}
+
+  defp apply_style("not-italic", {style, attrs}, _theme),
+    do: {%{style | italic: false}, attrs}
+
   defp apply_style("text-left", {style, attrs}, _theme),
     do: {BackBreeze.Style.text_align(style, :left), attrs}
 
@@ -326,8 +383,7 @@ defmodule Breeze.Style do
   defp apply_style("text-right", {style, attrs}, _theme),
     do: {BackBreeze.Style.text_align(style, :right), attrs}
 
-  defp apply_style("text", {style, attrs}, theme),
-    do: {BackBreeze.Style.foreground_color(style, Theme.resolve_color(theme, :text)), attrs}
+  defp apply_style("text", acc, theme), do: apply_foreground_color(:text, acc, theme)
 
   defp apply_style("text-mute-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :text_mute, normalize_percent(value))}
@@ -341,17 +397,16 @@ defmodule Breeze.Style do
   defp apply_style("emphasize-text-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :text_emphasize, normalize_percent(value))}
 
-  defp apply_style("text-" <> color, {style, attrs}, theme),
-    do: {BackBreeze.Style.foreground_color(style, Theme.resolve_color(theme, color)), attrs}
+  defp apply_style("text-" <> color, acc, theme),
+    do: apply_foreground_color(color, acc, theme)
 
-  defp apply_style("placeholder-text", {style, attrs}, theme),
-    do: {BackBreeze.Style.foreground_color(style, Theme.resolve_color(theme, :text)), attrs}
+  defp apply_style("placeholder-text", acc, theme),
+    do: apply_foreground_color(:text, acc, theme)
 
-  defp apply_style("placeholder-text-" <> color, {style, attrs}, theme),
-    do: {BackBreeze.Style.foreground_color(style, Theme.resolve_color(theme, color)), attrs}
+  defp apply_style("placeholder-text-" <> color, acc, theme),
+    do: apply_foreground_color(color, acc, theme)
 
-  defp apply_style("bg", {style, attrs}, theme),
-    do: {BackBreeze.Style.background_color(style, Theme.resolve_color(theme, :background)), attrs}
+  defp apply_style("bg", acc, theme), do: apply_background_color(:background, acc, theme)
 
   defp apply_style("bg-mute-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :bg_mute, normalize_percent(value))}
@@ -365,8 +420,8 @@ defmodule Breeze.Style do
   defp apply_style("emphasize-bg-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :bg_emphasize, normalize_percent(value))}
 
-  defp apply_style("bg-" <> color, {style, attrs}, theme),
-    do: {BackBreeze.Style.background_color(style, Theme.resolve_color(theme, color)), attrs}
+  defp apply_style("bg-" <> color, acc, theme),
+    do: apply_background_color(color, acc, theme)
 
   defp apply_style("scrollbar-mute-" <> value, {style, attrs}, _theme),
     do: {style, Map.put(attrs, :scrollbar_mute, normalize_percent(value))}
@@ -416,10 +471,8 @@ defmodule Breeze.Style do
   defp apply_style("scrollbar-arrows", {style, attrs}, _theme),
     do: {BackBreeze.Style.scrollbar(style, %{arrows: true}), attrs}
 
-  defp apply_style("scrollbar-" <> color, {style, attrs}, theme),
-    do:
-      {put_scrollbar_color(style, Theme.resolve_color(theme, color)),
-       Map.put(attrs, :scrollbar_color_explicit, true)}
+  defp apply_style("scrollbar-" <> color, acc, theme),
+    do: apply_scrollbar_color(color, acc, theme)
 
   defp apply_style("border-none", {style, attrs}, _theme),
     do: {%{style | border: BackBreeze.Border.none()}, attrs}
@@ -433,10 +486,128 @@ defmodule Breeze.Style do
   defp apply_style("border-square", {style, attrs}, _theme),
     do: {%{style | border: square_border()}, attrs}
 
-  defp apply_style("border-" <> color, {style, attrs}, theme),
-    do: {BackBreeze.Style.border_color(style, Theme.resolve_color(theme, color)), attrs}
+  defp apply_style("border-t", {style, attrs}, _theme),
+    do: {BackBreeze.Style.border_top(style), attrs}
+
+  defp apply_style("border-r", {style, attrs}, _theme),
+    do: {BackBreeze.Style.border_right(style), attrs}
+
+  defp apply_style("border-b", {style, attrs}, _theme),
+    do: {BackBreeze.Style.border_bottom(style), attrs}
+
+  defp apply_style("border-l", {style, attrs}, _theme),
+    do: {BackBreeze.Style.border_left(style), attrs}
+
+  defp apply_style("border-" <> color, acc, theme),
+    do: apply_border_color(color, acc, theme)
 
   defp apply_style(_, acc, _theme), do: acc
+
+  defp apply_foreground_color(value, {style, attrs} = acc, theme) do
+    case Theme.resolve_class_color(theme, value) do
+      nil -> acc
+      color -> {BackBreeze.Style.foreground_color(style, color), attrs}
+    end
+  end
+
+  defp apply_background_color(value, {style, attrs} = acc, theme) do
+    case Theme.resolve_class_color(theme, value) do
+      nil -> acc
+      color -> {BackBreeze.Style.background_color(style, color), attrs}
+    end
+  end
+
+  defp apply_border_color(value, {style, attrs} = acc, theme) do
+    case Theme.resolve_class_color(theme, value) do
+      nil -> acc
+      color -> {BackBreeze.Style.border_color(style, color), attrs}
+    end
+  end
+
+  defp apply_scrollbar_color(value, {style, attrs} = acc, theme) do
+    case Theme.resolve_class_color(theme, value) do
+      nil ->
+        acc
+
+      color ->
+        {put_scrollbar_color(style, color), Map.put(attrs, :scrollbar_color_explicit, true)}
+    end
+  end
+
+  # Breeze originally shipped verbose sizing and spacing names. Keep those
+  # implementations as the canonical runtime path and translate the equivalent
+  # Tailwind utility vocabulary before applying a token.
+  defp normalize_utility_alias(nil), do: nil
+
+  defp normalize_utility_alias(token)
+       when is_binary(token) and byte_size(token) >= 3 and
+              binary_part(token, byte_size(token) - 3, 3) == "-px",
+       do: nil
+
+  defp normalize_utility_alias("font-bold"), do: "bold"
+  defp normalize_utility_alias("rounded"), do: "border-rounded"
+  defp normalize_utility_alias("rounded-none"), do: "border"
+  defp normalize_utility_alias("w-auto"), do: "width-auto"
+  defp normalize_utility_alias("w-full"), do: "width-full"
+  defp normalize_utility_alias("w-screen"), do: "width-screen"
+  defp normalize_utility_alias("h-auto"), do: "height-auto"
+  defp normalize_utility_alias("h-full"), do: "height-full"
+  defp normalize_utility_alias("h-screen"), do: "height-screen"
+
+  defp normalize_utility_alias("max-h-" <> value = token),
+    do: normalize_integer_alias(value, token, "max-height-")
+
+  defp normalize_utility_alias("w-" <> value = token),
+    do: normalize_integer_alias(value, token, "width-")
+
+  defp normalize_utility_alias("h-" <> value = token),
+    do: normalize_integer_alias(value, token, "height-")
+
+  defp normalize_utility_alias("size-" <> value = token),
+    do: normalize_integer_alias(value, token, "size-")
+
+  defp normalize_utility_alias("p-" <> value = token),
+    do: normalize_integer_alias(value, token, "padding-")
+
+  defp normalize_utility_alias("px-" <> value = token),
+    do: normalize_integer_alias(value, token, "padding-x-")
+
+  defp normalize_utility_alias("py-" <> value = token),
+    do: normalize_integer_alias(value, token, "padding-y-")
+
+  defp normalize_utility_alias("pt-" <> value = token),
+    do: normalize_integer_alias(value, token, "padding-top-")
+
+  defp normalize_utility_alias("pr-" <> value = token),
+    do: normalize_integer_alias(value, token, "padding-right-")
+
+  defp normalize_utility_alias("pb-" <> value = token),
+    do: normalize_integer_alias(value, token, "padding-bottom-")
+
+  defp normalize_utility_alias("pl-" <> value = token),
+    do: normalize_integer_alias(value, token, "padding-left-")
+
+  defp normalize_utility_alias("z-" <> value = token),
+    do: normalize_integer_alias(value, token, "layer-")
+
+  defp normalize_utility_alias("gap-" <> value = token),
+    do: normalize_integer_alias(value, token, "gap-")
+
+  defp normalize_utility_alias(token), do: token
+
+  defp normalize_integer_alias(value, original, replacement) do
+    case non_negative_integer(value) do
+      {:ok, _integer} -> replacement <> value
+      :error -> original
+    end
+  end
+
+  defp non_negative_integer(value) do
+    case Integer.parse(value) do
+      {integer, ""} when integer >= 0 -> {:ok, integer}
+      _ -> :error
+    end
+  end
 
   defp normalize_class_input(value) when is_list(value) do
     if Keyword.keyword?(value) do
@@ -568,6 +739,9 @@ defmodule Breeze.Style do
 
   defp merge_style_entry(:height, value, {style, attrs}, _theme),
     do: {%{style | height: value}, attrs}
+
+  defp merge_style_entry(:max_height, value, {style, attrs}, _theme),
+    do: {BackBreeze.Style.max_height(style, value), attrs}
 
   defp merge_style_entry(:overflow, value, {style, attrs}, _theme),
     do: {%{style | overflow: value}, attrs}

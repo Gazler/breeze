@@ -10,9 +10,9 @@ defmodule CrashView do
 
   def render(assigns) do
     ~H"""
-    <box style="width-screen height-screen">
-      <box id="crash" focusable style="border-rounded width-40 height-5 focus:border-4">
-        <box style="bold">Custom ErrorView Example</box>
+    <box class="w-screen h-screen">
+      <box id="crash" focusable class="rounded w-40 h-5 focus:border-4">
+        <box class="font-bold">Custom ErrorView Example</box>
         <box>Press c to crash</box>
       </box>
     </box>
@@ -32,15 +32,15 @@ defmodule ExampleErrorView do
 
   def render(assigns) do
     ~H"""
-    <box style="border-rounded width-screen height-screen">
-      <box style="bold text-1">Custom Error View</box>
+    <box class="rounded w-screen h-screen">
+      <box class="font-bold text-1">Custom Error View</box>
       <box>View: {inspect(@view)}</box>
       <box>Kind: {inspect(@kind)}</box>
       <box>Reason: {inspect(@reason)}</box>
       <box>Stacktrace frames: {length(@stacktrace)}</box>
-      <box style="height-1">
+      <box class="h-1">
       </box>
-      <box style="height-1 bg-panel overflow-hidden">
+      <box class="h-1 bg-panel overflow-hidden">
         <.keybinding_bar keybindings={@breeze.keybindings}/>
       </box>
     </box>
