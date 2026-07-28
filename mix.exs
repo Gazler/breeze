@@ -67,6 +67,8 @@ defmodule Breeze.MixProject do
         "doc_src/guides/simple_app.md",
         "doc_src/guides/debugging.md",
         "doc_src/guides/persistent_multi_instance.md",
+        "doc_src/guides/ssh.md",
+        "doc_src/guides/fly_io.md",
         "doc_src/generated/blocks.md"
       ],
       source_ref: "v#{@version}",
@@ -109,7 +111,9 @@ defmodule Breeze.MixProject do
           "README.md",
           "doc_src/guides/simple_app.md",
           "doc_src/guides/debugging.md",
-          "doc_src/guides/persistent_multi_instance.md"
+          "doc_src/guides/persistent_multi_instance.md",
+          "doc_src/guides/ssh.md",
+          "doc_src/guides/fly_io.md"
         ],
         Components: ["doc_src/generated/blocks.md"]
       ]

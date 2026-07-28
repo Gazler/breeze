@@ -144,6 +144,7 @@ defmodule DemoEntrypoint do
 
     Breeze.Server.start_link(
       view: Demo,
+      start_opts: [username: session.username],
       terminal_opts: Termite.SSH.Session.terminal_opts(session),
       halt_fun: fn -> :ok end
     )
@@ -154,6 +155,7 @@ end
   port: 2222,
   auth: [{"alice", "secret"}],
   allow_insecure_auth: true,
+  system_dir: "priv/ssh",
   entrypoint: {DemoEntrypoint, []}
 )
 ```
@@ -167,17 +169,21 @@ ssh -p 2222 alice@localhost
 Run the included SSH counter example with:
 
 ```bash
-mix run examples/ssh_counter.exs
+elixir examples/ssh/ssh_counter.exs
 ```
 
 For a more complete demonstration based on the posting example, run:
 
 ```bash
-mix run examples/ssh_posting.exs
+elixir examples/ssh/ssh_posting.exs
 ```
 
 The authenticated username is injected into `mount/2` via `start_opts` as
 `opts[:username]`.
+
+For a supervised local listener, see
+[Serve a Breeze App over SSH](doc_src/guides/ssh.md). When it is ready to share,
+[deploy the SSH application to Fly.io](doc_src/guides/fly_io.md).
 
 ## Testing
 

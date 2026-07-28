@@ -132,6 +132,14 @@ MIX_ENV=test mix ecto.create
 MIX_ENV=test mix ecto.migrate
 ```
 
+SQLite also creates `-shm` and `-wal` journal files while the app is running.
+Keep the local databases and their journal files out of version control:
+
+```gitignore
+# .gitignore
+/task_pad_*.db*
+```
+
 ## Supervise Shared Services
 
 Start the repo and PubSub before the Breeze server:
@@ -384,7 +392,16 @@ end
 ```
 
 The final render function reads `@tasks` and `@visible_tasks`; it no longer
-derives domain state from a map owned by the view.
+derives domain state from a map owned by the view. Render `@status` beneath the
+input so validation and peer-connection results are visible without changing
+the list layout:
+
+```heex
+<.input ...>
+  {@new_task}
+</.input>
+<box class="h-1 text-accent">{@status || ""}</box>
+```
 
 ## Discover a Local Peer
 
@@ -485,6 +502,26 @@ to be common to two local processes.
 
 Use a shared SQL sandbox owner so both child view processes can access the test
 connection:
+
+The view test from the local app guide now queries the repo too. Make it
+synchronous and add the same sandbox setup before its existing test:
+
+```elixir
+defmodule TaskPad.ViewTest do
+  use ExUnit.Case, async: false
+
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TaskPad.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(TaskPad.Repo, {:shared, self()})
+    TaskPad.Repo.delete_all(TaskPad.Tasks.Task)
+    :ok
+  end
+
+  # Keep the existing view test here.
+end
+```
+
+Then add a second test module for synchronization:
 
 ```elixir
 defmodule TaskPad.SyncTest do
