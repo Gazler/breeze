@@ -38,12 +38,19 @@ defmodule Mix.Tasks.Breeze.Inspector do
   def run_opts do
     [
       view: Breeze.RemoteInspector.View,
-      reload: true,
+      reload: watcher_available?(),
       theme: :system,
       mouse: true,
       global_keybindings: Breeze.RemoteInspector.View.global_keybindings(),
       inspector: true
     ]
+  end
+
+  @doc false
+  def watcher_available?(watcher_module \\ FileSystem) do
+    Code.ensure_loaded?(watcher_module) and
+      function_exported?(watcher_module, :start_link, 1) and
+      function_exported?(watcher_module, :subscribe, 1)
   end
 
   @doc false

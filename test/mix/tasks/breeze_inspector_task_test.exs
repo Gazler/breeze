@@ -1,15 +1,21 @@
 defmodule Mix.Tasks.BreezeInspectorTaskTest do
   use ExUnit.Case, async: true
 
-  test "run opts enable reload and remote inspector self-inspection" do
+  test "run opts use available reload support and enable remote inspector self-inspection" do
+    reload? = Mix.Tasks.Breeze.Inspector.watcher_available?()
+
     assert Mix.Tasks.Breeze.Inspector.run_opts() == [
              view: Breeze.RemoteInspector.View,
-             reload: true,
+             reload: reload?,
              theme: :system,
              mouse: true,
              global_keybindings: Breeze.RemoteInspector.View.global_keybindings(),
              inspector: true
            ]
+  end
+
+  test "reload requires the file watcher API" do
+    refute Mix.Tasks.Breeze.Inspector.watcher_available?(String)
   end
 
   test "distribution error message prompts user to start epmd for nodistribution" do
