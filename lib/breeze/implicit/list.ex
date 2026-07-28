@@ -51,7 +51,7 @@ defmodule Breeze.Implicit.List do
        values: values,
        selected: selected,
        selected_index: selected_index,
-       offset: list_offset(root_attrs, last_state, cache, selected_index),
+       offset: list_offset(root_attrs, last_state, cache, selected_index, scroll_padding),
        loop: loop,
        scroll_padding: scroll_padding,
        width: width
@@ -209,18 +209,65 @@ defmodule Breeze.Implicit.List do
     |> Enum.map(& &1.value)
   end
 
-  defp list_offset(root_attrs, last_state, cache, selected_index) do
+  defp list_offset(root_attrs, last_state, cache, selected_index, scroll_padding) do
+    previous_offset =
+      root_attrs
+      |> Map.get(:"list-offset")
+      |> Common.normalize_int(Map.get(last_state, :offset, 0))
+
     offset =
       if controlled_selection_changed?(root_attrs, last_state) do
-        if is_integer(selected_index), do: row_start(cache, selected_index), else: 0
+        controlled_selection_offset(
+          previous_offset,
+          selected_index,
+          last_state,
+          cache,
+          scroll_padding
+        )
       else
-        root_attrs
-        |> Map.get(:"list-offset")
-        |> Common.normalize_int(Map.get(last_state, :offset, 0))
+        previous_offset
       end
 
     min(offset, max(cache.total_rows - 1, 0))
   end
+
+  defp controlled_selection_offset(
+         previous_offset,
+         selected_index,
+         %{__element__: element},
+         cache,
+         scroll_padding
+       )
+       when is_integer(selected_index) do
+    viewport =
+      element
+      |> Viewport.from_dimensions()
+      |> Map.put(:content_height, cache.total_rows)
+
+    if viewport.viewport_height > 0 do
+      first = row_start(cache, selected_index)
+      last = first + row_height(cache, selected_index) - 1
+
+      Viewport.ensure_range_visible(previous_offset, first, last, viewport,
+        padding: scroll_padding
+      )
+    else
+      row_start(cache, selected_index)
+    end
+  end
+
+  defp controlled_selection_offset(_previous_offset, selected_index, _last_state, cache, _padding)
+       when is_integer(selected_index),
+       do: row_start(cache, selected_index)
+
+  defp controlled_selection_offset(
+         _previous_offset,
+         _selected_index,
+         _last_state,
+         _cache,
+         _padding
+       ),
+       do: 0
 
   defp controlled_selection_changed?(
          %{:"list-selected" => selected},

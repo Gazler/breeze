@@ -39,6 +39,44 @@ defmodule Breeze.Implicit.ListTest do
       assert state.selected_index == 2
     end
 
+    test "does not scroll when a changed controlled selection is already visible" do
+      children = [%{value: "one"}, %{value: "two"}, %{value: "three"}]
+
+      {:ok, state} =
+        Implicit.List.init(
+          children,
+          %{:"list-selected" => "three"},
+          %{
+            selected: "one",
+            selected_index: 0,
+            offset: 0,
+            __element__: %Viewport{height: 6, viewport_height: 6, content_height: 2}
+          }
+        )
+
+      assert state.selected == "three"
+      assert state.offset == 0
+    end
+
+    test "scrolls only enough to reveal a changed controlled selection" do
+      children = Enum.map(1..8, &%{value: "item-#{&1}"})
+
+      {:ok, state} =
+        Implicit.List.init(
+          children,
+          %{:"list-selected" => "item-8"},
+          %{
+            selected: "item-1",
+            selected_index: 0,
+            offset: 0,
+            __element__: %Viewport{height: 3, viewport_height: 3, content_height: 8}
+          }
+        )
+
+      assert state.selected == "item-8"
+      assert state.offset == 5
+    end
+
     test "reads full values and offset from root attrs for windowed lists" do
       children = [%{value: "two"}, %{value: "three"}]
 
