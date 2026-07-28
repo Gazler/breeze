@@ -153,6 +153,7 @@ end
 {:ok, _daemon} = Termite.SSH.start_link(
   port: 2222,
   auth: [{"alice", "secret"}],
+  allow_insecure_auth: true,
   entrypoint: {DemoEntrypoint, []}
 )
 ```

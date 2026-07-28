@@ -12,7 +12,7 @@ project_root = Path.expand("../..", __DIR__)
 Mix.install([
   {:breeze, path: project_root},
   {:termite, github: "gazler/termite", override: true},
-  {:termite_ssh, github: "gazler/termite_ssh"}
+  {:termite_ssh, "~> 0.1.0"}
 ])
 
 try do
@@ -90,6 +90,7 @@ system_dir = System.get_env("BREEZE_SSH_SYSTEM_DIR") || Path.expand("../../priv/
 case Termite.SSH.start_link(
        port: port,
        auth: [{username, password}],
+       allow_insecure_auth: true,
        system_dir: system_dir,
        entrypoint: {SSHCounterEntrypoint, []}
      ) do
