@@ -23,12 +23,12 @@ Then we add Breeze to `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:breeze, "~> 0.4.0"}
+    {:breeze, "~> 0.5.0"}
   ]
 end
 ```
 
-`0.4.0` is the version this guide targets.
+`0.5.0` is the version this guide targets.
 
 Then we fetch dependencies:
 
@@ -226,6 +226,12 @@ typing while focused. The tabs handle left and right navigation and emit a
 change event when the active filter changes. The list handles selection with
 arrow keys and emits a change event when the selected item changes.
 
+A list retains its own selection, so most applications do not need to copy that
+state into an assign. Task Pad deliberately makes the selection controlled:
+`selected_task_id` lets event handlers toggle the selected task, while
+`list-selected` lets adding, filtering, and clearing tasks choose which entry
+remains selected.
+
 For larger collections, add `virtual` to `<.list>`. This keeps the rendered
 tree bounded to the visible rows plus overscan, but it is not pagination:
 Breeze still holds and processes the full item collection. Virtual rows should
@@ -311,8 +317,7 @@ defp set_filter(term, filter) do
     selected_id =
       TaskPad.InMemoryTasks.selected_visible_id(term.assigns.selected_task_id, visible_tasks)
 
-    term
-    |> assign(filter: filter, selected_task_id: selected_id)
+    assign(term, filter: filter, selected_task_id: selected_id)
   else
     term
   end
@@ -322,8 +327,9 @@ defp visible_tasks(term) do
   TaskPad.InMemoryTasks.visible(term.assigns.tasks_state, term.assigns.filter)
 end
 
-defp selected_visible_id(selected_id, tasks),
-  do: TaskPad.InMemoryTasks.selected_visible_id(selected_id, tasks)
+defp selected_visible_id(selected_id, tasks) do
+  TaskPad.InMemoryTasks.selected_visible_id(selected_id, tasks)
+end
 
 defp task_label(%{done?: true, title: title}), do: "[x] " <> title
 defp task_label(%{done?: false, title: title}), do: "[ ] " <> title

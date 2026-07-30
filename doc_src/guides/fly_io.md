@@ -285,7 +285,7 @@ terminals are connected even while the persistent render caches remain small.
 ## Provision the host key and password
 
 Create a host key for this deployment. Keep its private half out of Git and
-back it up somewhere protected; Fly secrets cannot be read back after they are
+back it up somewhere protected. Fly secrets cannot be read back after they are
 set:
 
 ```bash

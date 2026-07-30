@@ -17,7 +17,7 @@ Add `termite_ssh` to `mix.exs` alongside Breeze:
 ```elixir
 defp deps do
   [
-    {:breeze, "~> 0.4.0"},
+    {:breeze, "~> 0.5.0"},
     {:ecto_sql, "~> 3.14"},
     {:ecto_sqlite3, "~> 0.24.1"},
     {:phoenix_pubsub, "~> 2.2"},
@@ -43,7 +43,7 @@ defmodule TaskPad.SSHEntrypoint do
 
     Breeze.Server.start_link(
       view: TaskPad.View,
-      start_opts: [username: session.username],
+      start_opts: [username: session.username, connect_peers?: false],
       terminal_opts: Termite.SSH.Session.terminal_opts(session),
       theme: Breeze.Theme.builtin(:gruvbox),
       mouse: true,
@@ -64,7 +64,8 @@ same public `Breeze.Server.start_link/1` lifecycle used by a local terminal.
 `halt_fun` is a no-op because ending one view should close only that SSH
 session, not halt the VM that owns every connection. Passing `username` through
 `start_opts` is optional, but makes it available to `mount/2` as
-`opts[:username]`.
+`opts[:username]`. Setting `connect_peers?: false` removes the local `n`
+keybinding and disables peer discovery for SSH sessions.
 
 ## Configure a local listener
 

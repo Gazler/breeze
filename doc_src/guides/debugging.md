@@ -68,18 +68,6 @@ values, and implicit component state for controls such as inputs, lists, tabs,
 and scroll regions. Keep the setting `false` outside trusted development
 environments.
 
-We can also enable it while running an example:
-
-```elixir
-Breeze.Example.run(
-  view: TaskPad.View,
-  mouse: true,
-  inspector: true,
-  logger: :replace,
-  global_keybindings: [{"F10", fn _event, term -> {:stop, term} end}]
-)
-```
-
 ## Run the Remote Inspector
 
 The inspected app and the inspector UI can run in separate terminals. The app

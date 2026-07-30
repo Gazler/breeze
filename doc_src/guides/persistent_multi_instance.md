@@ -12,7 +12,7 @@ Add Ecto, SQLite, and PubSub to `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:breeze, "~> 0.4.0"},
+    {:breeze, "~> 0.5.0"},
     {:ecto_sql, "~> 3.14"},
     {:ecto_sqlite3, "~> 0.24.1"},
     {:phoenix_pubsub, "~> 2.2"}
@@ -304,24 +304,32 @@ twice.
 The view now loads tasks from the context and subscribes during `mount/2`:
 
 ```elixir
-def mount(_opts, term) do
+def mount(opts, term) do
   :ok = TaskPad.Tasks.subscribe()
+
+  connect_peers? = Keyword.get(opts, :connect_peers?, true)
+
+  keybindings = [
+    {"Enter", "Add/toggle"},
+    {"a", "New task"},
+    {"n", "Connect peer"},
+    {"c", "Clear done"}
+  ]
+
+  keybindings =
+    if connect_peers?, do: keybindings, else: List.keydelete(keybindings, "n", 0)
 
   {:ok,
    term
    |> focus("new-task")
-   |> put_local_keybindings([
-     {"Enter", "Add/toggle"},
-     {"a", "New task"},
-     {"n", "Connect peer"},
-     {"c", "Clear done"}
-   ])
+   |> put_local_keybindings(keybindings)
    |> assign(
      tasks: TaskPad.Tasks.all(),
      visible_tasks: TaskPad.Tasks.list("all"),
      new_task: "",
      filter: "all",
      selected_task_id: nil,
+     connect_peers?: connect_peers?,
      status: nil
    )
    |> normalize_selection()}
@@ -410,12 +418,13 @@ EPMD already knows which named Erlang nodes are running on the local machine.
 available peer names as strings instead of compiling the machine's hostname
 into a static allowlist.
 
-Both Task Pad nodes use the `term` prefix. Discover those nodes, remove the
-current node, and connect the first available peer:
+We will use the `taskpad` prefix for both Task Pad nodes. The helper below
+discovers those nodes, removes the current node, and connects the first
+available peer:
 
 ```elixir
 defmodule TaskPad.Peers do
-  @prefix "term"
+  @prefix "taskpad"
 
   def connect(current_node \\ node()) do
     with {:ok, [peer | _]} <- available(current_node),
@@ -456,14 +465,14 @@ end
 
 `Node.connect/1` still requires an atom, so the selected EPMD result is converted
 at the connection boundary. This is suitable for a trusted local development
-machine with the constrained `term` prefix. A production system should use
+machine with the constrained `taskpad` prefix. A production system should use
 trusted service discovery that returns a bounded peer set; atoms are not
 garbage-collected.
 
 Connect from the existing `n` event:
 
 ```elixir
-def handle_event(_, %{"key" => "n"}, term) do
+def handle_event(_, %{"key" => "n"}, %{assigns: %{connect_peers?: true}} = term) do
   status =
     case TaskPad.Peers.connect() do
       {:ok, peer} -> "Connected to #{peer}"
@@ -482,11 +491,11 @@ Start both instances with short names. Erlang adds the local hostname to each
 name, and EPMD makes both names discoverable:
 
 ```bash
-elixir --sname term1 -S mix run --no-halt
+elixir --sname taskpad1 -S mix run --no-halt
 ```
 
 ```bash
-elixir --sname term2 -S mix run --no-halt
+elixir --sname taskpad2 -S mix run --no-halt
 ```
 
 Both VMs normally share the Erlang cookie when they run as the same OS user.
@@ -551,25 +560,11 @@ defmodule TaskPad.SyncTest do
     end
 
     assert {:noreply, "tasks", true} = Breeze.Test.input(first, "Enter")
-    assert_eventually(fn -> Breeze.Test.render!(second) =~ "Shared task" end)
-  end
-
-  defp assert_eventually(fun, attempts \\ 50)
-
-  defp assert_eventually(_fun, 0) do
-    flunk("condition did not become true")
-  end
-
-  defp assert_eventually(fun, attempts) do
-    if fun.() do
-      :ok
-    else
-      Process.sleep(10)
-      assert_eventually(fun, attempts - 1)
-    end
+    assert Breeze.Test.render!(second) =~ "Shared task"
   end
 end
 ```
 
-The explicit zero-attempt clause preserves a useful assertion failure instead
-of ending in an unrelated `FunctionClauseError`.
+`Phoenix.PubSub.broadcast_from/4` dispatches to local subscribers before the
+first session's synchronous input call returns. The update is therefore queued
+before the second session's render call, so this test does not need to poll.
