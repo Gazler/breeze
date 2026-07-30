@@ -43,7 +43,7 @@ defmodule Breeze.MixProject do
   defp deps do
     [
       {:termite, "~> 0.4 or ~> 0.5"},
-      {:back_breeze, github: "gazler/back_breeze"},
+      {:back_breeze, "~> 0.4.2"},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
       {:telemetry, "~> 1.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
