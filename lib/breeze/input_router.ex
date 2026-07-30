@@ -3,7 +3,7 @@ defmodule Breeze.InputRouter do
 
   use GenServer
 
-  alias Breeze.InputRouter.{IExShellProxy, SilentGroupLeader, TerminalStart}
+  alias Breeze.InputRouter.{IExShellProxy, SilentGroupLeader, TerminalCleanup, TerminalStart}
   alias Breeze.InputCapture
   alias Breeze.Theme.Probe, as: ThemeProbe
 
@@ -19,6 +19,7 @@ defmodule Breeze.InputRouter do
     :theme_probe,
     :iex_shell_proxy,
     :silent_group_leader,
+    :terminal_cleanup,
     alt_screen?: true,
     enhanced_keyboard?: true,
     terminal_restored?: false,
@@ -57,6 +58,13 @@ defmodule Breeze.InputRouter do
     {terminal, deferred_messages} =
       maybe_complete_initial_theme_probe(terminal, Keyword.get(opts, :theme))
 
+    terminal_cleanup =
+      TerminalCleanup.register(terminal,
+        alt_screen?: alt_screen?,
+        enhanced_keyboard?: enhanced_keyboard?,
+        register: internal_get(opts, :at_exit_register, &System.at_exit/1)
+      )
+
     {:ok, child_view_supervisor} = Breeze.ChildViewSupervisor.start_link()
     remote_inspector_supervisor = maybe_start_remote_inspector_supervisor(opts)
 
@@ -81,6 +89,7 @@ defmodule Breeze.InputRouter do
       enhanced_keyboard?: enhanced_keyboard?,
       iex_shell_proxy: iex_shell_proxy,
       silent_group_leader: silent_group_leader,
+      terminal_cleanup: terminal_cleanup,
       global_keybindings: Keyword.get(opts, :global_keybindings, [])
     }
 
@@ -569,16 +578,13 @@ defmodule Breeze.InputRouter do
   defp restore_terminal(%{terminal_restored?: true} = state), do: state
 
   defp restore_terminal(state) do
-    terminal =
-      state.terminal
-      |> maybe_disable_enhanced_keyboard(state)
-      |> Termite.Screen.disable_mouse()
-      |> Termite.Screen.clear_screen()
-      |> Termite.Screen.show_cursor()
-      |> maybe_exit_alt_screen(state)
-      |> Termite.Terminal.write("\r")
+    case TerminalCleanup.restore(state.terminal_cleanup, state.terminal) do
+      {:restored, terminal} ->
+        %{state | terminal: terminal, terminal_restored?: true}
 
-    %{state | terminal: terminal, terminal_restored?: true}
+      :already_restored ->
+        %{state | terminal_restored?: true}
+    end
   end
 
   defp stop_server(server_pid) do
@@ -590,20 +596,9 @@ defmodule Breeze.InputRouter do
     :exit, {:noproc, {GenServer, :stop, _args}} -> :ok
   end
 
-  defp maybe_exit_alt_screen(terminal, %{alt_screen?: true}),
-    do: Termite.Screen.exit_alt_screen(terminal)
-
-  defp maybe_exit_alt_screen(terminal, _state), do: terminal
-
   defp enable_enhanced_keyboard(terminal) do
     Termite.Screen.enable_enhanced_keyboard(terminal)
   end
-
-  defp maybe_disable_enhanced_keyboard(terminal, %{enhanced_keyboard?: true}) do
-    Termite.Screen.disable_enhanced_keyboard(terminal)
-  end
-
-  defp maybe_disable_enhanced_keyboard(terminal, _state), do: terminal
 
   defp decode_input(raw_key) do
     Breeze.Input.decode(raw_key)

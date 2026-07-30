@@ -847,6 +847,39 @@ defmodule Breeze.InputRouterTest do
     assert_receive {:DOWN, ^server_ref, :process, ^server, :shutdown}, 500
   end
 
+  test "CLI exit cleanup restores the terminal once while the router is still running" do
+    parent = self()
+
+    register_at_exit = fn callback ->
+      send(parent, {:at_exit_callback, callback})
+      :ok
+    end
+
+    {:ok, router} =
+      start_input_router(
+        view: BlockingView,
+        start_opts: [parent: parent],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter, owner: parent],
+        halt_fun: fn -> send(parent, :halted) end,
+        internal: [at_exit_register: register_at_exit]
+      )
+
+    assert_receive {:at_exit_callback, callback}
+    assert is_function(callback, 1)
+
+    assert :ok = callback.(0)
+    assert_receive {:terminal_write, "\e[<u\e[>4;0m"}
+    assert_receive {:terminal_write, "\e[?1049l"}
+    assert Process.alive?(router)
+    refute_received :halted
+
+    assert :ok = stop_gen_server(router)
+    assert_receive :halted, 500
+    refute_receive {:terminal_write, "\e[<u\e[>4;0m"}, 50
+    refute_receive {:terminal_write, "\e[?1049l"}, 50
+  end
+
   test "stop global keys are handled even while the app server is blocked" do
     parent = self()
 
