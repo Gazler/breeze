@@ -469,6 +469,43 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule InferredStructuredVirtualListExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    @items Enum.map(0..99, fn index ->
+             id = "item-#{index}"
+             %{id: id, label: "Item #{index}"}
+           end)
+
+    def mount(opts, term) do
+      {:ok,
+       term
+       |> focus("items")
+       |> assign(test_pid: Keyword.fetch!(opts, :test_pid), items: @items)}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-20 height-10">
+        <.list id="items" list-selected="item-0" virtual class="width-full height-full">
+          <:item :for={item <- @items} value={item.id}>
+            <box class="bold">{render_label(item.label, @test_pid)}</box>
+          </:item>
+        </.list>
+      </box>
+      """
+    end
+
+    def render_label(label, test_pid) do
+      send(test_pid, {:rendered_list_label, label})
+      label
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule TreeExample do
     use Breeze.View
     import Breeze.Blocks
@@ -1264,15 +1301,62 @@ defmodule Breeze.BlocksTest do
   end
 
   test "list virtual window derives the item slice from selection" do
-    {:ok, pid} = start_child_server(view: VirtualListExample, start_opts: [])
+    {:ok, pid} =
+      start_child_server(
+        view: VirtualListExample,
+        start_opts: [],
+        theme: Breeze.Theme.builtin(:gruvbox)
+      )
 
-    {:ok, _acc, box} = ChildServer.render(pid, focused: "items", implicit_state: %{})
+    {:ok, acc, box} = ChildServer.render(pid, focused: "items", implicit_state: %{})
 
     assert box.content =~ "Item 4"
     assert box.content =~ "Item 5"
     assert box.content =~ "Item 6"
     refute box.content =~ "Item 3"
     refute box.content =~ "Item 7"
+    assert map_size(acc.elements) <= 3
+
+    assert {">", selected_style} = rendered_cell!(box, {2, 1})
+    assert selected_style =~ "48;2;131;165;152"
+    assert selected_style =~ "38;2;40;40;40"
+  end
+
+  test "structured virtual lists learn their rendered viewport and keep a bounded window" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 40}}
+
+    {:ok, pid} =
+      start_child_server(
+        view: InferredStructuredVirtualListExample,
+        start_opts: [test_pid: self()],
+        terminal: terminal
+      )
+
+    {:ok, _acc, _box} =
+      ChildServer.render(pid, terminal: terminal, focused: "items", implicit_state: %{})
+
+    metadata = ChildServer.metadata(pid)
+
+    assert {Breeze.Implicit.List, %{viewport_height: 8}} = metadata.implicit_state["items"]
+
+    drain_rendered_list_labels(MapSet.new())
+
+    {_acc, box} =
+      Renderer.render(InferredStructuredVirtualListExample, metadata.assigns,
+        terminal: terminal,
+        focused: "items",
+        implicit_state: metadata.implicit_state
+      )
+
+    rendered_labels = drain_rendered_list_labels(MapSet.new())
+
+    assert MapSet.size(rendered_labels) == 12
+    assert MapSet.member?(rendered_labels, "Item 0")
+    assert MapSet.member?(rendered_labels, "Item 11")
+    refute MapSet.member?(rendered_labels, "Item 12")
+    assert box.content =~ "Item 0"
+    assert box.content =~ "Item 7"
+    refute box.content =~ "Item 8"
   end
 
   test "list virtual window scrolls to a changed controlled selection" do
@@ -1293,6 +1377,15 @@ defmodule Breeze.BlocksTest do
 
     assert {Breeze.Implicit.List, %{selected: "item-0", offset: 0}} =
              ChildServer.metadata(pid).implicit_state["items"]
+  end
+
+  defp drain_rendered_list_labels(labels) do
+    receive do
+      {:rendered_list_label, label} ->
+        drain_rendered_list_labels(MapSet.put(labels, label))
+    after
+      0 -> labels
+    end
   end
 
   test "tree renders visible rows with collapsed and expanded prefixes" do

@@ -114,6 +114,7 @@ defmodule Breeze.Renderer do
     %{
       terminal: terminal,
       breakpoint: breakpoint(terminal),
+      __render_theme__: Keyword.get(opts, :theme),
       implicit_state: Keyword.get(opts, :implicit_state, %{}),
       implicit_meta: Keyword.get(opts, :implicit_meta, %{})
     }

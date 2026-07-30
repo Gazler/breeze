@@ -26,6 +26,7 @@ defmodule Breeze.Blocks do
 
   use Breeze.Component
   alias BackBreeze.Ucwidth
+  alias BackBreeze.VirtualText.Source, as: VirtualTextSource
 
   attr :keybindings, :list, default: []
   attr :class, :string, default: nil
@@ -64,7 +65,7 @@ defmodule Breeze.Blocks do
   attr :loop, :boolean, default: true
   attr :variant, :string, default: nil
   attr :virtual, :boolean, default: false
-  attr :virtual_overscan, :integer, default: 24
+  attr :virtual_overscan, :integer, default: 4
   attr :offset, :integer, default: nil
   attr :virtual_window, :integer, default: nil
   attr :"selected-indicator", :string, default: ">"
@@ -100,6 +101,11 @@ defmodule Breeze.Blocks do
       )
 
     {render_items, top_spacer, bottom_spacer, windowed?} = list_render_window(items, assigns)
+    list_selected = explicit_or_implicit_list_selected(assigns)
+    virtual_text? = virtual_text_list?(items, assigns, windowed?)
+
+    render_theme =
+      get_in(assigns, [:__breeze_caller_assigns__, :breeze, :__render_theme__])
 
     assigns =
       assigns
@@ -111,6 +117,21 @@ defmodule Breeze.Blocks do
       |> assign(list_offset: if(windowed?, do: top_spacer, else: assigns.offset))
       |> assign(selected_indicator: selected_indicator)
       |> assign(selected_indicator_width: selected_indicator_width)
+      |> assign(list_selected: list_selected)
+      |> assign(windowed?: windowed?)
+      |> assign(virtual_text?: virtual_text?)
+      |> assign(
+        virtual_content:
+          if virtual_text? do
+            virtual_list_content(
+              items,
+              list_selected,
+              selected_indicator,
+              selected_indicator_width,
+              render_theme
+            )
+          end
+      )
       |> assign(item_visual_defaults: item_visual_defaults)
       |> assign(class: merge_class(root_defaults, class_override(assigns)))
       |> assign(
@@ -135,16 +156,25 @@ defmodule Breeze.Blocks do
       list-loop={@loop}
       list-scroll-padding={1}
       list-offset={@list_offset}
+      list-rendered-offset={@list_offset || 0}
+      list-rendered-selected={@list_selected}
       list-values={@list_values}
+      list-virtual={@virtual}
+      list-windowed={@windowed?}
       focusable
       class={@class}
       style={inline_style(assigns)}
       {@rest}
     >
-      <box :if={@top_spacer > 0} class={"width-full height-#{@top_spacer} overflow-hidden"}>
+      {@virtual_content}
+      <box
+        :if={not @virtual_text? and @top_spacer > 0}
+        class={"width-full height-#{@top_spacer} overflow-hidden"}
+      >
       </box>
       <box
         :for={item <- @render_items}
+        :if={not @virtual_text?}
         value={item.value}
         focus-with-owner
         class="inline"
@@ -153,10 +183,121 @@ defmodule Breeze.Blocks do
         <box selected-with-owner class={@marker_class}>{@selected_indicator}</box>
         <box selected-with-owner class={@item_class}>{render_slot(item, %{})}</box>
       </box>
-      <box :if={@bottom_spacer > 0} class={"width-full height-#{@bottom_spacer} overflow-hidden"}>
+      <box
+        :if={not @virtual_text? and @bottom_spacer > 0}
+        class={"width-full height-#{@bottom_spacer} overflow-hidden"}
+      >
       </box>
     </box>
     """
+  end
+
+  defp virtual_text_list?(items, assigns, windowed?) do
+    windowed? and is_nil(Map.get(assigns, :variant)) and
+      virtual_text_item_class?(Map.get(assigns, :item_class)) and
+      is_nil(Map.get(assigns, :item_style)) and Enum.all?(items, &plain_text_slot?/1)
+  end
+
+  defp virtual_text_item_class?(class) when class in [nil, "", "w-full", "width-full"], do: true
+  defp virtual_text_item_class?(_class), do: false
+
+  defp plain_text_slot?(%{__breeze_slot_raw__: {nodes, _context, _let_pattern}}),
+    do: Enum.all?(nodes, &plain_text_slot_node?/1)
+
+  defp plain_text_slot?(_item), do: false
+
+  defp plain_text_slot_node?({:text, _segments}), do: true
+  defp plain_text_slot_node?({:expr, _expression}), do: true
+  defp plain_text_slot_node?(_node), do: false
+
+  defp virtual_list_content(
+         items,
+         selected,
+         selected_indicator,
+         indicator_width,
+         render_theme
+       ) do
+    items = List.to_tuple(items)
+    item_count = tuple_size(items)
+    unselected_indicator = String.duplicate(" ", indicator_width)
+    selected_style = virtual_list_selected_style(render_theme)
+
+    VirtualTextSource.lazy(
+      cache_key: :breeze_virtual_list,
+      cache?: false,
+      intrinsic_width: 1,
+      line_count_fn: fn _width -> item_count end,
+      slice_fn: fn start, count, width ->
+        virtual_list_slice(
+          items,
+          selected,
+          selected_indicator,
+          unselected_indicator,
+          selected_style,
+          start,
+          count,
+          width
+        )
+      end
+    )
+  end
+
+  defp virtual_list_selected_style(render_theme) do
+    theme = Breeze.Theme.new(render_theme)
+
+    %{
+      foreground_color: Breeze.Theme.color(theme, :background),
+      background_color: Breeze.Theme.color(theme, :primary)
+    }
+  end
+
+  defp virtual_list_slice(
+         _items,
+         _selected,
+         _selected_indicator,
+         _unselected_indicator,
+         _selected_style,
+         _start,
+         count,
+         _width
+       )
+       when count <= 0,
+       do: []
+
+  defp virtual_list_slice(
+         items,
+         selected,
+         selected_indicator,
+         unselected_indicator,
+         selected_style,
+         start,
+         count,
+         width
+       ) do
+    last = min(start + count - 1, tuple_size(items) - 1)
+
+    if start > last do
+      []
+    else
+      Enum.map(start..last, fn index ->
+        item = elem(items, index)
+        content = render_slot(item, %{})
+
+        if item.value == selected do
+          line = virtual_selected_line(selected_indicator <> content, width)
+          [{line, selected_style}]
+        else
+          BackBreeze.String.truncate(unselected_indicator <> content, width)
+        end
+      end)
+    end
+  end
+
+  defp virtual_selected_line(content, width) do
+    line = BackBreeze.String.truncate(content, width)
+    padding = max(width - BackBreeze.Utils.string_length(line), 0)
+
+    line <> String.duplicate(" ", padding)
   end
 
   defp list_render_window(items, assigns) do
@@ -193,27 +334,31 @@ defmodule Breeze.Blocks do
   defp inferred_list_window_size(assigns) do
     overscan = normalize_tree_overscan(assigns.virtual_overscan)
 
-    height =
-      Breeze.Style.resolve_dimensions(Map.get(assigns, :class), inline_style(assigns)).height
-
     visible_rows =
-      case height do
-        height when is_integer(height) and height > 0 ->
-          height
-
-        height when height in [:full, :screen] ->
-          assigns
-          |> caller_terminal_height()
-          |> case do
-            height when is_integer(height) and height > 0 -> height
-            _ -> nil
-          end
-
-        _ ->
-          nil
+      case get_in(list_implicit_state(assigns), [:viewport_height]) do
+        height when is_integer(height) and height > 0 -> height
+        _ -> inferred_component_height(assigns)
       end
 
     if is_integer(visible_rows), do: max(visible_rows + overscan, 1)
+  end
+
+  defp inferred_component_height(assigns) do
+    case Breeze.Style.resolve_dimensions(Map.get(assigns, :class), inline_style(assigns)).height do
+      height when is_integer(height) and height > 0 ->
+        height
+
+      height when height in [:full, :screen] ->
+        assigns
+        |> caller_terminal_height()
+        |> case do
+          height when is_integer(height) and height > 0 -> height
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
   end
 
   defp list_window_offset(_items, _assigns, window_size) when window_size <= 0, do: nil

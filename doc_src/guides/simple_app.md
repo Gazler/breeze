@@ -226,6 +226,14 @@ typing while focused. The tabs handle left and right navigation and emit a
 change event when the active filter changes. The list handles selection with
 arrow keys and emits a change event when the selected item changes.
 
+For larger collections, add `virtual` to `<.list>`. This keeps the rendered
+tree bounded to the visible rows plus overscan, but it is not pagination:
+Breeze still holds and processes the full item collection. Virtual rows should
+have a predictable, fixed height. The optimized plain-text path renders one
+terminal row per item and truncates long labels instead of wrapping them;
+custom variants, item styling, or nested markup use structured windowing
+instead.
+
 ## Handle events
 
 Components emit named events through `br-change`, and keyboard input arrives as a
@@ -440,6 +448,10 @@ We run the application with:
 ```bash
 mix run --no-halt
 ```
+
+Without `--no-halt`, Mix exits as soon as the run task completes. Breeze
+restores the terminal during that exit, but the supervised application does
+not remain running.
 
 ## Test it
 

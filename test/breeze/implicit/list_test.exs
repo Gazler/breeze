@@ -8,27 +8,30 @@ defmodule Breeze.Implicit.ListTest do
     test "keeps prior selection when still present" do
       children = [%{value: "one"}, %{value: "two"}, %{value: "three"}]
 
-      {:ok, state} = Implicit.List.init(children, %{}, %{selected: "two", offset: 2})
+      {:ok, state, options} =
+        Implicit.List.init(children, %{}, %{selected: "two", offset: 2})
 
       assert state.selected == "two"
       assert state.selected_index == 1
       assert state.offset == 2
+      assert options == [state_change_requires_rerender: true]
     end
 
     test "reads root options" do
       children = [%{value: "a"}, %{value: "b"}, %{value: "c"}]
 
-      {:ok, state} =
+      {:ok, state, options} =
         Implicit.List.init(children, %{:"list-loop" => false, :"list-scroll-padding" => "2"}, %{})
 
       assert state.loop == false
       assert state.scroll_padding == 2
+      assert options == [state_change_requires_rerender: false]
     end
 
     test "prefers list-selected from the root attrs over the prior internal selection" do
       children = [%{value: "one"}, %{value: "two"}, %{value: "three"}]
 
-      {:ok, state} =
+      {:ok, state, options} =
         Implicit.List.init(
           children,
           %{:"list-selected" => "three"},
@@ -37,12 +40,13 @@ defmodule Breeze.Implicit.ListTest do
 
       assert state.selected == "three"
       assert state.selected_index == 2
+      assert options == [state_change_requires_rerender: true]
     end
 
     test "does not scroll when a changed controlled selection is already visible" do
       children = [%{value: "one"}, %{value: "two"}, %{value: "three"}]
 
-      {:ok, state} =
+      {:ok, state, options} =
         Implicit.List.init(
           children,
           %{:"list-selected" => "three"},
@@ -56,12 +60,13 @@ defmodule Breeze.Implicit.ListTest do
 
       assert state.selected == "three"
       assert state.offset == 0
+      assert options == [state_change_requires_rerender: true]
     end
 
     test "scrolls only enough to reveal a changed controlled selection" do
       children = Enum.map(1..8, &%{value: "item-#{&1}"})
 
-      {:ok, state} =
+      {:ok, state, options} =
         Implicit.List.init(
           children,
           %{:"list-selected" => "item-8"},
@@ -75,12 +80,13 @@ defmodule Breeze.Implicit.ListTest do
 
       assert state.selected == "item-8"
       assert state.offset == 5
+      assert options == [state_change_requires_rerender: true]
     end
 
     test "reads full values and offset from root attrs for windowed lists" do
       children = [%{value: "two"}, %{value: "three"}]
 
-      {:ok, state} =
+      {:ok, state, options} =
         Implicit.List.init(
           children,
           %{:"list-values" => ["one", "two", "three", "four"], :"list-offset" => 1},
@@ -91,6 +97,24 @@ defmodule Breeze.Implicit.ListTest do
       assert state.selected == "three"
       assert state.selected_index == 2
       assert state.offset == 1
+      assert options == [state_change_requires_rerender: true]
+    end
+
+    test "retains the rendered viewport height for a component's next render" do
+      children = [%{value: "one"}, %{value: "two"}]
+
+      {:ok, state, options} =
+        Implicit.List.init(children, %{}, %{
+          __element__: %Viewport{height: 7, viewport_height: 5, content_height: 20}
+        })
+
+      assert state.viewport_height == 5
+      assert options == [state_change_requires_rerender: false]
+
+      {:ok, next_state, next_options} = Implicit.List.init(children, %{}, state)
+
+      assert next_state.viewport_height == 5
+      assert next_options == [state_change_requires_rerender: false]
     end
   end
 

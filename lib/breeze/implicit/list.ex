@@ -46,16 +46,43 @@ defmodule Breeze.Implicit.List do
 
     selected = selected_value(cache, selected_index)
 
-    {:ok,
-     Map.merge(cache, %{
-       values: values,
-       selected: selected,
-       selected_index: selected_index,
-       offset: list_offset(root_attrs, last_state, cache, selected_index, scroll_padding),
-       loop: loop,
-       scroll_padding: scroll_padding,
-       width: width
-     })}
+    state =
+      Map.merge(cache, %{
+        values: values,
+        selected: selected,
+        selected_index: selected_index,
+        offset: list_offset(root_attrs, last_state, cache, selected_index, scroll_padding),
+        viewport_height: list_viewport_height(last_state),
+        loop: loop,
+        scroll_padding: scroll_padding,
+        width: width
+      })
+
+    {:ok, state, state_change_requires_rerender: rendered_list_state_changed?(state, root_attrs)}
+  end
+
+  defp rendered_list_state_changed?(state, root_attrs) do
+    rendered_selected = Map.get(root_attrs, :"list-rendered-selected")
+    rendered_offset = Common.int_option(root_attrs, :"list-rendered-offset", 0)
+    virtual? = Common.bool_option(root_attrs, :"list-virtual", false)
+    windowed? = Common.bool_option(root_attrs, :"list-windowed", false)
+
+    state.selected != rendered_selected or state.offset != rendered_offset or
+      (virtual? and not windowed?)
+  end
+
+  defp list_viewport_height(last_state) do
+    height =
+      last_state
+      |> Map.get(:__element__)
+      |> Viewport.from_dimensions()
+      |> Map.get(:viewport_height)
+
+    if is_integer(height) and height > 0 do
+      height
+    else
+      Map.get(last_state, :viewport_height)
+    end
   end
 
   def handle_event(_, %{"key" => key, "element" => element}, state)
