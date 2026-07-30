@@ -1,7 +1,7 @@
 defmodule Breeze.MixProject do
   use Mix.Project
 
-  @version "0.4.0"
+  @version "0.5.0"
 
   def project do
     [
@@ -14,7 +14,6 @@ defmodule Breeze.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
-      test_ignore_filters: [~r{(^|/)test/support/}],
       name: "Breeze",
       source_url: "https://github.com/Gazler/breeze",
       docs: docs()
@@ -64,6 +63,7 @@ defmodule Breeze.MixProject do
       assets: %{"doc_src/assets" => "assets"},
       extras: [
         "README.md",
+        "CHANGELOG.md",
         "doc_src/guides/simple_app.md",
         "doc_src/guides/debugging.md",
         "doc_src/guides/persistent_multi_instance.md",
@@ -107,6 +107,7 @@ defmodule Breeze.MixProject do
         Tooling: [Breeze.HTMLFormatter]
       ],
       groups_for_extras: [
+        "Release notes": ["CHANGELOG.md"],
         Guides: [
           "README.md",
           "doc_src/guides/simple_app.md",
