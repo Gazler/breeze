@@ -306,7 +306,7 @@ defmodule Breeze.ChildServer do
 
   defp maybe_compact_snapshot_box(box, opts) do
     if Keyword.get(opts, :compact_snapshot, false) do
-      %{box | layer_map: %{}}
+      %{box | children: [], layer_map: %{}, fixed_layer_map: %{}}
     else
       box
     end

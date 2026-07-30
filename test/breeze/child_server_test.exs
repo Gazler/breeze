@@ -134,6 +134,23 @@ defmodule Breeze.ChildServerTest do
     def handle_event(_, _, term), do: {:noreply, term}
   end
 
+  defmodule CompactSnapshotView do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <box style="width-screen height-screen">
+        <box>base</box>
+        <box style="fixed right-0 bottom-0">X</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
   test "dispatches mouse input through handle_event/3" do
     {:ok, pid} = start_child_server(view: MouseView)
 
@@ -169,6 +186,28 @@ defmodule Breeze.ChildServerTest do
     assert %{assigns: %{count: 1}} = :sys.get_state(pid)
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, [])
     assert box.content == "1"
+  end
+
+  test "compact render snapshots retain content and discard transient box layers" do
+    terminal = %Termite.Terminal{size: %{width: 20, height: 5}}
+    {:ok, pid} = start_child_server(view: CompactSnapshotView, terminal: terminal)
+
+    assert {:ok, _acc, full_box, _decorations} =
+             Breeze.ChildServer.render_snapshot(pid, terminal: terminal)
+
+    assert map_size(full_box.layer_map) > 0
+    assert map_size(full_box.fixed_layer_map) > 0
+
+    assert {:ok, _acc, compact_box, _decorations} =
+             Breeze.ChildServer.render_snapshot(pid,
+               terminal: terminal,
+               compact_snapshot: true
+             )
+
+    assert compact_box.content == full_box.content
+    assert compact_box.children == []
+    assert compact_box.layer_map == %{}
+    assert compact_box.fixed_layer_map == %{}
   end
 
   test "bootstrap prepass runs only once for views without implicit state" do

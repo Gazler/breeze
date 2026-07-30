@@ -831,15 +831,19 @@ defmodule Breeze.InputRouterTest do
         view: BlockingView,
         start_opts: [parent: parent],
         hide_cursor: false,
-        terminal_opts: [adapter: FakeAdapter],
+        terminal_opts: [adapter: FakeAdapter, owner: parent],
         halt_fun: fn -> send(parent, :halted) end
       )
+
+    assert_receive {:terminal_write, "\e[>1u\e[>4;2m"}
 
     server = :sys.get_state(router).server_pid
     server_ref = Process.monitor(server)
 
     assert :ok = stop_gen_server(router)
     assert_receive :halted, 500
+    assert_receive {:terminal_write, "\e[<u\e[>4;0m"}
+    assert_receive {:terminal_write, "\e[?1049l"}
     assert_receive {:DOWN, ^server_ref, :process, ^server, :shutdown}, 500
   end
 

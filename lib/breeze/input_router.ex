@@ -21,6 +21,7 @@ defmodule Breeze.InputRouter do
     :silent_group_leader,
     alt_screen?: true,
     enhanced_keyboard?: true,
+    terminal_restored?: false,
     global_keybindings: []
   ]
 
@@ -151,6 +152,7 @@ defmodule Breeze.InputRouter do
   @impl true
   def terminate(_reason, state) do
     stop_server(state.server_pid)
+    restore_terminal(state)
     Breeze.RemoteInspector.Supervisor.stop(state.remote_inspector_supervisor)
     Breeze.ChildViewSupervisor.stop(state.child_view_supervisor)
     IExShellProxy.stop(state.iex_shell_proxy)
@@ -559,16 +561,24 @@ defmodule Breeze.InputRouter do
 
   defp stop(state) do
     stop_server(state.server_pid)
-
-    state.terminal
-    |> maybe_disable_enhanced_keyboard(state)
-    |> Termite.Screen.disable_mouse()
-    |> Termite.Screen.clear_screen()
-    |> Termite.Screen.show_cursor()
-    |> maybe_exit_alt_screen(state)
-    |> Termite.Terminal.write("\r")
+    state = restore_terminal(state)
 
     {:stop, :normal, state}
+  end
+
+  defp restore_terminal(%{terminal_restored?: true} = state), do: state
+
+  defp restore_terminal(state) do
+    terminal =
+      state.terminal
+      |> maybe_disable_enhanced_keyboard(state)
+      |> Termite.Screen.disable_mouse()
+      |> Termite.Screen.clear_screen()
+      |> Termite.Screen.show_cursor()
+      |> maybe_exit_alt_screen(state)
+      |> Termite.Terminal.write("\r")
+
+    %{state | terminal: terminal, terminal_restored?: true}
   end
 
   defp stop_server(server_pid) do
