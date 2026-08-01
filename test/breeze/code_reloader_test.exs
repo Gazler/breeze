@@ -120,15 +120,29 @@ defmodule Breeze.CodeReloaderTest do
     assert %{dirs: [^lib]} = :sys.get_state(watcher_pid)
   end
 
-  test "raises when reload starts without a supported watcher module" do
+  test "explains how to resolve an unavailable watcher module" do
     Process.flag(:trap_exit, true)
 
     assert {:error, {%ArgumentError{message: message}, _stacktrace}} =
              Breeze.CodeReloader.start_link(
                server_pid: self(),
-               watcher_module: nil
+               watcher_module: __MODULE__.UnavailableWatcher
              )
 
-    assert message =~ "live reload requires a watcher module"
+    assert message =~ "could not be loaded"
+    assert message =~ "direct dependency"
+    assert message =~ "reload: false"
+  end
+
+  test "reports a loaded watcher with an unsupported API" do
+    Process.flag(:trap_exit, true)
+
+    assert {:error, {%ArgumentError{message: message}, _stacktrace}} =
+             Breeze.CodeReloader.start_link(
+               server_pid: self(),
+               watcher_module: String
+             )
+
+    assert message =~ "must export start_link/1 and subscribe/1"
   end
 end

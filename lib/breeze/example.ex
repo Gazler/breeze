@@ -3,11 +3,12 @@ defmodule Breeze.Example do
 
   def run(server_opts, opts \\ []) do
     unless load_only?() or Breeze.ReloadContext.compiling?() do
-      server_opts
-      |> Keyword.put_new(:logger, :replace)
-      |> Breeze.Server.start_link()
-
-      keep_alive(Keyword.get(opts, :keep_alive, :infinity))
+      case server_opts
+           |> Keyword.put_new(:logger, :replace)
+           |> start_server() do
+        {:ok, _pid} -> keep_alive(Keyword.get(opts, :keep_alive, :infinity))
+        {:error, reason} -> raise_start_error(reason)
+      end
     end
   end
 
@@ -24,4 +25,20 @@ defmodule Breeze.Example do
   defp keep_alive(timeout) when is_integer(timeout) and timeout >= 0 do
     :timer.sleep(timeout)
   end
+
+  defp start_server(server_opts) do
+    previous_trap_exit = Process.flag(:trap_exit, true)
+
+    try do
+      Breeze.Server.start_link(server_opts)
+    after
+      Process.flag(:trap_exit, previous_trap_exit)
+    end
+  end
+
+  defp raise_start_error({exception, stacktrace}) when is_list(stacktrace) do
+    :erlang.raise(:error, exception, stacktrace)
+  end
+
+  defp raise_start_error(reason), do: exit(reason)
 end

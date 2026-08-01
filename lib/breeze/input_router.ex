@@ -48,16 +48,6 @@ defmodule Breeze.InputRouter do
       silent_group_leader: silent_group_leader
     } = build_terminal(opts)
 
-    reader = terminal.reader
-    terminal = if alt_screen?, do: Termite.Screen.alt_screen(terminal), else: terminal
-    terminal = if enhanced_keyboard?, do: enable_enhanced_keyboard(terminal), else: terminal
-    terminal = if hide_cursor?, do: Termite.Screen.hide_cursor(terminal), else: terminal
-    terminal = enable_mouse(terminal, mouse)
-    terminal = Termite.Screen.clear_screen(terminal)
-
-    {terminal, deferred_messages} =
-      maybe_complete_initial_theme_probe(terminal, Keyword.get(opts, :theme))
-
     terminal_cleanup =
       TerminalCleanup.register(terminal,
         alt_screen?: alt_screen?,
@@ -65,37 +55,77 @@ defmodule Breeze.InputRouter do
         register: internal_get(opts, :at_exit_register, &System.at_exit/1)
       )
 
-    {:ok, child_view_supervisor} = Breeze.ChildViewSupervisor.start_link()
-    remote_inspector_supervisor = maybe_start_remote_inspector_supervisor(opts)
+    previous_trap_exit = Process.flag(:trap_exit, true)
 
-    server_opts =
-      opts
-      |> Keyword.put(:terminal, terminal)
-      |> Keyword.put(:input_router, self())
-      |> put_internal(:child_view_supervisor, child_view_supervisor)
-      |> put_internal(:remote_inspector_supervisor, remote_inspector_supervisor)
+    try do
+      reader = terminal.reader
+      terminal = if alt_screen?, do: Termite.Screen.alt_screen(terminal), else: terminal
+      terminal = if enhanced_keyboard?, do: enable_enhanced_keyboard(terminal), else: terminal
+      terminal = if hide_cursor?, do: Termite.Screen.hide_cursor(terminal), else: terminal
+      terminal = enable_mouse(terminal, mouse)
+      terminal = Termite.Screen.clear_screen(terminal)
 
-    {:ok, server_pid} = Breeze.Server.start_app_link(server_opts)
-    Process.monitor(server_pid)
+      {terminal, deferred_messages} =
+        maybe_complete_initial_theme_probe(terminal, Keyword.get(opts, :theme))
 
-    state = %__MODULE__{
-      terminal: terminal,
-      reader: reader,
-      server_pid: server_pid,
-      child_view_supervisor: child_view_supervisor,
-      remote_inspector_supervisor: remote_inspector_supervisor,
-      halt_fun: Keyword.get_lazy(opts, :halt_fun, &default_halt_fun/0),
-      alt_screen?: alt_screen?,
-      enhanced_keyboard?: enhanced_keyboard?,
-      iex_shell_proxy: iex_shell_proxy,
-      silent_group_leader: silent_group_leader,
-      terminal_cleanup: terminal_cleanup,
-      global_keybindings: Keyword.get(opts, :global_keybindings, [])
-    }
+      {:ok, child_view_supervisor} = Breeze.ChildViewSupervisor.start_link()
+      remote_inspector_supervisor = maybe_start_remote_inspector_supervisor(opts)
 
-    Enum.each(Enum.reverse(deferred_messages), &send(self(), &1))
+      server_opts =
+        opts
+        |> Keyword.put(:terminal, terminal)
+        |> Keyword.put(:input_router, self())
+        |> put_internal(:child_view_supervisor, child_view_supervisor)
+        |> put_internal(:remote_inspector_supervisor, remote_inspector_supervisor)
 
-    {:ok, state, {:continue, {:maybe_start_theme_probe, Keyword.get(opts, :theme)}}}
+      server_pid =
+        case Breeze.Server.start_app_link(server_opts) do
+          {:ok, server_pid} ->
+            server_pid
+
+          {:error, reason} ->
+            Breeze.RemoteInspector.Supervisor.stop(remote_inspector_supervisor)
+            Breeze.ChildViewSupervisor.stop(child_view_supervisor)
+            exit(reason)
+        end
+
+      Process.monitor(server_pid)
+
+      state = %__MODULE__{
+        terminal: terminal,
+        reader: reader,
+        server_pid: server_pid,
+        child_view_supervisor: child_view_supervisor,
+        remote_inspector_supervisor: remote_inspector_supervisor,
+        halt_fun: Keyword.get_lazy(opts, :halt_fun, &default_halt_fun/0),
+        alt_screen?: alt_screen?,
+        enhanced_keyboard?: enhanced_keyboard?,
+        iex_shell_proxy: iex_shell_proxy,
+        silent_group_leader: silent_group_leader,
+        terminal_cleanup: terminal_cleanup,
+        global_keybindings: Keyword.get(opts, :global_keybindings, [])
+      }
+
+      Enum.each(Enum.reverse(deferred_messages), &send(self(), &1))
+
+      {:ok, state, {:continue, {:maybe_start_theme_probe, Keyword.get(opts, :theme)}}}
+    catch
+      kind, reason ->
+        stacktrace = __STACKTRACE__
+
+        cleanup_failed_start(
+          terminal,
+          terminal_cleanup,
+          nil,
+          nil,
+          iex_shell_proxy,
+          silent_group_leader
+        )
+
+        :erlang.raise(kind, reason, stacktrace)
+    after
+      Process.flag(:trap_exit, previous_trap_exit)
+    end
   end
 
   @impl true
@@ -594,6 +624,22 @@ defmodule Breeze.InputRouter do
   catch
     :exit, :noproc -> :ok
     :exit, {:noproc, {GenServer, :stop, _args}} -> :ok
+  end
+
+  defp cleanup_failed_start(
+         terminal,
+         terminal_cleanup,
+         child_view_supervisor,
+         remote_inspector_supervisor,
+         iex_shell_proxy,
+         silent_group_leader
+       ) do
+    Breeze.RemoteInspector.Supervisor.stop(remote_inspector_supervisor)
+    Breeze.ChildViewSupervisor.stop(child_view_supervisor)
+    IExShellProxy.stop(iex_shell_proxy)
+    SilentGroupLeader.stop(silent_group_leader)
+    _ = TerminalCleanup.restore(terminal_cleanup, terminal)
+    :ok
   end
 
   defp enable_enhanced_keyboard(terminal) do
