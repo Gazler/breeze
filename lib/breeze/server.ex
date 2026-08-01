@@ -398,7 +398,7 @@ defmodule Breeze.Server do
         end
       )
 
-    {:ok, view_pid} = child_start_result
+    view_pid = unwrap_start_result(child_start_result)
 
     Process.monitor(view_pid)
 
@@ -477,6 +477,14 @@ defmodule Breeze.Server do
 
     {:ok, render_base(state)}
   end
+
+  defp unwrap_start_result({:ok, pid}) when is_pid(pid), do: pid
+
+  defp unwrap_start_result({:error, {reason, stacktrace}}) when is_list(stacktrace) do
+    :erlang.raise(:error, reason, stacktrace)
+  end
+
+  defp unwrap_start_result({:error, reason}), do: exit(reason)
 
   @impl true
   def handle_call(:stats, _from, state) do
