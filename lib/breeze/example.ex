@@ -6,7 +6,7 @@ defmodule Breeze.Example do
       case server_opts
            |> Keyword.put_new(:logger, :replace)
            |> start_server() do
-        {:ok, _pid} -> keep_alive(Keyword.get(opts, :keep_alive, :infinity))
+        {:ok, pid} -> keep_alive(pid, Keyword.get(opts, :keep_alive, :infinity))
         {:error, reason} -> raise_start_error(reason)
       end
     end
@@ -17,14 +17,30 @@ defmodule Breeze.Example do
       System.get_env("BREEZE_LOAD_EXAMPLES_ONLY") in ["1", "true", "TRUE"]
   end
 
-  defp keep_alive(:infinity) do
+  defp keep_alive(pid, :infinity) do
+    ref = Process.monitor(pid)
+
     receive do
+      {:DOWN, ^ref, :process, ^pid, reason} -> session_result(reason)
     end
   end
 
-  defp keep_alive(timeout) when is_integer(timeout) and timeout >= 0 do
-    :timer.sleep(timeout)
+  defp keep_alive(pid, timeout) when is_integer(timeout) and timeout >= 0 do
+    ref = Process.monitor(pid)
+
+    receive do
+      {:DOWN, ^ref, :process, ^pid, reason} ->
+        session_result(reason)
+    after
+      timeout ->
+        Process.demonitor(ref, [:flush])
+        Breeze.Server.stop(pid)
+    end
   end
+
+  defp session_result(reason) when reason in [:normal, :shutdown], do: :ok
+  defp session_result({:shutdown, _reason}), do: :ok
+  defp session_result(reason), do: exit(reason)
 
   defp start_server(server_opts) do
     previous_trap_exit = Process.flag(:trap_exit, true)
