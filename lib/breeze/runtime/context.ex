@@ -37,7 +37,7 @@ defmodule Breeze.Runtime.Context do
   @spec metadata(t()) :: map()
   def metadata(%__MODULE__{metadata: metadata}), do: metadata
 
-  @doc "Returns the source server PID."
+  @doc "Returns the source runtime controller PID."
   @spec server_pid(t()) :: pid()
   def server_pid(%__MODULE__{} = context), do: context |> metadata() |> Map.fetch!(:server_pid)
 

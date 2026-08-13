@@ -6,6 +6,11 @@ defmodule Breeze.Runtime.State do
   or replace a view runtime, including assigns, focus, implicit state, and
   nested live-view state. It intentionally omits process identifiers,
   monitors, render timers, terminal handles, and invalidation callbacks.
+
+  Treat this struct and its nested values as opaque. Captured assigns may hold
+  arbitrary application terms, so state is only intended for short-lived use
+  in the same BEAM instance with the same Breeze and application code. It does
+  not provide a persistent storage or migration format.
   """
 
   alias __MODULE__.View

@@ -2,6 +2,14 @@ defmodule Breeze.Server do
   @moduledoc """
   Public server entrypoint for Breeze applications.
 
+  `start_link/1` returns the PID of the complete Breeze session. Use that PID
+  with `stop/1`; renderer and view processes behind the session are private
+  implementation details.
+
+  A view that returns `{:stop, term}` ends only its session. It restores the
+  terminal and releases session-owned processes without halting the host VM,
+  so SSH listeners, supervisors, and sibling sessions continue running.
+
   ## Startup Options
 
   `start_link/1` and `run/1` accept these public startup options:
@@ -137,7 +145,7 @@ defmodule Breeze.Server do
   @doc """
   Start the Breeze application.
 
-  See the module documentation for startup options.
+  Returns the session PID. See the module documentation for startup options.
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -171,7 +179,12 @@ defmodule Breeze.Server do
     end
   end
 
-  @doc "Stops a Breeze session after restoring its terminal and releasing owned resources."
+  @doc """
+  Stops a Breeze session after restoring its terminal and releasing owned
+  resources.
+
+  Stopping an already-terminated session is a no-op.
+  """
   @spec stop(pid()) :: :ok
   def stop(pid) when is_pid(pid) do
     GenServer.stop(pid, :normal, :infinity)

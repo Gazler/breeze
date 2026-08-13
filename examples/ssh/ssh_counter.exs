@@ -75,7 +75,6 @@ defmodule SSHCounterEntrypoint do
       view: SSHCounter,
       start_opts: [username: session.username],
       terminal_opts: Termite.SSH.Session.terminal_opts(session),
-      halt_fun: fn -> :ok end,
       global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
     )
   end

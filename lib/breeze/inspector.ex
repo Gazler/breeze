@@ -76,8 +76,10 @@ defmodule Breeze.Inspector do
 
   Use `Breeze.Server.Diagnostics.inspector_snapshot/1` to read the latest
   snapshot or `Breeze.Server.Diagnostics.subscribe_inspector/2` to receive
-  updates. The functions in this module operate on internal server state and
-  are not part of the public inspector API.
+  updates. Pass the runtime controller PID reported by inspector snapshots or
+  resolved through `Breeze.Server.runtime_pid/1`. The functions in this module
+  operate on internal server state and are not part of the public inspector
+  API.
   """
 
   alias Breeze.Viewport

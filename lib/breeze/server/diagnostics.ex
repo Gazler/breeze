@@ -1,16 +1,20 @@
 defmodule Breeze.Server.Diagnostics do
   @moduledoc """
-  Developer-facing diagnostics for a running Breeze server.
+  Developer-facing diagnostics for a Breeze runtime.
 
   Use this module to read the latest rendering statistics or inspector state,
   and to subscribe a process to either stream. Subscribers are monitored and
   automatically removed when they exit.
 
+  Every function accepts the runtime controller PID reported by runtime hooks
+  and inspector snapshots. Tooling that begins with a session can resolve it
+  through `Breeze.Server.runtime_pid/1`.
+
   Statistics subscribers receive `{:debug_stats, stats}` messages. Inspector
   subscribers receive `{:inspector_snapshot, snapshot}` messages.
   """
 
-  @doc "Returns the latest rendering and interaction statistics for a server."
+  @doc "Returns the latest rendering and interaction statistics for a runtime."
   @spec stats(pid()) :: map()
   def stats(server) when is_pid(server) do
     GenServer.call(server, :stats)
@@ -28,7 +32,7 @@ defmodule Breeze.Server.Diagnostics do
     GenServer.cast(server, {:subscribe_debug, subscriber})
   end
 
-  @doc "Returns the latest inspector snapshot for a server."
+  @doc "Returns the latest inspector snapshot for a runtime."
   @spec inspector_snapshot(pid()) :: map()
   def inspector_snapshot(server) when is_pid(server) do
     GenServer.call(server, :inspector_snapshot)
