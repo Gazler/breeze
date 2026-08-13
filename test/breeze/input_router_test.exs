@@ -801,8 +801,7 @@ defmodule Breeze.InputRouterTest do
         inspector: [remote: false],
         runtime_hooks: [{SessionHook, owner: self()}],
         hide_cursor: false,
-        terminal_opts: [adapter: FakeAdapter],
-        halt_fun: fn -> :ok end
+        terminal_opts: [adapter: FakeAdapter]
       )
 
     runtime_pid = Breeze.Server.runtime_pid(session_pid)
@@ -831,8 +830,7 @@ defmodule Breeze.InputRouterTest do
         view: BlockingView,
         start_opts: [parent: self()],
         hide_cursor: false,
-        terminal_opts: [adapter: FakeAdapter],
-        halt_fun: fn -> :ok end
+        terminal_opts: [adapter: FakeAdapter]
       )
 
     runtime_pid = Breeze.Server.runtime_pid(session_pid)
@@ -849,15 +847,12 @@ defmodule Breeze.InputRouterTest do
   end
 
   test "input router owns the session view supervisor and stops it on hangup" do
-    parent = self()
-
     {:ok, router} =
       start_input_router(
         view: SessionRootView,
         alt_screen: false,
         hide_cursor: false,
-        terminal_opts: [adapter: FakeAdapter],
-        halt_fun: fn -> send(parent, :halted) end
+        terminal_opts: [adapter: FakeAdapter]
       )
 
     router_state = :sys.get_state(router)
@@ -890,7 +885,6 @@ defmodule Breeze.InputRouterTest do
     router_ref = Process.monitor(router)
     send(router, {router_state.reader, {:signal, :hup}})
 
-    assert_receive :halted, 500
     assert_receive {:DOWN, ^router_ref, :process, ^router, :normal}, 500
 
     wait_until(fn ->
@@ -898,7 +892,7 @@ defmodule Breeze.InputRouterTest do
     end)
   end
 
-  test "stopping the input router also stops its app server" do
+  test "stopping a session waits for its app server and terminal cleanup" do
     parent = self()
 
     {:ok, router} =
@@ -906,8 +900,7 @@ defmodule Breeze.InputRouterTest do
         view: BlockingView,
         start_opts: [parent: parent],
         hide_cursor: false,
-        terminal_opts: [adapter: FakeAdapter, owner: parent],
-        halt_fun: fn -> send(parent, :halted) end
+        terminal_opts: [adapter: FakeAdapter, owner: parent]
       )
 
     assert_receive {:terminal_write, "\e[>1u\e[>4;2m"}
@@ -915,11 +908,79 @@ defmodule Breeze.InputRouterTest do
     server = :sys.get_state(router).server_pid
     server_ref = Process.monitor(server)
 
-    assert :ok = stop_gen_server(router)
-    assert_receive :halted, 500
+    assert :ok = Breeze.Server.stop(router)
+    refute Process.alive?(router)
+    refute Process.alive?(server)
     assert_receive {:terminal_write, "\e[<u\e[>4;0m"}
     assert_receive {:terminal_write, "\e[?1049l"}
     assert_receive {:DOWN, ^server_ref, :process, ^server, :shutdown}, 500
+  end
+
+  @tag capture_log: true
+  test "an unexpected app server exit propagates through the session after cleanup" do
+    parent = self()
+
+    {:ok, session_pid} =
+      start_input_router(
+        view: BlockingView,
+        start_opts: [parent: parent],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter, owner: parent]
+      )
+
+    server_pid = :sys.get_state(session_pid).server_pid
+    session_ref = Process.monitor(session_pid)
+
+    Process.exit(server_pid, :unexpected_failure)
+
+    assert_receive {:terminal_write, "\e[<u\e[>4;0m"}
+    assert_receive {:terminal_write, "\e[?1049l"}
+
+    assert_receive {:DOWN, ^session_ref, :process, ^session_pid, :unexpected_failure}, 500
+  end
+
+  test "a forced session shutdown also stops its private app server" do
+    {:ok, session_pid} =
+      start_input_router(
+        view: BlockingView,
+        start_opts: [parent: self()],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter]
+      )
+
+    server_pid = Breeze.Server.runtime_pid(session_pid)
+    session_ref = Process.monitor(session_pid)
+    server_ref = Process.monitor(server_pid)
+
+    Process.exit(session_pid, :shutdown)
+
+    assert_receive {:DOWN, ^session_ref, :process, ^session_pid, :shutdown}, 500
+    assert_receive {:DOWN, ^server_ref, :process, ^server_pid, :shutdown}, 500
+  end
+
+  test "stopping one session leaves another session running" do
+    {:ok, first} =
+      start_input_router(
+        view: BlockingView,
+        start_opts: [parent: self()],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter]
+      )
+
+    {:ok, second} =
+      start_input_router(
+        view: BlockingView,
+        start_opts: [parent: self()],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter]
+      )
+
+    assert :ok = Breeze.Server.stop(first)
+    refute Process.alive?(first)
+    assert Process.alive?(second)
+
+    assert {:ok, %Breeze.Runtime.State{}} =
+             second |> Breeze.Server.runtime_pid() |> Breeze.Runtime.capture_state()
   end
 
   test "CLI exit cleanup restores the terminal once while the router is still running" do
@@ -936,7 +997,6 @@ defmodule Breeze.InputRouterTest do
         start_opts: [parent: parent],
         hide_cursor: false,
         terminal_opts: [adapter: FakeAdapter, owner: parent],
-        halt_fun: fn -> send(parent, :halted) end,
         internal: [at_exit_register: register_at_exit]
       )
 
@@ -947,10 +1007,8 @@ defmodule Breeze.InputRouterTest do
     assert_receive {:terminal_write, "\e[<u\e[>4;0m"}
     assert_receive {:terminal_write, "\e[?1049l"}
     assert Process.alive?(router)
-    refute_received :halted
 
-    assert :ok = stop_gen_server(router)
-    assert_receive :halted, 500
+    assert :ok = Breeze.Server.stop(router)
     refute_receive {:terminal_write, "\e[<u\e[>4;0m"}, 50
     refute_receive {:terminal_write, "\e[?1049l"}, 50
   end
@@ -972,7 +1030,6 @@ defmodule Breeze.InputRouterTest do
                reload: [force?: true, watcher_module: __MODULE__.MissingWatcher],
                hide_cursor: false,
                terminal_opts: [adapter: FakeAdapter, owner: parent],
-               halt_fun: fn -> :ok end,
                internal: [at_exit_register: register_at_exit]
              )
 
@@ -1003,7 +1060,6 @@ defmodule Breeze.InputRouterTest do
                mouse: :invalid,
                hide_cursor: false,
                terminal_opts: [adapter: FakeAdapter, owner: parent],
-               halt_fun: fn -> :ok end,
                internal: [at_exit_register: register_at_exit]
              )
 
@@ -1025,7 +1081,6 @@ defmodule Breeze.InputRouterTest do
         start_opts: [parent: parent],
         hide_cursor: false,
         terminal_opts: [adapter: FakeAdapter],
-        halt_fun: fn -> send(parent, :halted) end,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -1036,7 +1091,6 @@ defmodule Breeze.InputRouterTest do
     assert_receive :started, 500
 
     send(pid, {reader, {:data, "q"}})
-    assert_receive :halted, 500
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
   end
 
@@ -1448,22 +1502,19 @@ defmodule Breeze.InputRouterTest do
     assert :sys.get_state(pid).focused == "button"
   end
 
-  test "ctrl-c always halts regardless of global keybindings" do
-    assert_ctrl_c_halts("\x03")
-    assert_ctrl_c_halts("\e[99;5u")
-    assert_ctrl_c_halts("\e[27;5;99u")
-    assert_ctrl_c_halts("\e[27;5;99~")
+  test "ctrl-c always stops the session regardless of global keybindings" do
+    assert_ctrl_c_stops("\x03")
+    assert_ctrl_c_stops("\e[99;5u")
+    assert_ctrl_c_stops("\e[27;5;99u")
+    assert_ctrl_c_stops("\e[27;5;99~")
   end
 
-  test "ctrl-c halts even when a focused implicit captures printable input" do
-    parent = self()
-
+  test "ctrl-c stops the session even when a focused implicit captures printable input" do
     {:ok, pid} =
       start_input_router(
         view: FocusedInputView,
         hide_cursor: false,
-        terminal_opts: [adapter: FakeAdapter],
-        halt_fun: fn -> send(parent, :halted) end
+        terminal_opts: [adapter: FakeAdapter]
       )
 
     ref = Process.monitor(pid)
@@ -1480,7 +1531,6 @@ defmodule Breeze.InputRouterTest do
 
     send(pid, {reader, {:data, "\e[99;5u"}})
 
-    assert_receive :halted, 500
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
   end
 
@@ -1492,8 +1542,7 @@ defmodule Breeze.InputRouterTest do
         view: FocusedCaptureView,
         start_opts: [parent: parent],
         hide_cursor: false,
-        terminal_opts: [adapter: FakeAdapter],
-        halt_fun: fn -> send(parent, :halted) end
+        terminal_opts: [adapter: FakeAdapter]
       )
 
     state = :sys.get_state(pid)
@@ -1511,7 +1560,7 @@ defmodule Breeze.InputRouterTest do
 
     assert_receive {:captured, %{"ctrlKey" => true, "key" => "c"}}
     _state = :sys.get_state(pid)
-    refute_received :halted
+    assert Process.alive?(pid)
 
     stop_gen_server(pid)
   end
@@ -1524,8 +1573,7 @@ defmodule Breeze.InputRouterTest do
         view: FocusedCaptureView,
         start_opts: [parent: parent],
         hide_cursor: false,
-        terminal_opts: [adapter: FakeAdapter],
-        halt_fun: fn -> send(parent, :halted) end
+        terminal_opts: [adapter: FakeAdapter]
       )
 
     state = :sys.get_state(pid)
@@ -1547,7 +1595,7 @@ defmodule Breeze.InputRouterTest do
     end
 
     _state = :sys.get_state(pid)
-    refute_received :halted
+    assert Process.alive?(pid)
     stop_gen_server(pid)
   end
 
@@ -1559,8 +1607,7 @@ defmodule Breeze.InputRouterTest do
         view: FocusedCaptureView,
         start_opts: [parent: parent],
         hide_cursor: false,
-        terminal_opts: [adapter: FakeAdapter],
-        halt_fun: fn -> send(parent, :halted) end
+        terminal_opts: [adapter: FakeAdapter]
       )
 
     state = :sys.get_state(pid)
@@ -1581,7 +1628,7 @@ defmodule Breeze.InputRouterTest do
     assert_receive {:captured, %{"key" => "ShiftTab"}}
 
     _state = :sys.get_state(pid)
-    refute_received :halted
+    assert Process.alive?(pid)
     assert :sys.get_state(server_pid).focused == "capture"
 
     stop_gen_server(pid)
@@ -1600,7 +1647,7 @@ defmodule Breeze.InputRouterTest do
     end)
   end
 
-  defp assert_ctrl_c_halts(sequence) do
+  defp assert_ctrl_c_stops(sequence) do
     parent = self()
 
     {:ok, pid} =
@@ -1609,7 +1656,6 @@ defmodule Breeze.InputRouterTest do
         start_opts: [parent: parent],
         hide_cursor: false,
         terminal_opts: [adapter: FakeAdapter],
-        halt_fun: fn -> send(parent, :halted) end,
         global_keybindings: []
       )
 
@@ -1618,7 +1664,6 @@ defmodule Breeze.InputRouterTest do
 
     send(pid, {reader, {:data, sequence}})
 
-    assert_receive :halted, 500
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
   end
 
@@ -1632,7 +1677,6 @@ defmodule Breeze.InputRouterTest do
         alt_screen: false,
         hide_cursor: false,
         terminal_opts: [adapter: FakeAdapter, owner: parent],
-        halt_fun: fn -> send(parent, :halted) end,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -1644,8 +1688,9 @@ defmodule Breeze.InputRouterTest do
     send(pid, {reader, {:data, "r"}})
     assert_receive :started, 500
 
+    ref = Process.monitor(pid)
     send(pid, {reader, {:data, "q"}})
-    assert_receive :halted, 500
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
 
     refute_received {:terminal_write, "\e[?1049l"}
   end
@@ -1659,16 +1704,16 @@ defmodule Breeze.InputRouterTest do
         start_opts: [parent: parent],
         hide_cursor: false,
         terminal_opts: [adapter: FakeAdapter, owner: parent],
-        halt_fun: fn -> send(parent, :halted) end,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
     assert_receive {:terminal_write, "\e[?1049h"}
 
     state = :sys.get_state(pid)
+    ref = Process.monitor(pid)
     send(pid, {state.reader, {:data, "q"}})
 
-    assert_receive :halted, 500
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
     assert_receive {:terminal_write, "\e[?1049l"}
   end
 
@@ -1681,16 +1726,16 @@ defmodule Breeze.InputRouterTest do
         start_opts: [parent: parent],
         hide_cursor: false,
         terminal_opts: [adapter: FakeAdapter, owner: parent],
-        halt_fun: fn -> send(parent, :halted) end,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
     assert_receive {:terminal_write, "\e[>1u\e[>4;2m"}
 
     state = :sys.get_state(pid)
+    ref = Process.monitor(pid)
     send(pid, {state.reader, {:data, "q"}})
 
-    assert_receive :halted, 500
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
     assert_receive {:terminal_write, "\e[<u\e[>4;0m"}
   end
 
@@ -1732,14 +1777,11 @@ defmodule Breeze.InputRouterTest do
   end
 
   defp assert_enhanced_shift_tab_moves_focus_backward(sequence) do
-    parent = self()
-
     {:ok, pid} =
       start_input_router(
         view: FocusCycleView,
         hide_cursor: false,
         terminal_opts: [adapter: FakeAdapter],
-        halt_fun: fn -> send(parent, :halted) end,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -1763,8 +1805,9 @@ defmodule Breeze.InputRouterTest do
       :sys.get_state(server_pid).focused == "one"
     end)
 
+    ref = Process.monitor(pid)
     send(pid, {reader, {:data, "q"}})
-    assert_receive :halted, 500
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
   end
 
   test "enhanced keyboard mode can be disabled" do
@@ -1777,16 +1820,16 @@ defmodule Breeze.InputRouterTest do
         enhanced_keyboard: false,
         hide_cursor: false,
         terminal_opts: [adapter: FakeAdapter, owner: parent],
-        halt_fun: fn -> send(parent, :halted) end,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
     refute_received {:terminal_write, "\e[>1u\e[>4;2m"}
 
     state = :sys.get_state(pid)
+    ref = Process.monitor(pid)
     send(pid, {state.reader, {:data, "q"}})
 
-    assert_receive :halted, 500
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
     refute_received {:terminal_write, "\e[<u\e[>4;0m"}
   end
 
@@ -1800,7 +1843,6 @@ defmodule Breeze.InputRouterTest do
         start_opts: [parent: parent],
         hide_cursor: false,
         terminal: terminal,
-        halt_fun: fn -> send(parent, :halted) end,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -1811,7 +1853,6 @@ defmodule Breeze.InputRouterTest do
     assert_receive :started, 500
 
     send(pid, {reader, {:data, "q"}})
-    assert_receive :halted, 500
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
   end
 
@@ -1854,15 +1895,12 @@ defmodule Breeze.InputRouterTest do
     assert Task.await(task) == :ok
   end
 
-  test "stop global keys do not halt when a focused implicit captures printable input" do
-    parent = self()
-
+  test "stop global keys do not stop a focused implicit that captures printable input" do
     {:ok, pid} =
       start_input_router(
         view: FocusedInputView,
         hide_cursor: false,
         terminal_opts: [adapter: FakeAdapter],
-        halt_fun: fn -> send(parent, :halted) end,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -1884,7 +1922,7 @@ defmodule Breeze.InputRouterTest do
     end)
 
     _state = :sys.get_state(pid)
-    refute_received :halted
+    assert Process.alive?(pid)
 
     stop_gen_server(pid)
   end
@@ -1898,7 +1936,6 @@ defmodule Breeze.InputRouterTest do
         start_opts: [parent: parent],
         hide_cursor: false,
         terminal_opts: [adapter: FakeAdapter],
-        halt_fun: fn -> send(parent, :halted) end,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
@@ -1921,7 +1958,7 @@ defmodule Breeze.InputRouterTest do
 
     assert_receive {:dynamically_captured, %{"key" => "q"}}, 500
     wait_for_input_callbacks(server_pid)
-    refute_received :halted
+    assert Process.alive?(pid)
 
     Process.exit(pid, :normal)
   end
@@ -1946,14 +1983,11 @@ defmodule Breeze.InputRouterThemeSyncTest do
   }
 
   test "switching to system theme after startup promotes to probed system mode" do
-    parent = self()
-
     {:ok, pid} =
       start_input_router(
         view: ThemeSwitchView,
         hide_cursor: false,
-        terminal_opts: [adapter: PaletteAdapter],
-        halt_fun: fn -> send(parent, :halted) end
+        terminal_opts: [adapter: PaletteAdapter]
       )
 
     state = :sys.get_state(pid)
@@ -1993,8 +2027,7 @@ defmodule Breeze.InputRouterThemeSyncTest do
         view: ThemeProbeLeakView,
         start_opts: [parent: parent],
         hide_cursor: false,
-        terminal_opts: [adapter: SplitPaletteAdapter],
-        halt_fun: fn -> send(parent, :halted) end
+        terminal_opts: [adapter: SplitPaletteAdapter]
       )
 
     state = :sys.get_state(pid)
@@ -2029,8 +2062,7 @@ defmodule Breeze.InputRouterThemeSyncTest do
         view: ThemeProbeLeakView,
         start_opts: [parent: parent],
         hide_cursor: false,
-        terminal_opts: [adapter: DelayedPaletteAdapter, owner: parent],
-        halt_fun: fn -> send(parent, :halted) end
+        terminal_opts: [adapter: DelayedPaletteAdapter, owner: parent]
       )
 
     state = :sys.get_state(pid)

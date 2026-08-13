@@ -60,7 +60,6 @@ defmodule Breeze.ExampleTest do
           logger: false,
           hide_cursor: false,
           terminal_opts: [adapter: FakeAdapter, owner: parent],
-          halt_fun: fn -> :ok end,
           internal: [at_exit_register: fn _callback -> :ok end]
         ],
         keep_alive: 0
@@ -82,7 +81,6 @@ defmodule Breeze.ExampleTest do
           logger: false,
           hide_cursor: false,
           terminal_opts: [adapter: FakeAdapter, owner: parent],
-          halt_fun: fn -> :ok end,
           internal: [at_exit_register: fn _callback -> :ok end]
         ],
         keep_alive: 0

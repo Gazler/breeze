@@ -44,9 +44,6 @@ defmodule Breeze.Server do
       when Breeze starts the terminal.
     * `:terminal` - an existing `%Termite.Terminal{}` to use instead
       of starting one.
-    * `:halt_fun` - function called when the input router exits.
-      Defaults to `System.halt/0` outside IEx and no-op inside IEx.
-      Use `fn -> :ok end` for embedded or SSH sessions.
     * `:render_errors` - crash rendering options. Pass
       `view: MyErrorView` to override the crash screen view. Defaults
       to the built-in crash view. Pass `keybindings: [...]` to configure
@@ -131,7 +128,6 @@ defmodule Breeze.Server do
           | {:terminal, %Termite.Terminal{}}
           | {:reload, boolean() | keyword()}
           | {:theme, Breeze.Theme.t() | map() | keyword() | atom()}
-          | {:halt_fun, (-> term())}
           | {:global_keybindings, list()}
           | {:inspector, boolean() | keyword()}
           | {:logger, false | :attach | :replace | keyword()}
@@ -157,10 +153,7 @@ defmodule Breeze.Server do
   """
   @spec run(keyword()) :: :ok | {:error, term()}
   def run(opts) do
-    opts =
-      opts
-      |> Keyword.put_new_lazy(:halt_fun, fn -> fn -> :ok end end)
-      |> put_internal_new(:pause_iex, true)
+    opts = put_internal_new(opts, :pause_iex, true)
 
     case Breeze.InputRouter.start(opts) do
       {:ok, pid} ->
@@ -176,6 +169,15 @@ defmodule Breeze.Server do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  @doc "Stops a Breeze session after restoring its terminal and releasing owned resources."
+  @spec stop(pid()) :: :ok
+  def stop(pid) when is_pid(pid) do
+    GenServer.stop(pid, :normal, :infinity)
+  catch
+    :exit, :noproc -> :ok
+    :exit, {:noproc, {GenServer, :stop, _args}} -> :ok
   end
 
   @doc false
@@ -334,6 +336,8 @@ defmodule Breeze.Server do
     internal_opts = internal_opts(opts)
     child_process_flags = Keyword.get(internal_opts, :child_process_flags, [])
     terminal_size_override = Keyword.get(internal_opts, :terminal_size_override)
+    input_router = Keyword.get(opts, :input_router)
+    if is_pid(input_router), do: Process.monitor(input_router)
 
     {child_view_supervisor, owns_child_view_supervisor?} =
       child_view_supervisor(internal_opts)
@@ -431,7 +435,7 @@ defmodule Breeze.Server do
       %__MODULE__{
         terminal: terminal,
         reader: terminal.reader,
-        input_router: Keyword.get(opts, :input_router),
+        input_router: input_router,
         child_view_supervisor: child_view_supervisor,
         owns_child_view_supervisor?: owns_child_view_supervisor?,
         remote_inspector_supervisor: remote_inspector_supervisor,
@@ -714,7 +718,7 @@ defmodule Breeze.Server do
            Breeze.ChildServer.dispatch_info(state.view_pid, :resize, terminal, invalidate: false)
          end) do
       {:ok, {:stop, _focused}} ->
-        stop(state)
+        stop_runtime(state)
 
       {:ok, {:noreply, focused}} ->
         {:noreply, force_full_redraw(%{state | focused: focused}, :resize)}
@@ -797,7 +801,7 @@ defmodule Breeze.Server do
 
     case flush_input_batch(state) do
       {:stop, state} ->
-        stop(state)
+        stop_runtime(state)
 
       {:noreply, state} ->
         state =
@@ -920,6 +924,14 @@ defmodule Breeze.Server do
   def handle_info({:event_reply, _ref, _reply}, state), do: {:noreply, state}
 
   def handle_info(
+        {:DOWN, _ref, :process, pid, _reason},
+        %{input_router: pid} = state
+      )
+      when is_pid(pid) do
+    {:stop, :shutdown, state}
+  end
+
+  def handle_info(
         {:DOWN, ref, :process, _pid, _reason},
         %{frame: %{display_owner_ref: ref}} = state
       )
@@ -938,7 +950,7 @@ defmodule Breeze.Server do
   def handle_info(_message, state), do: {:noreply, state}
 
   defp handle_root_view_down(_reason, state) when not is_nil(state.crash), do: {:noreply, state}
-  defp handle_root_view_down(:normal, state), do: stop(state)
+  defp handle_root_view_down(:normal, state), do: stop_runtime(state)
 
   defp handle_root_view_down(reason, state) do
     {:noreply, enter_crash_state(state, crash_info(:exit, reason, []))}
@@ -1193,8 +1205,8 @@ defmodule Breeze.Server do
     {:noreply, enter_crash_state(state, crash)}
   end
 
-  defp apply_event_reply(state, {:stop, _focused}), do: stop(state)
-  defp apply_event_reply(state, {:stop, _focused, _consumed}), do: stop(state)
+  defp apply_event_reply(state, {:stop, _focused}), do: stop_runtime(state)
+  defp apply_event_reply(state, {:stop, _focused, _consumed}), do: stop_runtime(state)
 
   defp apply_event_reply(state, {:noreply, focused}) do
     {:noreply, finish_event_reply(state, focused, true)}
@@ -2568,7 +2580,7 @@ defmodule Breeze.Server do
 
   defp live_placeholder_style(_child, _state, _terminal), do: %{}
 
-  defp stop(state) do
+  defp stop_runtime(state) do
     state = FrameDisplay.clear(state)
     shutdown_root_view(state.child_view_supervisor, state.view_pid)
 

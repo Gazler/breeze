@@ -381,7 +381,6 @@ defmodule Posting.ServerEditingInputTest do
           enhanced_keyboard: false,
           hide_cursor: false,
           terminal: terminal,
-          halt_fun: fn -> :ok end,
           global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
         )
 

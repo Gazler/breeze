@@ -15,7 +15,6 @@ defmodule Breeze.InputRouter do
     :server_pid,
     :child_view_supervisor,
     :remote_inspector_supervisor,
-    :halt_fun,
     :theme_probe,
     :iex_shell_proxy,
     :silent_group_leader,
@@ -89,6 +88,7 @@ defmodule Breeze.InputRouter do
             exit(reason)
         end
 
+      Process.unlink(server_pid)
       Process.monitor(server_pid)
 
       state = %__MODULE__{
@@ -97,7 +97,6 @@ defmodule Breeze.InputRouter do
         server_pid: server_pid,
         child_view_supervisor: child_view_supervisor,
         remote_inspector_supervisor: remote_inspector_supervisor,
-        halt_fun: Keyword.get_lazy(opts, :halt_fun, &default_halt_fun/0),
         alt_screen?: alt_screen?,
         enhanced_keyboard?: enhanced_keyboard?,
         iex_shell_proxy: iex_shell_proxy,
@@ -177,8 +176,8 @@ defmodule Breeze.InputRouter do
 
   def handle_info({:theme_probe_drain_timeout, _key, _ref}, state), do: {:noreply, state}
 
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, %{server_pid: pid} = state) do
-    stop(state)
+  def handle_info({:DOWN, _ref, :process, pid, reason}, %{server_pid: pid} = state) do
+    {:stop, session_exit_reason(reason), state}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -196,7 +195,6 @@ defmodule Breeze.InputRouter do
     Breeze.ChildViewSupervisor.stop(state.child_view_supervisor)
     IExShellProxy.stop(state.iex_shell_proxy)
     SilentGroupLeader.stop(state.silent_group_leader)
-    state.halt_fun.()
     :ok
   end
 
@@ -586,14 +584,6 @@ defmodule Breeze.InputRouter do
     end
   end
 
-  defp default_halt_fun do
-    if iex_started?() do
-      fn -> :ok end
-    else
-      fn -> System.halt() end
-    end
-  end
-
   defp iex_started? do
     Code.ensure_loaded?(IEx) and function_exported?(IEx, :started?, 0) and IEx.started?()
   end
@@ -604,6 +594,10 @@ defmodule Breeze.InputRouter do
 
     {:stop, :normal, state}
   end
+
+  defp session_exit_reason(reason) when reason in [:normal, :shutdown], do: :normal
+  defp session_exit_reason({:shutdown, _reason}), do: :normal
+  defp session_exit_reason(reason), do: reason
 
   defp restore_terminal(%{terminal_restored?: true} = state), do: state
 
