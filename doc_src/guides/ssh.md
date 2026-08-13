@@ -17,7 +17,7 @@ Add `termite_ssh` to `mix.exs` alongside Breeze:
 ```elixir
 defp deps do
   [
-    {:breeze, "~> 0.5.0"},
+    {:breeze, "~> 0.6.0"},
     {:ecto_sql, "~> 3.14"},
     {:ecto_sqlite3, "~> 0.24.1"},
     {:phoenix_pubsub, "~> 2.2"},

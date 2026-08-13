@@ -1,3 +1,24 @@
+## [0.6.0] - 2026-08-13
+
+### Features
+
+- *(Breeze.Server)* [**breaking**] Stop sessions without halting the VM ([bb574c0](https://github.com/gazler/breeze/commit/bb574c0dc8a031a3a8e3292b044c72961c867a27))
+
+### Bug Fixes
+
+- *(Breeze.InputRouter)* Restore the terminal and surface session startup failures ([54153d3](https://github.com/gazler/breeze/commit/54153d3e89f005f68e8c18224b0a00681d1584fe))
+- *(Breeze.Runtime)* Preserve live state when replacement fails ([bf7fe35](https://github.com/gazler/breeze/commit/bf7fe35bc2295390fd5f933c89e26bd279d35836))
+- *(Breeze.Example)* Return when the session ends ([c309f3c](https://github.com/gazler/breeze/commit/c309f3c360d7657df8b14b897ad15bef3d08c1b1))
+
+### Refactor
+
+- *(Breeze.Server)* Separate session and runtime PIDs ([bb95a55](https://github.com/gazler/breeze/commit/bb95a55ddd26efe21644e152eadf52086586bda4))
+
+### Documentation
+
+- Document `:os_mon` configuration for the bounded render cache ([aac2b15](https://github.com/gazler/breeze/commit/aac2b1594668a838b7a2cd5d3d485c5454009367))
+- Explain the 0.6 session and runtime contracts ([ae73e04](https://github.com/gazler/breeze/commit/ae73e0491fc845ec8d6c9cc3c79323931f5a2496))
+
 ## [0.5.0] - 2026-07-30
 
 ### Features

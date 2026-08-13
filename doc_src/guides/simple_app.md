@@ -23,12 +23,12 @@ Then we add Breeze to `mix.exs`:
 ```elixir
 defp deps do
   [
-    {:breeze, "~> 0.5.0"}
+    {:breeze, "~> 0.6.0"}
   ]
 end
 ```
 
-`0.5.0` is the version this guide targets.
+`0.6.0` is the version this guide targets.
 
 Then we fetch dependencies:
 
