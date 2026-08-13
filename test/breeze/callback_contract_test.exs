@@ -77,6 +77,19 @@ defmodule Breeze.CallbackContractTest do
     end
   end
 
+  test "server and runtime layers do not special-case implicit modules" do
+    source_paths =
+      ["lib/breeze/server.ex", "lib/breeze/runtime.ex"] ++
+        Path.wildcard("lib/breeze/server/**/*.ex") ++
+        Path.wildcard("lib/breeze/runtime/**/*.ex")
+
+    for path <- Enum.uniq(source_paths) do
+      source = File.read!(path)
+      refute source =~ "Breeze.Implicit."
+      refute source =~ "Breeze.Implicit.{"
+    end
+  end
+
   defp behaviours(module) do
     module.module_info(:attributes)
     |> Keyword.get_values(:behaviour)

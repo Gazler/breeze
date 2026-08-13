@@ -403,6 +403,30 @@ defmodule Breeze.RuntimeTest do
       """
     end
   end
+
+  defmodule TransactionalRoot do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, assign(term, count: 0, crash?: false)}
+
+    def render(%{crash?: true}), do: raise("replacement render failed")
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box>count={@count}</box>
+        <live id="child" view={ForkChild}>
+        </live>
+      </box>
+      """
+    end
+
+    def handle_event(:increment, _event, term) do
+      {:noreply, assign(term, count: term.assigns.count + 1)}
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
 end
 
 defmodule Breeze.RuntimeTestCase do
@@ -439,7 +463,8 @@ defmodule Breeze.RuntimeTestCase do
         RecordingAdapter,
         RestoreChildrenRoot,
         StatefulImplicit,
-        TaggedHook
+        TaggedHook,
+        TransactionalRoot
       }
     end
   end

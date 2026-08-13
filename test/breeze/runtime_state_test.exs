@@ -232,11 +232,11 @@ defmodule Breeze.Runtime.StateTest do
     stop_gen_server(pid)
   end
 
-  test "replacement errors clean up the root and children started before the failure" do
+  test "a child startup failure leaves the running runtime unchanged" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
 
     {:ok, pid} = start_app_server(view: RestoreChildrenRoot, terminal: terminal)
-    supervisor = :sys.get_state(pid).child_view_supervisor
+    original = :sys.get_state(pid)
     assert {:ok, runtime_state} = Breeze.Runtime.capture_state(pid)
 
     invalid_child = %{runtime_state.root.children["b"] | view: FocusChild}
@@ -249,13 +249,68 @@ defmodule Breeze.Runtime.StateTest do
         }
     }
 
-    assert {:error, {"b", _reason}} = Breeze.Runtime.replace_state(pid, invalid_state)
+    assert {:error, {:state_replacement_failed, :children, {"b", _reason}}} =
+             Breeze.Runtime.replace_state(pid, invalid_state)
 
-    failed = :sys.get_state(pid)
-    assert failed.view_pid == nil
-    assert failed.children == %{}
-    assert failed.crash
-    assert %{active: 0} = DynamicSupervisor.count_children(supervisor)
+    unchanged = :sys.get_state(pid)
+    assert unchanged.view_pid == original.view_pid
+    assert unchanged.children == original.children
+    assert is_nil(unchanged.crash)
+
+    stop_gen_server(pid)
+  end
+
+  @tag capture_log: true
+  test "failed replacement keeps the running process tree and terminal intact" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+
+    {:ok, pid} = start_app_server(view: TransactionalRoot, terminal: terminal)
+    _initial_writes = drain_terminal_writes()
+
+    original = :sys.get_state(pid)
+    original_root = original.view_pid
+    original_child = original.children["child"].pid
+
+    original_process_count =
+      DynamicSupervisor.count_children(original.child_view_supervisor).active
+
+    assert {:ok, runtime_state} = Breeze.Runtime.capture_state(pid)
+
+    failing_root = %{
+      runtime_state.root
+      | term: %{
+          runtime_state.root.term
+          | assigns: Map.put(runtime_state.root.term.assigns, :crash?, true)
+        }
+    }
+
+    assert {:error, {:state_replacement_failed, :render, :runtime_stopped_during_staging}} =
+             Breeze.Runtime.replace_state(pid, %{runtime_state | root: failing_root})
+
+    unchanged = :sys.get_state(pid)
+    assert unchanged.view_pid == original_root
+    assert unchanged.children["child"].pid == original_child
+    assert unchanged.frame.base_output == original.frame.base_output
+    assert is_nil(unchanged.crash)
+    assert Process.alive?(original_root)
+    assert Process.alive?(original_child)
+
+    assert DynamicSupervisor.count_children(unchanged.child_view_supervisor).active ==
+             original_process_count
+
+    assert drain_terminal_writes() == []
+
+    assert {:noreply, _focused, true} =
+             Breeze.ChildServer.dispatch_event(original_root, :increment, %{})
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      Breeze.ChildServer.metadata(state.view_pid).assigns.count == 1 and
+        Enum.join(state.frame.last_lines || [], "\n") =~ "count=1"
+    end)
+
+    assert_receive {:terminal_write, _content}
 
     stop_gen_server(pid)
   end

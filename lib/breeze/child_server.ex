@@ -70,6 +70,11 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, {:put_global_keybindings, keybindings})
   end
 
+  @doc false
+  def put_terminal(pid, terminal) do
+    GenServer.call(pid, {:put_terminal, terminal})
+  end
+
   def put_theme(pid, theme, opts \\ []) do
     GenServer.call(pid, {:put_theme, theme, opts})
   end
@@ -269,6 +274,18 @@ defmodule Breeze.ChildServer do
 
   def handle_call({:put_global_keybindings, keybindings}, _from, term) do
     {:reply, :ok, %{term | global_keybindings: keybindings}}
+  end
+
+  def handle_call({:put_terminal, terminal}, _from, term) do
+    Enum.each(term.children, fn
+      {_id, %{pid: pid}} when is_pid(pid) ->
+        if Process.alive?(pid), do: put_terminal(pid, terminal)
+
+      _child ->
+        :ok
+    end)
+
+    {:reply, :ok, %{term | terminal: terminal}}
   end
 
   def handle_call({:put_theme, theme_input, opts}, _from, term) do

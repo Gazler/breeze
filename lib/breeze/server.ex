@@ -1039,35 +1039,28 @@ defmodule Breeze.Server do
          } = runtime_state,
          render_cause
        ) do
-    {state, replacement} = StateReplacement.prepare(state, runtime_state)
+    {candidate, context} = StateReplacement.prepare(state, runtime_state)
 
-    with {:ok, pid, focused, theme} <- start_root_view(state, replacement.root_state),
-         state <-
-           state
-           |> Map.put(:view_pid, pid)
-           |> Map.put(:focused, focused)
-           |> Map.put(:theme, theme),
-         {:ok, state} <- StateReplacement.start_children(state, replacement.children) do
-      state = maybe_render_base(state, render_cause)
+    case stage_runtime_state(candidate, context, render_cause) do
+      {:ok, candidate} ->
+        case StateReplacement.activate(candidate, context) do
+          {:ok, candidate} ->
+            candidate =
+              state
+              |> StateReplacement.commit(candidate)
+              |> render_frame()
+              |> schedule_animation()
 
-      if is_nil(state.crash) do
-        state = StateReplacement.restore_hooks(state, replacement.hooks)
+            {:ok, candidate}
 
-        {:ok, state}
-      else
-        failed_state =
-          state
-          |> StateReplacement.cleanup()
-          |> StateReplacement.restore_hooks(replacement.hooks)
+          {:error, reason, candidate} ->
+            StateReplacement.rollback(candidate)
+            {:error, replacement_error(:activate, reason), state}
+        end
 
-        {:error, :state_replacement_render_failed, failed_state}
-      end
-    else
-      {:error, reason, partial_state} ->
-        {:error, reason, failed_replacement_state(partial_state, replacement.hooks, reason)}
-
-      {:error, reason} ->
-        {:error, reason, failed_replacement_state(state, replacement.hooks, reason)}
+      {:error, phase, reason, candidate} ->
+        StateReplacement.rollback(candidate)
+        {:error, replacement_error(phase, reason), state}
     end
   end
 
@@ -1075,12 +1068,35 @@ defmodule Breeze.Server do
     {:error, {:view_mismatch, state.view, view}, state}
   end
 
-  defp failed_replacement_state(state, hooks, reason) do
-    state
-    |> StateReplacement.cleanup()
-    |> StateReplacement.restore_hooks(hooks)
-    |> enter_crash_state(Error.crash_info(:error, StateReplacement.error(reason), []))
+  defp stage_runtime_state(candidate, context, render_cause) do
+    case start_root_view(candidate, context.root_state) do
+      {:ok, pid, focused, theme} ->
+        candidate =
+          candidate
+          |> Map.put(:view_pid, pid)
+          |> Map.put(:focused, focused)
+          |> Map.put(:theme, theme)
+
+        case StateReplacement.start_children(candidate, context.children) do
+          {:ok, candidate} ->
+            candidate = maybe_render_base(candidate, render_cause)
+
+            if StateReplacement.ready?(candidate) do
+              {:ok, candidate}
+            else
+              {:error, :render, StateReplacement.failure(candidate), candidate}
+            end
+
+          {:error, reason, candidate} ->
+            {:error, :children, reason, candidate}
+        end
+
+      {:error, reason} ->
+        {:error, :root, reason, candidate}
+    end
   end
+
+  defp replacement_error(phase, reason), do: {:state_replacement_failed, phase, reason}
 
   defp flush_input_batch(state) do
     Input.flush_batch(state, input_handlers())

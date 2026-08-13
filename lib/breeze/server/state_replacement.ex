@@ -6,57 +6,104 @@ defmodule Breeze.Server.StateReplacement do
   alias Breeze.Server.State
 
   def prepare(state, %RuntimeState{root: %RuntimeState.View{} = root} = runtime_state) do
-    hooks = state.rendered.runtime_hooks
-
-    state =
-      state
-      |> FrameDisplay.discard()
-      |> put_hooks([])
-
-    terminate_processes(state)
-
     global_keybindings =
       case root.term do
         %Breeze.Term{global_keybindings: keybindings} when is_list(keybindings) -> keybindings
         _term -> state.input.global_keybindings
       end
 
-    state =
+    candidate =
       state
+      |> Map.put(:terminal, staging_terminal(state.terminal))
       |> Map.put(:view_pid, nil)
       |> Map.put(:start_opts, runtime_state.start_opts || [])
       |> Map.put(:children, %{})
       |> Map.put(:crash, nil)
       |> Map.put(:crash_scrollback?, false)
       |> Input.reset_pipeline(global_keybindings: global_keybindings)
-      |> Map.put(:frame, %State.Frame{last_render_at: System.monotonic_time(:millisecond)})
+      |> Map.put(:frame, %State.Frame{
+        last_render_at: System.monotonic_time(:millisecond),
+        display_sys_timeout: state.frame.display_sys_timeout
+      })
+      |> Map.put(:debug, staging_debug(state.debug))
+      |> Map.put(:inspector_state, staging_inspector(state.inspector_state))
       |> Map.put(:rendered, %State.Rendered{
         tracking_table: state.rendered.tracking_table,
         runtime_hooks: []
       })
 
     context = %{
-      hooks: hooks,
+      terminal: state.terminal,
+      hooks: state.rendered.runtime_hooks,
+      debug: state.debug,
+      inspector_state: state.inspector_state,
       root_state: root_state(root, runtime_state.focused),
       children: root.children
     }
 
-    {state, context}
+    {candidate, context}
   end
 
-  def restore_hooks(state, hooks) when is_list(hooks), do: put_hooks(state, hooks)
+  def activate(candidate, context) do
+    candidate = FrameDisplay.cancel_animation(candidate)
 
-  def cleanup(state) do
-    terminate_processes(state)
+    case put_runtime_terminal(candidate, context.terminal) do
+      :ok ->
+        debug =
+          struct!(candidate.debug,
+            subscribers: context.debug.subscribers,
+            push_timer: context.debug.push_timer
+          )
 
-    Enum.each(state.children, fn {_id, child} ->
-      case Map.get(child, :ref) do
-        ref when is_reference(ref) -> Process.demonitor(ref, [:flush])
-        _ref -> :ok
-      end
-    end)
+        inspector_state =
+          struct!(candidate.inspector_state,
+            config: context.inspector_state.config,
+            subscribers: context.inspector_state.subscribers
+          )
 
-    %{state | view_pid: nil, children: %{}}
+        frame =
+          struct!(candidate.frame,
+            last_payload: nil,
+            last_lines: nil,
+            last_overlays: []
+          )
+
+        {:ok,
+         candidate
+         |> Map.put(:terminal, context.terminal)
+         |> Map.put(:debug, debug)
+         |> Map.put(:inspector_state, inspector_state)
+         |> Map.put(:frame, frame)
+         |> put_hooks(context.hooks)}
+
+      {:error, reason} ->
+        {:error, reason, candidate}
+    end
+  end
+
+  def commit(original, candidate) do
+    _ = FrameDisplay.discard(original)
+    terminate_processes(original)
+    candidate
+  end
+
+  def rollback(candidate) do
+    candidate = FrameDisplay.cancel_animation(candidate)
+    terminate_processes(candidate)
+    demonitor_children(candidate.children)
+    :ok
+  end
+
+  def ready?(state) do
+    is_nil(state.crash) and alive?(state.view_pid) and
+      Enum.all?(state.children, fn {_id, child} -> alive?(Map.get(child, :pid)) end)
+  end
+
+  def failure(state) do
+    case state.crash do
+      nil -> :runtime_stopped_during_staging
+      crash -> crash
+    end
   end
 
   def start_children(state, children) when is_map(children) do
@@ -74,10 +121,6 @@ defmodule Breeze.Server.StateReplacement do
   end
 
   def start_children(state, _children), do: {:error, :invalid_runtime_state_children, state}
-
-  def error(reason) do
-    RuntimeError.exception("could not replace runtime state: #{inspect(reason)}")
-  end
 
   defp root_state(%RuntimeState.View{term: %Breeze.Term{} = term} = root, focused) do
     %{root | term: %{term | focused: focused}, children: %{}}
@@ -172,6 +215,56 @@ defmodule Breeze.Server.StateReplacement do
     |> Enum.each(&Breeze.ChildViewSupervisor.terminate_child(state.child_view_supervisor, &1))
   end
 
+  defp demonitor_children(children) do
+    Enum.each(children, fn {_id, child} ->
+      case Map.get(child, :ref) do
+        ref when is_reference(ref) -> Process.demonitor(ref, [:flush])
+        _ref -> :ok
+      end
+    end)
+  end
+
+  defp put_runtime_terminal(state, terminal) do
+    state.children
+    |> Map.values()
+    |> Enum.map(&Map.get(&1, :pid))
+    |> then(&[state.view_pid | &1])
+    |> Enum.uniq()
+    |> Enum.reduce_while(:ok, fn pid, :ok ->
+      case Error.safe_call(fn -> Breeze.ChildServer.put_terminal(pid, terminal) end) do
+        {:ok, :ok} -> {:cont, :ok}
+        {:ok, result} -> {:halt, {:error, {:unexpected_terminal_update_result, result}}}
+        {:crash, crash} -> {:halt, {:error, crash}}
+      end
+    end)
+  end
+
+  defp staging_terminal(%Termite.Terminal{} = terminal) do
+    %{terminal | adapter: {__MODULE__.TerminalAdapter, %{size: terminal.size}}}
+  end
+
+  defp staging_debug(debug) do
+    struct!(debug, subscribers: MapSet.new(), push_timer: make_ref())
+  end
+
+  defp staging_inspector(inspector) do
+    struct!(inspector,
+      config: local_inspector_config(inspector.config),
+      subscribers: MapSet.new()
+    )
+  end
+
+  defp local_inspector_config(false), do: false
+  defp local_inspector_config(nil), do: false
+  defp local_inspector_config(true), do: [remote: false]
+
+  defp local_inspector_config(config) when is_list(config),
+    do: Keyword.put(config, :remote, false)
+
+  defp local_inspector_config(config), do: config
+
+  defp alive?(pid), do: is_pid(pid) and Process.alive?(pid)
+
   defp put_hooks(state, hooks) do
     rendered = struct!(state.rendered, runtime_hooks: hooks)
     %{state | rendered: rendered}
@@ -179,4 +272,22 @@ defmodule Breeze.Server.StateReplacement do
 
   defp live_id(nil, id), do: id
   defp live_id(prefix, id), do: prefix <> "::" <> id
+end
+
+defmodule Breeze.Server.StateReplacement.TerminalAdapter do
+  @moduledoc false
+
+  @behaviour Termite.Terminal.Adapter
+
+  @impl true
+  def start(opts), do: {:ok, %{size: Keyword.get(opts, :size, %{width: 80, height: 24})}}
+
+  @impl true
+  def reader(_state), do: {:ok, make_ref()}
+
+  @impl true
+  def resize(state), do: state.size
+
+  @impl true
+  def write(state, _content), do: {:ok, state}
 end
