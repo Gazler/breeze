@@ -47,7 +47,6 @@ defmodule TaskPad.SSHEntrypoint do
       terminal_opts: Termite.SSH.Session.terminal_opts(session),
       theme: Breeze.Theme.builtin(:gruvbox),
       mouse: true,
-      halt_fun: fn -> :ok end,
       global_keybindings: [
         {"F3", "Cycle theme", &Breeze.View.cycle_theme/2},
         {"F10", "Disconnect", fn _event, term -> {:stop, term} end}
@@ -61,8 +60,10 @@ end
 `terminal_opts` route input, output, resize, and disconnect events through the
 same public `Breeze.Server.start_link/1` lifecycle used by a local terminal.
 
-`halt_fun` is a no-op because ending one view should close only that SSH
-session, not halt the VM that owns every connection. Passing `username` through
+The PID returned by `start_link/1` represents the complete session and is the
+handle `Termite.SSH` owns. Returning `{:stop, term}` from a view or calling
+`Breeze.Server.stop/1` closes only that SSH session; Breeze never halts the VM
+that owns the listener and every other connection. Passing `username` through
 `start_opts` is optional, but makes it available to `mount/2` as
 `opts[:username]`. Setting `connect_peers?: false` removes the local `n`
 keybinding and disables peer discovery for SSH sessions.

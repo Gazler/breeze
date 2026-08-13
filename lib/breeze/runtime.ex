@@ -7,7 +7,18 @@ defmodule Breeze.Runtime do
   decide when to capture it through `Breeze.Runtime.Hook` without Breeze
   imposing storage, history, or debugger semantics.
 
+  Pass the runtime controller PID to the server-oriented functions in this
+  module. Runtime hooks and inspector snapshots report that PID; tooling that
+  starts with a session can resolve it through `Breeze.Server.runtime_pid/1`.
+  Root-view PIDs remain private and may change after state replacement.
+
+  Runtime state can contain arbitrary application terms. It is intended for
+  short-lived use in the same BEAM instance, not serialization, durable
+  persistence, or transfer between Breeze versions.
+
   Replacing or starting from runtime state does not invoke `mount/2`.
+  Replacement is transactional: Breeze keeps the current view tree active
+  unless the candidate tree starts and renders successfully.
   """
 
   alias Breeze.Runtime.State
@@ -18,16 +29,21 @@ defmodule Breeze.Runtime do
 
   @type t :: %__MODULE__{
           pid: pid(),
-          terminal: Termite.Terminal.t()
+          terminal: %Termite.Terminal{}
         }
 
-  @doc "Exports opaque state from a running Breeze server."
+  @doc "Exports opaque state from a running Breeze session."
   @spec capture_state(pid(), keyword()) :: {:ok, State.t()} | {:error, term()}
   def capture_state(server_pid, opts \\ []) when is_pid(server_pid) and is_list(opts) do
     Breeze.Server.runtime_state(server_pid, opts)
   end
 
-  @doc "Replaces a running Breeze application's view runtime with exported state."
+  @doc """
+  Replaces a running Breeze application's view runtime with exported state.
+
+  Returns an error without changing the running view tree when startup or the
+  candidate render fails.
+  """
   @spec replace_state(pid(), State.t()) :: :ok | {:error, term()}
   def replace_state(server_pid, %State{} = runtime_state) when is_pid(server_pid) do
     Breeze.Server.replace_state(server_pid, runtime_state)

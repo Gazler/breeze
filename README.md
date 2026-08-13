@@ -146,6 +146,21 @@ Breeze.Example.run(
 Explore more applications in the
 [examples directory](https://github.com/Gazler/breeze/tree/master/examples).
 
+## Session lifecycle
+
+`Breeze.Server.start_link/1` returns the public PID for the complete terminal
+session. Stop it explicitly when an owning process needs to close the session:
+
+```elixir
+{:ok, session} = Breeze.Server.start_link(view: Demo)
+:ok = Breeze.Server.stop(session)
+```
+
+A view can also return `{:stop, term}` from its event lifecycle. Either path
+restores the terminal and ends only that session; it never halts the host VM.
+Use `Breeze.Server.run/1` when a caller should block until an interactive
+session exits.
+
 ## Storybook
 
 Place stories in `storybook/*.story.exs`, then launch the interactive browser
@@ -175,8 +190,7 @@ defmodule DemoEntrypoint do
     Breeze.Server.start_link(
       view: Demo,
       start_opts: [username: session.username],
-      terminal_opts: Termite.SSH.Session.terminal_opts(session),
-      halt_fun: fn -> :ok end
+      terminal_opts: Termite.SSH.Session.terminal_opts(session)
     )
   end
 end

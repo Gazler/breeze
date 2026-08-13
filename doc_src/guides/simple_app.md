@@ -446,6 +446,11 @@ checks them before normal focused view and component event routing, so they are 
 good fit for application-level controls such as quitting or cycling themes. We
 use `F10` for quitting so the command never competes with printable input.
 
+The `restart: :temporary` child specification matters for an interactive
+session: returning `{:stop, term}` ends that session normally, restores its
+terminal, and leaves the application VM and sibling children running. A
+permanent child would ask the supervisor to start the terminal session again.
+
 The `start_server?/0` guard keeps the interactive server out of `mix test`,
 where we use `Breeze.Test` to exercise the view directly.
 
