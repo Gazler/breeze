@@ -179,6 +179,12 @@ defmodule Breeze.Server do
   end
 
   @doc false
+  @spec runtime_pid(pid()) :: pid()
+  def runtime_pid(session_pid) when is_pid(session_pid) do
+    GenServer.call(session_pid, :runtime_pid)
+  end
+
+  @doc false
   @spec start_app_link(keyword()) :: GenServer.on_start()
   def start_app_link(opts) do
     GenServer.start_link(__MODULE__, opts)

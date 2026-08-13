@@ -773,6 +773,81 @@ defmodule Breeze.InputRouterTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule SessionHook do
+    @behaviour Breeze.Runtime.Hook
+
+    @impl true
+    def init(opts, metadata) do
+      send(Keyword.fetch!(opts, :owner), {:session_hook_init, metadata})
+      {:ok, opts}
+    end
+
+    @impl true
+    def handle_event(:rendered, context, opts) do
+      send(
+        Keyword.fetch!(opts, :owner),
+        {:session_hook_event, Breeze.Runtime.Context.server_pid(context)}
+      )
+
+      {:noreply, opts}
+    end
+  end
+
+  test "session exposes its runtime pid for tooling operations" do
+    {:ok, session_pid} =
+      start_input_router(
+        view: BlockingView,
+        start_opts: [parent: self()],
+        inspector: [remote: false],
+        runtime_hooks: [{SessionHook, owner: self()}],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter],
+        halt_fun: fn -> :ok end
+      )
+
+    runtime_pid = Breeze.Server.runtime_pid(session_pid)
+
+    assert runtime_pid != session_pid
+    assert_receive {:session_hook_init, %{server_pid: ^runtime_pid}}
+    assert_receive {:session_hook_event, ^runtime_pid}
+
+    assert {:ok, runtime_state} = Breeze.Runtime.capture_state(runtime_pid)
+    assert :ok = Breeze.Runtime.replace_state(runtime_pid, runtime_state)
+    assert :ok = Breeze.Runtime.pause(runtime_pid)
+    assert :ok = Breeze.Runtime.display_frame(runtime_pid, :live)
+
+    assert is_map(Breeze.Server.Diagnostics.stats(runtime_pid))
+
+    assert %{source: %{server_pid: ^runtime_pid}} =
+             Breeze.Server.Diagnostics.inspector_snapshot(runtime_pid)
+
+    assert :ok = Breeze.Server.Diagnostics.subscribe_inspector(runtime_pid)
+    assert_receive {:inspector_snapshot, %{source: %{server_pid: ^runtime_pid}}}
+  end
+
+  test "runtime call timeouts leave the session running" do
+    {:ok, session_pid} =
+      start_input_router(
+        view: BlockingView,
+        start_opts: [parent: self()],
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter],
+        halt_fun: fn -> :ok end
+      )
+
+    runtime_pid = Breeze.Server.runtime_pid(session_pid)
+    :ok = :sys.suspend(runtime_pid)
+
+    try do
+      assert {:timeout, {GenServer, :call, [^runtime_pid, {:runtime_state, _opts}, 25]}} =
+               catch_exit(Breeze.Runtime.capture_state(runtime_pid, call_timeout: 25))
+
+      assert Process.alive?(session_pid)
+    after
+      if Process.alive?(runtime_pid), do: :sys.resume(runtime_pid)
+    end
+  end
+
   test "input router owns the session view supervisor and stops it on hangup" do
     parent = self()
 

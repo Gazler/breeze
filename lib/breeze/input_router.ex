@@ -184,8 +184,8 @@ defmodule Breeze.InputRouter do
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
-  def handle_call(:stats, _from, state) do
-    {:reply, Breeze.Server.Diagnostics.stats(state.server_pid), state}
+  def handle_call(:runtime_pid, _from, state) do
+    {:reply, state.server_pid, state}
   end
 
   @impl true
