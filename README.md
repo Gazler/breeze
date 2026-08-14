@@ -49,6 +49,36 @@ def deps do
 end
 ```
 
+Breeze uses BackBreeze's bounded render cache. Add `:os_mon` to your
+application's `extra_applications` so the cache can size itself from the
+available system memory:
+
+```elixir
+def application do
+  [
+    extra_applications: [:logger, :os_mon]
+  ]
+end
+```
+
+BackBreeze does not start `:os_mon` transitively. If it is unavailable, startup
+logs a warning and the render cache uses a conservative 256 MiB limit. To use
+only the memory supervisor without disk-space alarms or CPU monitoring, add
+this to your application configuration:
+
+```elixir
+config :os_mon,
+  start_cpu_sup: false,
+  start_disksup: false
+```
+
+Alternatively, configure an explicit cache limit to avoid `:os_mon` and
+suppress the warning:
+
+```elixir
+config :back_breeze, render_cache_max_memory_bytes: 256 * 1_024 * 1_024
+```
+
 The ExDoc documentation includes API references and previews of the built-in
 blocks.
 

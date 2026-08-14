@@ -139,9 +139,16 @@ defmodule Breeze.CodeReloader do
     watcher_module = state.watcher_module
     paths = Enum.filter(state.paths, &File.dir?/1)
 
-    unless watcher_supported?(watcher_module) do
+    unless Code.ensure_loaded?(watcher_module) do
       raise ArgumentError,
-            "live reload requires a watcher module with start_link/1 and subscribe/1, got: #{inspect(watcher_module)}"
+            "live reload watcher #{inspect(watcher_module)} could not be loaded. " <>
+              "Add it as a direct dependency of your application or disable live reload with reload: false"
+    end
+
+    unless function_exported?(watcher_module, :start_link, 1) and
+             function_exported?(watcher_module, :subscribe, 1) do
+      raise ArgumentError,
+            "live reload watcher #{inspect(watcher_module)} must export start_link/1 and subscribe/1"
     end
 
     case watcher_module.start_link(dirs: paths) do
@@ -157,10 +164,5 @@ defmodule Breeze.CodeReloader do
         raise RuntimeError,
               "live reload failed to start #{inspect(watcher_module)}: #{Exception.format_exit(reason)}"
     end
-  end
-
-  defp watcher_supported?(watcher_module) do
-    Code.ensure_loaded?(watcher_module) and function_exported?(watcher_module, :start_link, 1) and
-      function_exported?(watcher_module, :subscribe, 1)
   end
 end

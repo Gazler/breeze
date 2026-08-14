@@ -880,6 +880,67 @@ defmodule Breeze.InputRouterTest do
     refute_receive {:terminal_write, "\e[?1049l"}, 50
   end
 
+  test "startup failure restores the terminal before returning the error" do
+    parent = self()
+    previous_trap_exit = Process.flag(:trap_exit, true)
+    on_exit(fn -> Process.flag(:trap_exit, previous_trap_exit) end)
+
+    register_at_exit = fn callback ->
+      send(parent, {:at_exit_callback, callback})
+      :ok
+    end
+
+    assert {:error, {%ArgumentError{message: message}, _stacktrace}} =
+             Breeze.InputRouter.start_link(
+               view: BlockingView,
+               start_opts: [parent: parent],
+               reload: [force?: true, watcher_module: __MODULE__.MissingWatcher],
+               hide_cursor: false,
+               terminal_opts: [adapter: FakeAdapter, owner: parent],
+               halt_fun: fn -> :ok end,
+               internal: [at_exit_register: register_at_exit]
+             )
+
+    assert message =~ "could not be loaded"
+    assert_receive {:at_exit_callback, callback}
+    assert_receive {:terminal_write, "\e[<u\e[>4;0m"}
+    assert_receive {:terminal_write, "\e[?1049l"}
+
+    assert :ok = callback.(1)
+    refute_receive {:terminal_write, "\e[<u\e[>4;0m"}, 50
+    refute_receive {:terminal_write, "\e[?1049l"}, 50
+  end
+
+  test "failure during terminal setup also restores the terminal" do
+    parent = self()
+    previous_trap_exit = Process.flag(:trap_exit, true)
+    on_exit(fn -> Process.flag(:trap_exit, previous_trap_exit) end)
+
+    register_at_exit = fn callback ->
+      send(parent, {:at_exit_callback, callback})
+      :ok
+    end
+
+    assert {:error, {:function_clause, _stacktrace}} =
+             Breeze.InputRouter.start_link(
+               view: BlockingView,
+               start_opts: [parent: parent],
+               mouse: :invalid,
+               hide_cursor: false,
+               terminal_opts: [adapter: FakeAdapter, owner: parent],
+               halt_fun: fn -> :ok end,
+               internal: [at_exit_register: register_at_exit]
+             )
+
+    assert_receive {:at_exit_callback, callback}
+    assert_receive {:terminal_write, "\e[<u\e[>4;0m"}
+    assert_receive {:terminal_write, "\e[?1049l"}
+
+    assert :ok = callback.(1)
+    refute_receive {:terminal_write, "\e[<u\e[>4;0m"}, 50
+    refute_receive {:terminal_write, "\e[?1049l"}, 50
+  end
+
   test "stop global keys are handled even while the app server is blocked" do
     parent = self()
 
