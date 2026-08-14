@@ -2816,7 +2816,9 @@ defmodule Breeze.Server do
         maybe_render_base(state, :reload)
 
       {:restart, state} ->
-        restart_root(state, :reload)
+        state
+        |> prepare_root_restart()
+        |> restart_root_clean(:reload)
 
       {:error, crash} ->
         enter_crash_state(state, crash)

@@ -955,6 +955,49 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule ReloadTimerView do
+    use Breeze.View
+
+    @tick_ms 10
+
+    def mount(opts, term) do
+      owner = Keyword.fetch!(opts, :owner)
+      generation = Keyword.get(opts, :generation, 0)
+
+      Process.send_after(self(), :tick, @tick_ms)
+      send(owner, {:reload_timer_mounted, generation})
+
+      term =
+        assign(term,
+          owner: owner,
+          generation: generation,
+          ticks: Keyword.get(opts, :ticks, 0)
+        )
+
+      term =
+        if Keyword.get(opts, :restore_flash?, false) do
+          put_flash(term, :success, "Reloaded", id: "reloaded", duration: 40)
+        else
+          term
+        end
+
+      {:ok, term}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>Generation: {@generation}; ticks: {@ticks}</box>
+      """
+    end
+
+    def handle_info(:tick, term) do
+      Process.send_after(self(), :tick, @tick_ms)
+      {:noreply, assign(term, ticks: term.assigns.ticks + 1)}
+    end
+
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule NestedReloadLeaf do
     use Breeze.View
 

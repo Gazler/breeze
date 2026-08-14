@@ -45,6 +45,7 @@ defmodule Breeze.TestSupport.LiveViewCase do
         ReloadableView,
         ReloadConfigView,
         ReloadStateView,
+        ReloadTimerView,
         RenderCrashingRoot,
         RenderOnlyChild,
         ResizeAdapter,

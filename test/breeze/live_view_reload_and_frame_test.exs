@@ -242,6 +242,59 @@ defmodule Breeze.LiveView.ReloadAndFrameTest do
     stop_gen_server(pid)
   end
 
+  test "refreshed start options remount the root and rearm process-owned timers" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+
+    {:ok, pid} =
+      start_app_server(
+        view: ReloadTimerView,
+        terminal: terminal,
+        start_opts: [owner: self()],
+        reload: [
+          force?: true,
+          watcher_module: FakeWatcher,
+          refresh_server_opts: {__MODULE__, :reload_timer_server_opts, []}
+        ]
+      )
+
+    assert_receive {:reload_timer_mounted, 0}, 500
+
+    ticks_before_reload =
+      wait_until(fn ->
+        ticks =
+          :sys.get_state(pid).view_pid
+          |> Breeze.ChildServer.metadata()
+          |> get_in([:assigns, :ticks])
+
+        if ticks > 0, do: ticks, else: false
+      end)
+
+    send(pid, {:reload, :code_changed, ["lib/breeze/view.ex"]})
+
+    assert_receive {:reload_timer_mounted, 1}, 500
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+      metadata = Breeze.ChildServer.metadata(state.view_pid)
+
+      Keyword.fetch!(state.start_opts, :generation) == 1 and
+        metadata.assigns.generation == 1 and
+        metadata.assigns.ticks > ticks_before_reload
+    end)
+
+    wait_until(fn ->
+      state = :sys.get_state(pid)
+
+      state.view_pid
+      |> Breeze.ChildServer.metadata()
+      |> get_in([:assigns, :breeze, :flash])
+      |> Breeze.Flash.entries()
+      |> Enum.empty?()
+    end)
+
+    stop_gen_server(pid)
+  end
+
   test "reloaded root global keybindings do not corrupt nested live child state" do
     {:ok, config_pid} =
       Agent.start_link(fn ->
@@ -701,6 +754,17 @@ defmodule Breeze.LiveView.ReloadAndFrameTest do
 
   def reload_state_server_opts(%{metadata: %{assigns: assigns}}) do
     [start_opts: [count: assigns.count]]
+  end
+
+  def reload_timer_server_opts(%{metadata: %{assigns: assigns}}) do
+    [
+      start_opts: [
+        owner: assigns.owner,
+        generation: assigns.generation + 1,
+        ticks: assigns.ticks,
+        restore_flash?: true
+      ]
+    ]
   end
 
   test "server restarts a live child when its view changes" do
