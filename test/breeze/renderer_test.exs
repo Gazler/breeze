@@ -435,6 +435,16 @@ defmodule Breeze.RendererTest do
     end
   end
 
+  defmodule EdgeBorderExample do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box class="width-10 height-4 border border-edge">Hello</box>
+      """
+    end
+  end
+
   defmodule PaddingBottomExample do
     use Breeze.View
 
@@ -963,6 +973,21 @@ defmodule Breeze.RendererTest do
                ┌─────┐
                │ Hey │
                └─────┘\
+               """
+    end
+
+    test "renders a complete edge border within the declared dimensions" do
+      {_, box} = Renderer.render(EdgeBorderExample, %{})
+
+      assert box.width == 10
+      assert box.height == 4
+
+      assert box.content ==
+               """
+               ▗▄▄▄▄▄▄▄▄▖
+               ▐Hello   ▌
+               ▐        ▌
+               ▝▀▀▀▀▀▀▀▀▘\
                """
     end
 

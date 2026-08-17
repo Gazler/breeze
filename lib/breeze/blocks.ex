@@ -2683,8 +2683,13 @@ defmodule Breeze.Blocks do
   defp utility_style_key("italic"), do: "font-style"
   defp utility_style_key("not-italic"), do: "font-style"
 
-  defp utility_style_key(token) when token in ["border-rounded", "border-square"],
-    do: "border-shape"
+  defp utility_style_key(token)
+       when token in ["border-line", "border-rounded", "border-square", "border-edge"],
+       do: "border-shape"
+
+  defp utility_style_key(token)
+       when token in ["border-t", "border-r", "border-b", "border-l", "border-x", "border-y"],
+       do: token
 
   defp utility_style_key("rounded"), do: "border-shape"
   defp utility_style_key("rounded-" <> _value), do: "border-shape"

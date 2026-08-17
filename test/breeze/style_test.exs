@@ -202,6 +202,100 @@ defmodule Breeze.StyleTest do
       assert element.style.border == BackBreeze.Border.line()
     end
 
+    test "supports border axis utilities" do
+      horizontal =
+        Style.empty()
+        |> Style.put_class("border-x")
+        |> Style.to_element([])
+
+      vertical =
+        Style.empty()
+        |> Style.put_class("border-y")
+        |> Style.to_element([])
+
+      assert horizontal.style.border.left == "│"
+      assert horizontal.style.border.right == "│"
+      assert horizontal.style.border.top == nil
+      assert horizontal.style.border.bottom == nil
+
+      assert vertical.style.border.top == "─"
+      assert vertical.style.border.bottom == "─"
+      assert vertical.style.border.left == nil
+      assert vertical.style.border.right == nil
+    end
+
+    test "composes border-edge with side utilities independent of class order" do
+      for class <- ["border-x border-edge", "border-edge border-x"] do
+        element =
+          Style.empty()
+          |> Style.put_class(class)
+          |> Style.to_element([])
+
+        assert element.style.border.style == :custom
+        assert element.style.border.left == "▐"
+        assert element.style.border.right == "▌"
+        assert element.style.border.top == nil
+        assert element.style.border.bottom == nil
+        refute Map.has_key?(element.attributes, :__breeze_border_state__)
+      end
+    end
+
+    test "supports top, bottom, and complete edge borders" do
+      vertical =
+        Style.empty()
+        |> Style.put_class("border-y border-edge")
+        |> Style.to_element([])
+
+      complete =
+        Style.empty()
+        |> Style.put_class("border border-edge")
+        |> Style.to_element([])
+
+      assert vertical.style.border.top == "▄"
+      assert vertical.style.border.bottom == "▀"
+      assert vertical.style.border.left == nil
+      assert vertical.style.border.right == nil
+
+      assert complete.style.border.top == "▄"
+      assert complete.style.border.right == "▌"
+      assert complete.style.border.bottom == "▀"
+      assert complete.style.border.left == "▐"
+      assert complete.style.border.top_left == "▗"
+      assert complete.style.border.top_right == "▖"
+      assert complete.style.border.bottom_left == "▝"
+      assert complete.style.border.bottom_right == "▘"
+    end
+
+    test "border-edge does not enable sides by itself" do
+      element =
+        Style.empty()
+        |> Style.put_class("border-edge")
+        |> Style.to_element([])
+
+      assert element.style.border == BackBreeze.Border.none()
+    end
+
+    test "border selectors preserve an explicitly selected edge style" do
+      for class <- ["border border-edge", "border-edge border"] do
+        element =
+          Style.empty()
+          |> Style.put_class(class)
+          |> Style.to_element([])
+
+        assert element.style.border.left == "▐"
+        assert element.style.border.right == "▌"
+      end
+    end
+
+    test "rounded-none restores the line border style" do
+      element =
+        Style.empty()
+        |> Style.put_class("rounded rounded-none")
+        |> Style.to_element([])
+
+      assert element.style.border == BackBreeze.Border.line()
+    end
+
     test "supports Tailwind reset utilities" do
       element =
         Style.empty()

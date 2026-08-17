@@ -131,6 +131,23 @@ defmodule Posting.LayoutTest do
     assert md_content =~ "echo post"
   end
 
+  test "request bar uses inward-facing edge borders" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    request_row =
+      box.content
+      |> visible()
+      |> String.split("\n")
+      |> Enum.find(&String.contains?(&1, "https://jsonplaceholder"))
+      |> String.trim()
+
+    assert String.starts_with?(request_row, "▐")
+    assert String.ends_with?(request_row, "▌")
+  end
+
   test "F1 opens help modal and focuses it, Escape closes and restores url focus" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
 

@@ -72,27 +72,27 @@ defmodule Posting do
               <box class="hidden md:block md:w-full text-right text-muted">{@user_host}</box>
             </box>
           </box>
-          <box class="grid grid-cols-5 h-2 pb-1">
-            <box class="text-primary w-1">▐</box>
-            <.dropdown
-              id="method"
-              selected={@method}
-              br-change="method_changed"
-              class="w-10"
-              item_class="bg-panel text"
-              menu_class="bg-panel text"
-            >
-              <:item :for={method <- @methods} value={method}>{method}</:item>
-            </.dropdown>
-            <.input
-              id="url"
-              input-value={@url}
-              input-placeholder="Enter URL"
-              br-change="url_changed"
-              class="w-full"
-            />
-            <.button class="w-8 pl-2" focusable="false">Send</.button>
-            <box class="bg-primary text-bg w-1">▐</box>
+          <box class="h-2 pb-1">
+            <box class="grid grid-cols-3 w-full h-full border-x border-edge border-primary">
+              <.dropdown
+                id="method"
+                selected={@method}
+                br-change="method_changed"
+                class="w-10"
+                item_class="bg-panel text"
+                menu_class="bg-panel text"
+              >
+                <:item :for={method <- @methods} value={method}>{method}</:item>
+              </.dropdown>
+              <.input
+                id="url"
+                input-value={@url}
+                input-placeholder="Enter URL"
+                br-change="url_changed"
+                class="w-full"
+              />
+              <.button class="w-8 pl-2" focusable="false">Send</.button>
+            </box>
           </box>
           <box class="grid grid-cols-1 grid-rows-2 h-full">
             <box class="grid grid-cols-1 md:grid-cols-2 h-full">

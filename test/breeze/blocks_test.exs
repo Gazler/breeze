@@ -892,6 +892,13 @@ defmodule Breeze.BlocksTest do
       assert Blocks.merge_class("rounded border-stroke", "border-primary") ==
                "rounded border-primary"
     end
+
+    test "keeps edge shape, side, and color utilities independent" do
+      assert Blocks.merge_class(
+               "border-rounded border-stroke",
+               "border-x border-edge border-primary"
+             ) == "border-edge border-primary border-x"
+    end
   end
 
   describe "merge_style/2" do

@@ -13,6 +13,9 @@ defmodule Breeze.Style do
 
   @breakpoint_thresholds [{160, "2xl"}, {120, "xl"}, {80, "lg"}, {60, "md"}, {40, "sm"}]
 
+  @border_state_attribute :__breeze_border_state__
+  @border_sides [:top, :right, :bottom, :left]
+
   @type state :: %{class: list(), style: list()}
 
   @spec empty() :: state()
@@ -63,6 +66,7 @@ defmodule Breeze.Style do
         style = style |> resolve_style_token([]) |> normalize_utility_alias()
         apply_style(style, acc, theme)
       end)
+      |> finalize_border()
 
     {bb_style, _attributes} =
       merge_style_map(normalize_style_map(style_state.style), {bb_style, %{}}, theme)
@@ -91,6 +95,7 @@ defmodule Breeze.Style do
 
         apply_style(style, acc, theme)
       end)
+      |> finalize_border()
 
     {bb_style, attributes} =
       merge_style_map(normalize_style_map(style_state.style), {bb_style, attributes}, theme)
@@ -119,7 +124,7 @@ defmodule Breeze.Style do
     struct(Breeze.Element, %{style: Map.from_struct(bb_style), attributes: attributes})
   end
 
-  defp apply_style("border", {style, attrs}, _theme), do: {BackBreeze.Style.border(style), attrs}
+  defp apply_style("border", acc, _theme), do: select_border_sides(acc, @border_sides)
   defp apply_style("bold", {style, attrs}, _theme), do: {BackBreeze.Style.bold(style), attrs}
   defp apply_style("italic", {style, attrs}, _theme), do: {BackBreeze.Style.italic(style), attrs}
 
@@ -474,29 +479,28 @@ defmodule Breeze.Style do
   defp apply_style("scrollbar-" <> color, acc, theme),
     do: apply_scrollbar_color(color, acc, theme)
 
-  defp apply_style("border-none", {style, attrs}, _theme),
-    do: {%{style | border: BackBreeze.Border.none()}, attrs}
+  defp apply_style("border-none", acc, _theme), do: reset_border(acc)
 
-  defp apply_style("border-invisible", {style, attrs}, _theme),
-    do: {%{style | border: BackBreeze.Border.invisible()}, attrs}
+  defp apply_style("border-invisible", acc, _theme),
+    do: select_border_style(acc, :invisible, @border_sides)
 
-  defp apply_style("border-rounded", {style, attrs}, _theme),
-    do: {BackBreeze.Style.border(style, :rounded), attrs}
+  defp apply_style("border-rounded", acc, _theme),
+    do: select_border_style(acc, :rounded, @border_sides)
 
-  defp apply_style("border-square", {style, attrs}, _theme),
-    do: {%{style | border: square_border()}, attrs}
+  defp apply_style("border-line", acc, _theme),
+    do: select_border_style(acc, :line, @border_sides)
 
-  defp apply_style("border-t", {style, attrs}, _theme),
-    do: {BackBreeze.Style.border_top(style), attrs}
+  defp apply_style("border-square", acc, _theme),
+    do: select_border_style(acc, :square, @border_sides)
 
-  defp apply_style("border-r", {style, attrs}, _theme),
-    do: {BackBreeze.Style.border_right(style), attrs}
+  defp apply_style("border-edge", acc, _theme), do: select_border_style(acc, :edge)
 
-  defp apply_style("border-b", {style, attrs}, _theme),
-    do: {BackBreeze.Style.border_bottom(style), attrs}
-
-  defp apply_style("border-l", {style, attrs}, _theme),
-    do: {BackBreeze.Style.border_left(style), attrs}
+  defp apply_style("border-x", acc, _theme), do: select_border_sides(acc, [:left, :right])
+  defp apply_style("border-y", acc, _theme), do: select_border_sides(acc, [:top, :bottom])
+  defp apply_style("border-t", acc, _theme), do: select_border_sides(acc, [:top])
+  defp apply_style("border-r", acc, _theme), do: select_border_sides(acc, [:right])
+  defp apply_style("border-b", acc, _theme), do: select_border_sides(acc, [:bottom])
+  defp apply_style("border-l", acc, _theme), do: select_border_sides(acc, [:left])
 
   defp apply_style("border-" <> color, acc, theme),
     do: apply_border_color(color, acc, theme)
@@ -534,6 +538,84 @@ defmodule Breeze.Style do
     end
   end
 
+  defp select_border_sides({style, attrs}, sides) do
+    state = border_state(attrs)
+    border_style = if(state.style == :none, do: nil, else: state.style)
+    state = %{state | sides: Enum.uniq(state.sides ++ sides), style: border_style}
+
+    {style, Map.put(attrs, @border_state_attribute, state)}
+  end
+
+  defp select_border_style(acc, border_style, sides \\ nil)
+
+  defp select_border_style({style, attrs}, border_style, nil) do
+    state = %{border_state(attrs) | style: border_style}
+    {style, Map.put(attrs, @border_state_attribute, state)}
+  end
+
+  defp select_border_style({style, attrs}, border_style, sides) do
+    state = %{border_state(attrs) | style: border_style, sides: sides}
+    {style, Map.put(attrs, @border_state_attribute, state)}
+  end
+
+  defp reset_border({style, attrs}) do
+    state = %{border_state(attrs) | style: :none, sides: []}
+    {style, Map.put(attrs, @border_state_attribute, state)}
+  end
+
+  defp border_state(attrs) do
+    Map.get(attrs, @border_state_attribute, %{style: nil, sides: []})
+  end
+
+  defp finalize_border({style, attrs}) do
+    case Map.pop(attrs, @border_state_attribute) do
+      {nil, attrs} ->
+        {style, attrs}
+
+      {%{style: :none}, attrs} ->
+        {%{style | border: BackBreeze.Border.none()}, attrs}
+
+      {%{sides: []}, attrs} ->
+        {%{style | border: BackBreeze.Border.none()}, attrs}
+
+      {%{style: border_style, sides: sides}, attrs} ->
+        border = border_for_sides(border_style || :line, sides)
+        {%{style | border: border}, attrs}
+    end
+  end
+
+  defp border_for_sides(border_style, sides) do
+    template = border_template(border_style)
+    sides = MapSet.new(sides)
+
+    %BackBreeze.Border{
+      style: template.style,
+      top: border_side(template, sides, :top),
+      right: border_side(template, sides, :right),
+      bottom: border_side(template, sides, :bottom),
+      left: border_side(template, sides, :left),
+      top_left: border_corner(template, sides, :top, :left, :top_left),
+      top_right: border_corner(template, sides, :top, :right, :top_right),
+      bottom_left: border_corner(template, sides, :bottom, :left, :bottom_left),
+      bottom_right: border_corner(template, sides, :bottom, :right, :bottom_right)
+    }
+  end
+
+  defp border_template(:line), do: BackBreeze.Border.line()
+  defp border_template(:rounded), do: BackBreeze.Border.rounded()
+  defp border_template(:invisible), do: BackBreeze.Border.invisible()
+  defp border_template(:square), do: square_border()
+  defp border_template(:edge), do: edge_border()
+
+  defp border_side(template, sides, side) do
+    if MapSet.member?(sides, side), do: Map.fetch!(template, side)
+  end
+
+  defp border_corner(template, sides, side_a, side_b, corner) do
+    if MapSet.member?(sides, side_a) and MapSet.member?(sides, side_b),
+      do: Map.fetch!(template, corner)
+  end
+
   # Breeze originally shipped verbose sizing and spacing names. Keep those
   # implementations as the canonical runtime path and translate the equivalent
   # Tailwind utility vocabulary before applying a token.
@@ -546,7 +628,7 @@ defmodule Breeze.Style do
 
   defp normalize_utility_alias("font-bold"), do: "bold"
   defp normalize_utility_alias("rounded"), do: "border-rounded"
-  defp normalize_utility_alias("rounded-none"), do: "border"
+  defp normalize_utility_alias("rounded-none"), do: "border-line"
   defp normalize_utility_alias("w-auto"), do: "width-auto"
   defp normalize_utility_alias("w-full"), do: "width-full"
   defp normalize_utility_alias("w-screen"), do: "width-screen"
@@ -839,6 +921,7 @@ defmodule Breeze.Style do
   defp normalize_border(:invisible), do: BackBreeze.Border.invisible()
   defp normalize_border(:rounded), do: BackBreeze.Border.rounded()
   defp normalize_border(:square), do: square_border()
+  defp normalize_border(:edge), do: edge_border()
   defp normalize_border(%BackBreeze.Border{} = value), do: value
   defp normalize_border(true), do: BackBreeze.Border.line()
   defp normalize_border(_value), do: BackBreeze.Border.none()
@@ -853,6 +936,19 @@ defmodule Breeze.Style do
       top_right: "▁",
       bottom_left: "▔",
       bottom_right: "▔"
+    })
+  end
+
+  defp edge_border do
+    BackBreeze.Border.custom(%{
+      top: "▄",
+      right: "▌",
+      bottom: "▀",
+      left: "▐",
+      top_left: "▗",
+      top_right: "▖",
+      bottom_left: "▝",
+      bottom_right: "▘"
     })
   end
 

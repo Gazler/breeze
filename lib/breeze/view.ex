@@ -178,13 +178,27 @@ defmodule Breeze.View do
      `grid-rows-n`, `gap-n`, `gap-x-n`, and `gap-y-n`
    * positioning - `absolute`, `fixed`, `inset-n`, `inset-x-n`, `inset-y-n`,
      `top-n`, `right-n`, `bottom-n`, `left-n`, and `z-n`
-   * borders - `border`, `border-t`, `border-r`, `border-b`, `border-l`, and
-     `rounded`, plus terminal-specific
-     `border-square`, `border-none`, and `border-invisible`
+   * borders - `border`, `border-x`, `border-y`, `border-t`, `border-r`,
+     `border-b`, `border-l`, and `rounded`, plus terminal-specific
+     `border-edge`, `border-square`, `border-none`, and `border-invisible`
    * overflow - `overflow-auto`, `overflow-hidden`, and `overflow-scroll`
 
   Breeze also provides terminal-specific utilities for colors, scrollbars,
   content repetition, scroll offsets, and foreground/background inversion.
+
+  Border side utilities compose with `border-edge`, which renders the selected
+  sides using inward-facing half-cell glyphs. The boundary sits halfway through
+  its terminal cell, allowing filled surfaces to line up with standard border
+  strokes in adjacent rows or panels. `border-edge` only selects the glyph
+  style, so it must be paired with `border` or a side utility:
+
+  ```heex
+  <box class="border-x border-edge border-primary">Horizontal edge</box>
+  <box class="border border-edge border-primary w-20 h-4">Edge frame</box>
+  ```
+
+  Each selected border side occupies one terminal cell inside an explicitly
+  declared width or height, just like the standard line and rounded borders.
 
   ### Grid layout
 
@@ -237,13 +251,13 @@ defmodule Breeze.View do
 
    * `text` - set the foreground to the theme's default text color
    * `bg` - set the background to the theme's default background color
-   * `text-x` - set the foreground color
-   * `bg-x` - set the background color
-   * `border-x` - set the border color
-   * `scrollbar-x` - set the scrollbar color
-   * `placeholder-text-x` - set an input placeholder's foreground color
+   * `text-{color}` - set the foreground color
+   * `bg-{color}` - set the background color
+   * `border-{color}` - set the border color
+   * `scrollbar-{color}` - set the scrollbar color
+   * `placeholder-text-{color}` - set an input placeholder's foreground color
 
-  For the color classes above, `x` can be a numeric ANSI color index or a
+  For the color classes above, `{color}` can be a numeric ANSI color index or a
   theme variable such as `primary`, `muted`, or `panel`. See
   [Breeze.Theme](`m:Breeze.Theme`) for the complete variable reference and
   custom theme configuration.
