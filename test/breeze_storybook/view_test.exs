@@ -385,6 +385,59 @@ defmodule Breeze.Storybook.ModalRenderingTest do
     assert plain_content =~ "Confirm Action"
     assert plain_content =~ "Escape closes it normally."
   end
+
+  test "closing the dimmed modal restores the Storybook backdrop" do
+    {terminal, pid} =
+      start_storybook_server!("modal.story.exs", theme: Breeze.Theme.builtin(:nebula))
+
+    reader = terminal.reader
+    {preview_pid, _viewport} = wait_for_preview_child(pid, "modal")
+    view_pid = :sys.get_state(pid).view_pid
+    trigger = "storybook-preview::storybook-modal-trigger"
+
+    assert {:noreply, ^trigger, true} = Breeze.ChildServer.set_focus(view_pid, trigger)
+    send(pid, :child_invalidated)
+
+    initial_output =
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+        if state.focused == trigger, do: state.frame.base_output, else: false
+      end)
+
+    drain_terminal_writes()
+    send(pid, {reader, {:data, "\r"}})
+
+    opened_output =
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+
+        if :sys.get_state(preview_pid).assigns.show_modal and
+             state.focused == "storybook-preview::storybook-modal-close" do
+          state.frame.base_output
+        else
+          false
+        end
+      end)
+
+    refute opened_output == initial_output
+
+    drain_terminal_writes()
+    send(pid, {reader, {:data, "\e"}})
+
+    closed_state =
+      wait_until(fn ->
+        state = :sys.get_state(pid)
+
+        if not :sys.get_state(preview_pid).assigns.show_modal and state.focused == trigger do
+          state
+        else
+          false
+        end
+      end)
+
+    assert closed_state.frame.base_output == initial_output
+    assert closed_state.debug.stats[:last_render_cause] == :child_invalidated
+  end
 end
 
 defmodule Breeze.Storybook.LayoutTest do

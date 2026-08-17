@@ -1543,7 +1543,11 @@ defmodule Breeze.Server do
       state
       |> Debug.increment_stat(:render_base_count)
       |> update_frame(base_output: base_output)
-      |> update_rendered(elements: viewports_from_acc(result.acc), boxes: result.acc.boxes)
+      |> update_rendered(
+        elements: viewports_from_acc(result.acc),
+        boxes: result.acc.boxes,
+        screen_dim?: screen_dim_in_acc?(result.acc)
+      )
       |> maybe_merge_inspector_render_data(result.acc)
       |> update_frame(decorations: decorations)
       |> Map.put(:focused, result.focused)
@@ -2109,11 +2113,12 @@ defmodule Breeze.Server do
              end
            )
          end) do
-      {:ok, {:ok, _child_acc, child_box, child_decorations}} ->
+      {:ok, {:ok, child_acc, child_box, child_decorations}} ->
         tracking = RenderTracking.finish(ctx.tracking_ref)
 
         {:ok,
          ctx
+         |> Map.put(:child_acc, child_acc)
          |> Map.put(:child_box, child_box)
          |> Map.put(:child_decorations, child_decorations)
          |> Map.put(:tracking, tracking)
@@ -2129,6 +2134,18 @@ defmodule Breeze.Server do
 
   defp validate_child_patch_render(%{tracking: %{missing: missing}}) when missing != [] do
     {:error, {:missing_live_children, missing}}
+  end
+
+  defp validate_child_patch_render(%{state: %{rendered: %{screen_dim?: true}}}) do
+    {:error, :screen_dim_active}
+  end
+
+  defp validate_child_patch_render(%{child_acc: child_acc} = ctx) do
+    if screen_dim_in_acc?(child_acc) do
+      {:error, :screen_dim_added}
+    else
+      ctx |> Map.delete(:child_acc) |> validate_child_patch_render()
+    end
   end
 
   defp validate_child_patch_render(%{
@@ -2154,6 +2171,14 @@ defmodule Breeze.Server do
         :ok
     end
   end
+
+  defp screen_dim_in_acc?(%{elements: elements}) when is_map(elements) do
+    Enum.any?(elements, fn {_index, flags} ->
+      Keyword.get(flags, :"screen-dim") in [true, "true"]
+    end)
+  end
+
+  defp screen_dim_in_acc?(_acc), do: false
 
   defp decoration_intersects_viewport?(%{layout: layout}, viewport),
     do: rectangles_intersect?(layout, viewport)

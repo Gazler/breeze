@@ -66,6 +66,7 @@ defmodule Breeze.Server.State.Rendered do
 
   defstruct tracking_table: nil,
             runtime_hooks: [],
+            screen_dim?: false,
             boxes: %{},
             elements: %{},
             render_tree: nil,
