@@ -159,6 +159,18 @@ defmodule Breeze.Implicit.TreeTest do
 
       assert scrolled.offset == 1
     end
+
+    test "wheel scroll bubbles at a viewport boundary" do
+      element = %{height: 3, viewport_height: 3, content_height: 10}
+      state = %{offset: 7}
+
+      assert {:bubble, ^state} =
+               Implicit.Tree.handle_event(
+                 :ignore,
+                 %{"mouse" => %{"button" => "wheel_down"}, "element" => element},
+                 state
+               )
+    end
   end
 
   describe "handle_modifiers/3" do

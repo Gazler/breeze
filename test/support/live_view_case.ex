@@ -36,6 +36,7 @@ defmodule Breeze.TestSupport.LiveViewCase do
         LiveAssignsRoot,
         LiveThenSiblingExample,
         MouseScrollLiveParent,
+        NestedMouseScrollLiveParent,
         NestedReloadChild,
         NestedReloadLeaf,
         ParentLiveExample,

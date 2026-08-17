@@ -979,6 +979,7 @@ defmodule Breeze.Renderer do
   defp add_live_box_element(acc, full_id, flags, current_id) do
     live_flags =
       [id: full_id, __live_dimension__: true]
+      |> inherit_implicit_owner(flags)
       |> inherit_focus_scope_path(flags)
       |> inherit_focus_within_path(flags)
 

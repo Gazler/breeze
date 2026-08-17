@@ -3,6 +3,9 @@ defmodule Breeze.Mouse do
 
   import Bitwise
 
+  @wheel_handoff_delay_ms 80
+  @wheel_gesture_idle_ms 160
+
   @type button :: String.t()
   @type action :: String.t()
   @type event :: %{
@@ -33,6 +36,12 @@ defmodule Breeze.Mouse do
   end
 
   def decode(_), do: :error
+
+  @doc false
+  def wheel_handoff_delay_ms, do: @wheel_handoff_delay_ms
+
+  @doc false
+  def wheel_gesture_idle_ms, do: @wheel_gesture_idle_ms
 
   defp button(code) do
     cond do

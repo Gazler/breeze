@@ -82,7 +82,7 @@ defmodule Breeze.Implicit.Scroll do
         viewport
       )
 
-    {:noreply, put_offset(state, offset_y, viewport)}
+    wheel_reply(state, current_offset_y, offset_y, viewport)
   end
 
   def handle_event(
@@ -99,7 +99,7 @@ defmodule Breeze.Implicit.Scroll do
         viewport
       )
 
-    {:noreply, put_offset(state, offset_y, viewport)}
+    wheel_reply(state, current_offset_y, offset_y, viewport)
   end
 
   def handle_event(_, _, state), do: {:noreply, state}
@@ -110,10 +110,19 @@ defmodule Breeze.Implicit.Scroll do
   def handle_modifiers(:child, _flags, _state), do: []
 
   defp wheel_step(%Viewport{viewport_height: height}) do
-    max(div(height, 2), 1)
+    height
+    |> div(2)
+    |> max(1)
+    |> min(3)
   end
 
   defp wheel_repeat(mouse), do: Common.wheel_repeat(mouse)
+
+  defp wheel_reply(state, current_offset_y, current_offset_y, _viewport),
+    do: {:bubble, state}
+
+  defp wheel_reply(state, _current_offset_y, offset_y, viewport),
+    do: {:noreply, put_offset(state, offset_y, viewport)}
 
   defp effective_offset_y(state, nil), do: Map.get(state, :offset_y, 0)
 

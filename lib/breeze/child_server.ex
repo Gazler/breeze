@@ -240,12 +240,12 @@ defmodule Breeze.ChildServer do
   end
 
   def handle_call({:input, input, opts}, _from, term) do
-    touched_term = touch_interaction(term)
+    touched_term = term |> touch_interaction() |> prepare_wheel_routing(input)
     reply_from_input_result(process_input(input, touched_term, opts), touched_term, opts)
   end
 
   def handle_call({:global_input, input, opts}, _from, term) do
-    touched_term = touch_interaction(term)
+    touched_term = term |> touch_interaction() |> prepare_wheel_routing(input)
     event = normalize_key_event(input)
 
     case Breeze.GlobalKeybindings.dispatch(event, touched_term) do
@@ -1031,20 +1031,22 @@ defmodule Breeze.ChildServer do
   end
 
   defp process_input(%{"mouse" => mouse} = event, term, opts) do
-    case mouse_target(term, mouse) do
+    {target, term} = routed_mouse_target(term, mouse, event)
+
+    case target do
       nil ->
         handle_view_event(term.view, :input, event, term)
 
       target ->
-        event = put_mouse_target_fields(term, target, event)
+        event = put_mouse_target_fields_if_available(term, target, event)
         live_children = Keyword.get(opts, :live_children, term.children)
 
         case dispatch_live_mouse_target(term, target, event, live_children, opts) do
           {:ok, reply} ->
             reply
 
-          :bubble ->
-            normalize_result(term.view.handle_event(:input, event, term), term)
+          {:bubble, owner_target} ->
+            dispatch_mouse_target(event, mouse, owner_target, term)
 
           :not_live ->
             dispatch_mouse_target(event, mouse, target, term)
@@ -1072,6 +1074,16 @@ defmodule Breeze.ChildServer do
     |> Map.put("focused", term.focused)
     |> Map.put("row", mouse_row(term, target, mouse))
     |> Map.put("col", mouse_col(term, target, mouse))
+  end
+
+  defp put_mouse_target_fields_if_available(term, target, event) do
+    if is_map(Map.get(term.mouse_targets, target)) do
+      put_mouse_target_fields(term, target, event)
+    else
+      event
+      |> Map.put("target", target)
+      |> Map.put("focused", term.focused)
+    end
   end
 
   defp dispatch_key_input(key, term, opts) do
@@ -1155,7 +1167,13 @@ defmodule Breeze.ChildServer do
         {:noreply, term}
 
       true ->
-        handle_view_event(term.view, change, event, term)
+        case handle_view_event(term.view, change, event, term) do
+          {:noreply, ^term} = reply ->
+            if wheel_input?(event), do: {:noreply, term, invalidate: false}, else: reply
+
+          reply ->
+            reply
+        end
     end
   end
 
@@ -1182,6 +1200,59 @@ defmodule Breeze.ChildServer do
 
   defp normalize_key_event(%{"key" => _} = event), do: event
   defp normalize_key_event(key), do: %{"key" => key}
+
+  defp wheel_input?(%{"mouse" => %{"button" => button}})
+       when button in ["wheel_down", "wheel_up"],
+       do: true
+
+  defp wheel_input?(_event), do: false
+
+  defp prepare_wheel_routing(term, input) do
+    if wheel_input?(input) do
+      expire_wheel_target_lock(term)
+    else
+      %{term | wheel_handoffs: %{}, wheel_target_lock: nil}
+    end
+  end
+
+  defp expire_wheel_target_lock(%{wheel_target_lock: nil} = term), do: term
+
+  defp expire_wheel_target_lock(%{wheel_target_lock: %{last_event_at: last_event_at}} = term) do
+    elapsed = System.monotonic_time(:millisecond) - last_event_at
+
+    if elapsed >= Breeze.Mouse.wheel_gesture_idle_ms() do
+      %{term | wheel_target_lock: nil}
+    else
+      term
+    end
+  end
+
+  defp expire_wheel_target_lock(term), do: %{term | wheel_target_lock: nil}
+
+  defp routed_mouse_target(term, mouse, event) do
+    hit_target = mouse_target(term, mouse)
+
+    if wheel_input?(event) do
+      target = active_wheel_target(term) || hit_target
+      {target, lock_wheel_target(term, target)}
+    else
+      {hit_target, term}
+    end
+  end
+
+  defp active_wheel_target(%{wheel_target_lock: %{target: target}} = term) do
+    if Map.has_key?(term.mouse_targets, target) or Map.has_key?(term.implicit_state, target),
+      do: target
+  end
+
+  defp active_wheel_target(_term), do: nil
+
+  defp lock_wheel_target(term, nil), do: term
+
+  defp lock_wheel_target(term, target) do
+    lock = %{target: target, last_event_at: System.monotonic_time(:millisecond)}
+    %{term | wheel_target_lock: lock}
+  end
 
   defp dispatch_input_steps([:global | rest], event, key, term) do
     case Breeze.GlobalKeybindings.dispatch(event, term) do
@@ -1663,7 +1734,7 @@ defmodule Breeze.ChildServer do
         case reply do
           {:noreply, _focused, true} -> {:ok, reply}
           {:stop, _focused, _consumed} -> {:ok, reply}
-          _ -> :bubble
+          _ -> {:bubble, child_id}
         end
     end
   end
@@ -2141,9 +2212,18 @@ defmodule Breeze.ChildServer do
       :bottom,
       term_height(term)
     )
+    |> apply_mouse_clip()
   end
 
   defp mouse_target_bounds(_term, bounds), do: bounds
+
+  defp apply_mouse_clip(bounds) do
+    bounds
+    |> Map.update!(:left, &max(&1, Map.get(bounds, :clip_left, &1)))
+    |> Map.update!(:top, &max(&1, Map.get(bounds, :clip_top, &1)))
+    |> Map.update!(:right, &min(&1, Map.get(bounds, :clip_right, &1)))
+    |> Map.update!(:bottom, &min(&1, Map.get(bounds, :clip_bottom, &1)))
+  end
 
   defp mouse_target_layer(term, id) do
     owner = get_in(term.focus_meta, [id, :implicit_owner])

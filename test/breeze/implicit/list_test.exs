@@ -263,6 +263,18 @@ defmodule Breeze.Implicit.ListTest do
       assert next_state.selected == "item-2"
       assert next_state.selected_index == 1
     end
+
+    test "wheel scroll bubbles at a viewport boundary" do
+      viewport = Viewport.from_dimensions(%{height: 3, viewport_height: 3, content_height: 8})
+      state = %{offset: 5}
+
+      assert {:bubble, ^state} =
+               Implicit.List.handle_event(
+                 :ignore,
+                 %{"mouse" => %{"button" => "wheel_down"}, "element" => viewport},
+                 state
+               )
+    end
   end
 
   describe "handle_modifiers/3" do

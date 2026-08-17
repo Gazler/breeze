@@ -29,7 +29,8 @@ defmodule Breeze.RenderState do
       build_dimensions(sorted_elements, acc.dimensions)
       |> Map.merge(Map.get(acc, :live_dimensions, %{}))
 
-    {elements, mouse_targets} = build_layout_maps(raw_dimensions)
+    {elements, mouse_targets} =
+      build_layout_maps(raw_dimensions, sorted_elements, Map.get(acc, :boxes, %{}))
 
     %{
       term
@@ -38,17 +39,21 @@ defmodule Breeze.RenderState do
         focusables: acc.focusables,
         implicit_state: implicits,
         implicit_meta: implicit_meta,
+        wheel_handoffs: Map.take(term.wheel_handoffs, Map.keys(implicits)),
         rendered_boxes: Map.get(acc, :boxes, %{}),
         events: events
     }
   end
 
   def build_layout(acc, dimensions, live_dimensions \\ %{}) do
+    sorted_elements = Enum.sort(acc.elements)
+
     raw_dimensions =
-      build_dimensions(Enum.sort(acc.elements), dimensions)
+      build_dimensions(sorted_elements, dimensions)
       |> Map.merge(live_dimensions)
 
-    {elements, mouse_targets} = build_layout_maps(raw_dimensions)
+    {elements, mouse_targets} =
+      build_layout_maps(raw_dimensions, sorted_elements, Map.get(acc, :boxes, %{}))
 
     %{elements: elements, mouse_targets: mouse_targets}
   end
@@ -108,7 +113,27 @@ defmodule Breeze.RenderState do
 
   defp live_dimension?(flags), do: Keyword.get(flags, :__live_dimension__) == true
 
-  defp build_layout_maps(raw_dimensions) do
+  defp build_layout_maps(raw_dimensions, sorted_elements, boxes) do
+    owners = build_implicit_owner_map(sorted_elements, raw_dimensions)
+    {scroll_offsets, clipping_owners} = build_scroll_layout(boxes)
+
+    raw_dimensions =
+      Map.new(raw_dimensions, fn {id, dims} ->
+        {scroll_top, scroll_left} = ancestor_scroll_offset(id, owners, scroll_offsets)
+
+        shifted_dims =
+          dims
+          |> Map.put(:left, Map.get(dims, :left, 0) - scroll_left)
+          |> Map.put(:top, Map.get(dims, :top, 0) - scroll_top)
+
+        {id, shifted_dims}
+      end)
+
+    {elements, mouse_targets} = build_unclipped_layout_maps(raw_dimensions)
+    {elements, clip_mouse_targets(mouse_targets, owners, clipping_owners)}
+  end
+
+  defp build_unclipped_layout_maps(raw_dimensions) do
     Enum.reduce(raw_dimensions, {%{}, %{}}, fn {id, dims}, {elements, mouse_targets} ->
       width = resolved_dimension(dims, :width, :viewport_width)
       height = resolved_dimension(dims, :height, :viewport_height)
@@ -136,6 +161,144 @@ defmodule Breeze.RenderState do
     end)
   end
 
+  defp build_implicit_owner_map(sorted_elements, raw_dimensions) do
+    explicit_owners =
+      Map.new(sorted_elements, fn {_idx, flags} ->
+        {Keyword.get(flags, :id), Keyword.get(flags, :implicit_owner)}
+      end)
+
+    ids = raw_dimensions |> Map.keys() |> MapSet.new()
+
+    Map.new(raw_dimensions, fn {id, _dims} ->
+      owner = Map.get(explicit_owners, id) || namespace_parent(id, ids)
+      {id, owner}
+    end)
+  end
+
+  defp namespace_parent(id, ids) when is_binary(id) do
+    id
+    |> String.split("::")
+    |> Enum.drop(-1)
+    |> find_namespace_parent(ids)
+  end
+
+  defp namespace_parent(_id, _ids), do: nil
+
+  defp find_namespace_parent([], _ids), do: nil
+
+  defp find_namespace_parent(parts, ids) do
+    candidate = Enum.join(parts, "::")
+
+    if MapSet.member?(ids, candidate) do
+      candidate
+    else
+      parts |> Enum.drop(-1) |> find_namespace_parent(ids)
+    end
+  end
+
+  defp build_scroll_layout(boxes) do
+    Enum.reduce(boxes, {%{}, MapSet.new()}, fn
+      {id, %BackBreeze.Box{scroll: {top, left}, style: style}}, {offsets, clipping_owners}
+      when is_binary(id) and is_integer(top) and is_integer(left) ->
+        offsets = Map.put(offsets, id, {top, left})
+
+        clipping_owners =
+          if style.overflow == :hidden and style.scrollbar != false do
+            MapSet.put(clipping_owners, id)
+          else
+            clipping_owners
+          end
+
+        {offsets, clipping_owners}
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp ancestor_scroll_offset(id, owners, scroll_offsets) do
+    id
+    |> owner_chain(owners)
+    |> Enum.reduce({0, 0}, fn owner, {top, left} ->
+      {owner_top, owner_left} = Map.get(scroll_offsets, owner, {0, 0})
+      {top + owner_top, left + owner_left}
+    end)
+  end
+
+  defp owner_chain(id, owners), do: do_owner_chain(Map.get(owners, id), owners, MapSet.new(), [])
+
+  defp do_owner_chain(nil, _owners, _visited, acc), do: Enum.reverse(acc)
+
+  defp do_owner_chain(owner, owners, visited, acc) do
+    if MapSet.member?(visited, owner) do
+      Enum.reverse(acc)
+    else
+      do_owner_chain(
+        Map.get(owners, owner),
+        owners,
+        MapSet.put(visited, owner),
+        [owner | acc]
+      )
+    end
+  end
+
+  defp clip_mouse_targets(mouse_targets, owners, clipping_owners) do
+    Enum.reduce(mouse_targets, %{}, fn {id, target}, acc ->
+      clip_ancestors =
+        id
+        |> owner_chain(owners)
+        |> Enum.filter(&MapSet.member?(clipping_owners, &1))
+
+      case clip_ancestors do
+        [] ->
+          Map.put(acc, id, target)
+
+        clip_ancestors ->
+          clipped_target =
+            Enum.reduce_while(clip_ancestors, target_bounds(target), fn owner, bounds ->
+              case Map.get(mouse_targets, owner) do
+                nil -> {:cont, bounds}
+                owner_target -> intersect_bounds(bounds, target_bounds(owner_target))
+              end
+            end)
+
+          case clipped_target do
+            nil ->
+              acc
+
+            bounds ->
+              target =
+                target
+                |> Map.put(:clip_left, bounds.left)
+                |> Map.put(:clip_top, bounds.top)
+                |> Map.put(:clip_right, bounds.right)
+                |> Map.put(:clip_bottom, bounds.bottom)
+
+              Map.put(acc, id, target)
+          end
+      end
+    end)
+  end
+
+  defp target_bounds(target) do
+    Map.take(target, [:left, :top, :right, :bottom])
+  end
+
+  defp intersect_bounds(left, right) do
+    intersection = %{
+      left: max(left.left, right.left),
+      top: max(left.top, right.top),
+      right: min(left.right, right.right),
+      bottom: min(left.bottom, right.bottom)
+    }
+
+    if intersection.left <= intersection.right and intersection.top <= intersection.bottom do
+      {:cont, intersection}
+    else
+      {:halt, nil}
+    end
+  end
+
   defp resolved_dimension(dims, primary_key, fallback_key) do
     dims
     |> Map.get(primary_key)
@@ -147,7 +310,7 @@ defmodule Breeze.RenderState do
   defp integer_dimension(_value, _fallback), do: 0
 
   def dispatch_implicit_event(term, id, payload, route_change_fun, visited \\ MapSet.new()) do
-    do_dispatch_implicit_event(term, id, payload, route_change_fun, visited)
+    do_dispatch_implicit_event(term, id, payload, route_change_fun, visited, false)
   end
 
   def put_implicit_state(term, id, mod, implicit) do
@@ -230,7 +393,7 @@ defmodule Breeze.RenderState do
     {implicit_acc, implicit_meta, [], implicit, id, elem}
   end
 
-  defp do_dispatch_implicit_event(term, id, payload, route_change_fun, visited) do
+  defp do_dispatch_implicit_event(term, id, payload, route_change_fun, visited, bubbling?) do
     cond do
       MapSet.member?(visited, id) ->
         {:noreply, false, term}
@@ -246,6 +409,7 @@ defmodule Breeze.RenderState do
                 term = apply_implicit_term_options(term, opts)
 
                 {view_state, term} = route_change(term, id, :change, event, route_change_fun)
+                term = lock_wheel_target(term, id, payload)
 
                 {view_state, true, term}
 
@@ -253,6 +417,7 @@ defmodule Breeze.RenderState do
                 term = put_implicit_state(term, id, mod, val)
 
                 {view_state, term} = route_change(term, id, :change, event, route_change_fun)
+                term = lock_wheel_target(term, id, payload)
 
                 {view_state, true, term}
 
@@ -260,6 +425,7 @@ defmodule Breeze.RenderState do
                 term = put_implicit_state(term, id, mod, val)
 
                 {view_state, term} = route_change(term, id, :submit, event, route_change_fun)
+                term = lock_wheel_target(term, id, payload)
 
                 {view_state, true, term}
 
@@ -271,29 +437,129 @@ defmodule Breeze.RenderState do
                   target_id,
                   payload,
                   route_change_fun,
-                  MapSet.put(visited, id)
+                  MapSet.put(visited, id),
+                  false
+                )
+
+              {:bubble, val} ->
+                term = put_implicit_state(term, id, mod, val)
+
+                dispatch_implicit_bubble(
+                  term,
+                  id,
+                  payload,
+                  route_change_fun,
+                  visited
                 )
 
               {:noreply, val} ->
-                term = put_implicit_state(term, id, mod, val)
-                {:noreply, val != implicit, term}
+                changed? = val != implicit
+
+                term =
+                  term
+                  |> put_implicit_state(id, mod, val)
+                  |> clear_wheel_handoff(id)
+                  |> maybe_lock_wheel_target(id, payload, changed?)
+
+                if bubbling? and val == implicit do
+                  dispatch_implicit_owner(term, id, payload, route_change_fun, visited, true)
+                else
+                  {:noreply, changed?, term}
+                end
             end
 
           nil ->
-            case get_in(term.focus_meta, [id, :implicit_owner]) do
-              owner_id when is_binary(owner_id) ->
-                do_dispatch_implicit_event(
-                  term,
-                  owner_id,
-                  payload,
-                  route_change_fun,
-                  MapSet.put(visited, id)
-                )
-
-              _ ->
-                {:noreply, false, term}
-            end
+            dispatch_implicit_owner(term, id, payload, route_change_fun, visited, false)
         end
+    end
+  end
+
+  defp dispatch_implicit_bubble(term, id, payload, route_change_fun, visited) do
+    case wheel_direction(payload) do
+      nil ->
+        dispatch_implicit_owner(term, id, payload, route_change_fun, visited, true)
+
+      direction ->
+        case advance_wheel_handoff(term, id, direction) do
+          {:waiting, term} ->
+            {:noreply, true, term}
+
+          {:ready, term} ->
+            payload = put_wheel_repeat(payload, 1)
+            dispatch_implicit_owner(term, id, payload, route_change_fun, visited, true)
+        end
+    end
+  end
+
+  defp advance_wheel_handoff(term, id, direction) do
+    now = System.monotonic_time(:millisecond)
+
+    case Map.get(term.wheel_handoffs, id) do
+      %{direction: ^direction, released?: true} ->
+        {:ready, term}
+
+      %{direction: ^direction, started_at: started_at} = handoff ->
+        if now - started_at >= Breeze.Mouse.wheel_handoff_delay_ms() do
+          {:ready, put_wheel_handoff(term, id, %{handoff | released?: true})}
+        else
+          handoff = Map.update(handoff, :discarded_packets, 1, &(&1 + 1))
+          {:waiting, put_wheel_handoff(term, id, handoff)}
+        end
+
+      _ ->
+        handoff = %{
+          direction: direction,
+          started_at: now,
+          released?: false,
+          discarded_packets: 1
+        }
+
+        {:waiting, put_wheel_handoff(term, id, handoff)}
+    end
+  end
+
+  defp put_wheel_handoff(term, id, handoff) do
+    %{term | wheel_handoffs: Map.put(term.wheel_handoffs, id, handoff)}
+  end
+
+  defp clear_wheel_handoff(term, id) do
+    %{term | wheel_handoffs: Map.delete(term.wheel_handoffs, id)}
+  end
+
+  defp wheel_direction(%{"mouse" => %{"button" => "wheel_down"}}), do: :down
+  defp wheel_direction(%{"mouse" => %{"button" => "wheel_up"}}), do: :up
+  defp wheel_direction(_payload), do: nil
+
+  defp put_wheel_repeat(payload, repeat), do: put_in(payload, ["mouse", "repeat"], repeat)
+
+  defp maybe_lock_wheel_target(term, id, payload, true),
+    do: lock_wheel_target(term, id, payload)
+
+  defp maybe_lock_wheel_target(term, _id, _payload, false), do: term
+
+  defp lock_wheel_target(term, id, payload) do
+    if wheel_direction(payload) do
+      lock = %{target: id, last_event_at: System.monotonic_time(:millisecond)}
+      %{term | wheel_target_lock: lock}
+    else
+      term
+    end
+  end
+
+  defp dispatch_implicit_owner(term, id, payload, route_change_fun, visited, bubbling?) do
+    case get_in(term.focus_meta, [id, :implicit_owner]) do
+      owner_id when is_binary(owner_id) ->
+        do_dispatch_implicit_event(
+          term,
+          owner_id,
+          payload,
+          route_change_fun,
+          MapSet.put(visited, id),
+          bubbling?
+        )
+
+      _ ->
+        {:noreply, false, term}
     end
   end
 

@@ -135,6 +135,48 @@ defmodule Breeze.Implicit.ScrollTest do
     end
   end
 
+  defmodule NestedScrollView do
+    use Breeze.View
+
+    defmodule PassiveImplicit do
+      @behaviour Breeze.Implicit
+
+      def init(_children, _root_attrs, last_state), do: {:ok, last_state}
+      def handle_event(_, _, state), do: {:noreply, state}
+      def handle_modifiers(_, _, _state), do: []
+    end
+
+    def mount(_opts, term), do: {:ok, focus(term, "child-scroll")}
+
+    def render(assigns) do
+      ~H"""
+      <box
+        id="parent-scroll"
+        implicit={Breeze.Implicit.Scroll}
+        focusable
+        class="width-20 height-6 overflow-scroll"
+        style={%{scrollbar: %{arrows: true}}}
+      >
+        <box id="scroll-wrapper" implicit={PassiveImplicit}>
+          <box
+            id="child-scroll"
+            implicit={Breeze.Implicit.Scroll}
+            focusable
+            class="width-18 height-3 overflow-scroll"
+            style={%{scrollbar: %{arrows: true}}}
+          >
+            <box :for={index <- 1..8} class="height-1">Child {index}</box>
+          </box>
+        </box>
+        <box :for={index <- 1..8} class="height-1">Parent {index}</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   describe "init/3" do
     test "carries autoscroll configuration from root attrs" do
       assert {:ok, state, meta} = Scroll.init([], %{"scroll-autoscroll": "bottom"}, %{})
@@ -214,6 +256,41 @@ defmodule Breeze.Implicit.ScrollTest do
 
       assert next_state.offset_y == 9
     end
+
+    test "wheel scroll is capped at three rows for tall viewports" do
+      viewport = %{viewport_height: 20, content_height: 80, height: 20}
+      state = %{offset_y: 3, autoscroll: nil, pinned_bottom: false}
+
+      assert {:noreply, next_state} =
+               Scroll.handle_event(
+                 :input,
+                 %{"mouse" => %{"button" => "wheel_down"}, "element" => viewport},
+                 state
+               )
+
+      assert next_state.offset_y == 6
+    end
+
+    test "wheel scroll bubbles at the top and bottom boundaries" do
+      viewport = %{viewport_height: 4, content_height: 12, height: 4}
+
+      bottom = %{offset_y: 8, autoscroll: nil, pinned_bottom: false}
+      top = %{offset_y: 0, autoscroll: nil, pinned_bottom: false}
+
+      assert {:bubble, ^bottom} =
+               Scroll.handle_event(
+                 :input,
+                 %{"mouse" => %{"button" => "wheel_down"}, "element" => viewport},
+                 bottom
+               )
+
+      assert {:bubble, ^top} =
+               Scroll.handle_event(
+                 :input,
+                 %{"mouse" => %{"button" => "wheel_up"}, "element" => viewport},
+                 top
+               )
+    end
   end
 
   describe "handle_modifiers/3" do
@@ -274,5 +351,167 @@ defmodule Breeze.Implicit.ScrollTest do
       refute next_box.content =~ "Line 01"
       assert next_box.content =~ "Line 06"
     end
+  end
+
+  test "wheel scroll chains from a child at its bottom boundary to its parent" do
+    terminal = %Termite.Terminal{size: %{width: 24, height: 10}}
+    {:ok, pid} = start_child_server(view: NestedScrollView, terminal: terminal)
+
+    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
+
+    assert %{implicit_owner: "scroll-wrapper"} =
+             ChildServer.metadata(pid).focus_meta["child-scroll"]
+
+    assert %{implicit_owner: "parent-scroll"} =
+             ChildServer.metadata(pid).focus_meta["scroll-wrapper"]
+
+    assert {:noreply, "child-scroll", true} = ChildServer.dispatch_input(pid, "End")
+
+    layout = ChildServer.layout_snapshot(pid)
+    child_viewport = layout.elements["child-scroll"]
+    child_bounds = layout.mouse_targets["child-scroll"]
+
+    assert {Scroll, %{offset_y: child_offset}} =
+             ChildServer.metadata(pid).implicit_state["child-scroll"]
+
+    assert child_offset == Viewport.max_scroll_y(child_viewport)
+
+    wheel_event = %{
+      "mouse" => %{
+        "button" => "wheel_down",
+        "x" => min(child_bounds.left + 1, child_bounds.right),
+        "y" => min(child_bounds.top + 1, child_bounds.bottom)
+      }
+    }
+
+    assert {:noreply, "child-scroll", true} = ChildServer.dispatch_input(pid, wheel_event)
+
+    assert {Scroll, %{offset_y: 0}} =
+             ChildServer.metadata(pid).implicit_state["parent-scroll"]
+
+    wheel_event = put_in(wheel_event, ["mouse", "repeat"], 4)
+
+    assert {:noreply, "child-scroll", true} = ChildServer.dispatch_input(pid, wheel_event)
+
+    assert {Scroll, %{offset_y: 0}} =
+             ChildServer.metadata(pid).implicit_state["parent-scroll"]
+
+    Process.sleep(Breeze.Mouse.wheel_handoff_delay_ms() + 10)
+
+    assert {:noreply, "child-scroll", true} = ChildServer.dispatch_input(pid, wheel_event)
+
+    implicit_state = ChildServer.metadata(pid).implicit_state
+    parent_viewport = ChildServer.layout_snapshot(pid).elements["parent-scroll"]
+    expected_parent_offset = parent_viewport.viewport_height |> div(2) |> max(1) |> min(3)
+
+    assert {Scroll, %{offset_y: ^child_offset}} = implicit_state["child-scroll"]
+    assert {Scroll, %{offset_y: parent_offset}} = implicit_state["parent-scroll"]
+    assert parent_offset == expected_parent_offset
+
+    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
+
+    refute Map.has_key?(ChildServer.layout_snapshot(pid).mouse_targets, "child-scroll")
+
+    wheel_up_event =
+      put_in(wheel_event, ["mouse"], %{
+        "button" => "wheel_up",
+        "x" => wheel_event["mouse"]["x"],
+        "y" => wheel_event["mouse"]["y"]
+      })
+
+    assert {:noreply, "child-scroll", true} =
+             ChildServer.dispatch_input(pid, wheel_up_event)
+
+    implicit_state = ChildServer.metadata(pid).implicit_state
+    assert {Scroll, %{offset_y: ^child_offset}} = implicit_state["child-scroll"]
+    assert {Scroll, %{offset_y: 0}} = implicit_state["parent-scroll"]
+
+    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
+
+    assert {:noreply, "child-scroll", true} =
+             ChildServer.dispatch_input(pid, wheel_up_event)
+
+    implicit_state = ChildServer.metadata(pid).implicit_state
+    assert {Scroll, %{offset_y: ^child_offset}} = implicit_state["child-scroll"]
+    assert {Scroll, %{offset_y: 0}} = implicit_state["parent-scroll"]
+
+    Process.sleep(Breeze.Mouse.wheel_gesture_idle_ms() + 10)
+
+    assert {:noreply, "child-scroll", true} =
+             ChildServer.dispatch_input(pid, wheel_up_event)
+
+    assert {Scroll, %{offset_y: child_offset_after_new_gesture}} =
+             ChildServer.metadata(pid).implicit_state["child-scroll"]
+
+    assert child_offset_after_new_gesture < child_offset
+  end
+
+  test "mouse targets outside an ancestor scroll viewport are clipped" do
+    terminal = %Termite.Terminal{size: %{width: 24, height: 10}}
+    {:ok, pid} = start_child_server(view: NestedScrollView, terminal: terminal)
+
+    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
+
+    initial_layout = ChildServer.layout_snapshot(pid)
+    initial_child_bounds = initial_layout.mouse_targets["child-scroll"]
+    parent_bounds = initial_layout.mouse_targets["parent-scroll"]
+
+    assert {:noreply, "parent-scroll", true} = ChildServer.set_focus(pid, "parent-scroll")
+    assert {:noreply, "parent-scroll", true} = ChildServer.dispatch_input(pid, "ArrowDown")
+    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
+
+    shifted_child_bounds = ChildServer.layout_snapshot(pid).mouse_targets["child-scroll"]
+    assert shifted_child_bounds.top == initial_child_bounds.top - 1
+    assert shifted_child_bounds.clip_top == parent_bounds.top
+
+    assert {:noreply, "parent-scroll", true} = ChildServer.dispatch_input(pid, "End")
+    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
+
+    refute Map.has_key?(ChildServer.layout_snapshot(pid).mouse_targets, "child-scroll")
+  end
+
+  test "active parent wheel gesture is not stolen when a child scrolls under the pointer" do
+    terminal = %Termite.Terminal{size: %{width: 24, height: 10}}
+    {:ok, pid} = start_child_server(view: NestedScrollView, terminal: terminal)
+
+    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
+    assert {:noreply, "parent-scroll", true} = ChildServer.set_focus(pid, "parent-scroll")
+    assert {:noreply, "parent-scroll", true} = ChildServer.dispatch_input(pid, "End")
+    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
+
+    layout = ChildServer.layout_snapshot(pid)
+    parent_bounds = layout.mouse_targets["parent-scroll"]
+
+    refute Map.has_key?(layout.mouse_targets, "child-scroll")
+
+    wheel_up = %{
+      "mouse" => %{
+        "button" => "wheel_up",
+        "x" => min(parent_bounds.left + 1, parent_bounds.right),
+        "y" => parent_bounds.top
+      }
+    }
+
+    assert {:noreply, "parent-scroll", true} = ChildServer.dispatch_input(pid, wheel_up)
+    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
+
+    child_bounds = ChildServer.layout_snapshot(pid).mouse_targets["child-scroll"]
+    assert wheel_up["mouse"]["y"] in child_bounds.top..child_bounds.bottom
+
+    assert {:noreply, "parent-scroll", true} = ChildServer.dispatch_input(pid, wheel_up)
+
+    implicit_state = ChildServer.metadata(pid).implicit_state
+    assert {Scroll, %{offset_y: 0}} = implicit_state["parent-scroll"]
+    assert {Scroll, %{offset_y: 0}} = implicit_state["child-scroll"]
+
+    Process.sleep(Breeze.Mouse.wheel_gesture_idle_ms() + 10)
+
+    wheel_down = put_in(wheel_up, ["mouse", "button"], "wheel_down")
+    assert {:noreply, "parent-scroll", true} = ChildServer.dispatch_input(pid, wheel_down)
+
+    assert {Scroll, %{offset_y: child_offset}} =
+             ChildServer.metadata(pid).implicit_state["child-scroll"]
+
+    assert child_offset > 0
   end
 end

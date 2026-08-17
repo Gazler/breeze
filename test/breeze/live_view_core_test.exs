@@ -255,6 +255,57 @@ defmodule Breeze.LiveView.CoreTest do
     assert offset_y > 0
   end
 
+  test "root child chains a boundary wheel event from a live scroll child to its parent" do
+    terminal = %Termite.Terminal{size: %{width: 24, height: 10}}
+
+    {:ok, root_pid} =
+      start_child_server(view: NestedMouseScrollLiveParent, terminal: terminal)
+
+    assert {:ok, _acc, _box, _decorations} =
+             ChildServer.render_snapshot(root_pid, terminal: terminal)
+
+    %{children: %{"scroll-child" => %{pid: child_pid}}} = :sys.get_state(root_pid)
+    targets = ChildServer.layout_snapshot(root_pid).mouse_targets
+
+    assert {:noreply, "scroll", true} = ChildServer.set_focus(child_pid, "scroll")
+    assert {:noreply, "scroll", true} = ChildServer.dispatch_input(child_pid, "End")
+
+    assert {Breeze.Implicit.Scroll, %{offset_y: child_offset}} =
+             ChildServer.metadata(child_pid).implicit_state["scroll"]
+
+    event = wheel_event("wheel_down", targets["scroll-child::scroll"])
+
+    assert {:noreply, "outer-scroll", true} = ChildServer.dispatch_input(root_pid, event)
+
+    assert {Breeze.Implicit.Scroll, %{offset_y: 0}} =
+             ChildServer.metadata(root_pid).implicit_state["outer-scroll"]
+
+    assert {:noreply, "outer-scroll", true} = ChildServer.dispatch_input(root_pid, event)
+
+    assert {Breeze.Implicit.Scroll, %{offset_y: 0}} =
+             ChildServer.metadata(root_pid).implicit_state["outer-scroll"]
+
+    Process.sleep(Breeze.Mouse.wheel_handoff_delay_ms() + 10)
+
+    assert {:noreply, "outer-scroll", true} = ChildServer.dispatch_input(root_pid, event)
+
+    assert {Breeze.Implicit.Scroll, %{offset_y: ^child_offset}} =
+             ChildServer.metadata(child_pid).implicit_state["scroll"]
+
+    assert {Breeze.Implicit.Scroll, %{offset_y: parent_offset}} =
+             ChildServer.metadata(root_pid).implicit_state["outer-scroll"]
+
+    assert parent_offset > 0
+
+    assert {:ok, _acc, _box, _decorations} =
+             ChildServer.render_snapshot(root_pid, terminal: terminal)
+
+    refute Map.has_key?(
+             ChildServer.layout_snapshot(root_pid).mouse_targets,
+             "scroll-child::scroll"
+           )
+  end
+
   test "server forwards mouse wheel input to a live child scroll implicit" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader

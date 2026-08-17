@@ -495,6 +495,30 @@ defmodule Breeze.LiveViewTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule NestedMouseScrollLiveParent do
+    use Breeze.View
+
+    def mount(_opts, term), do: {:ok, focus(term, "outer-scroll")}
+
+    def render(assigns) do
+      ~H"""
+      <box
+        id="outer-scroll"
+        implicit={Breeze.Implicit.Scroll}
+        focusable
+        class="width-20 height-6 overflow-scroll"
+      >
+        <live id="scroll-child" view={BufferedScrollView} class="width-18 height-3">
+        </live>
+        <box :for={index <- 1..8} class="height-1">Outer {index}</box>
+      </box>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule KeybindingFooterRoot do
     use Breeze.View
     import Breeze.Blocks

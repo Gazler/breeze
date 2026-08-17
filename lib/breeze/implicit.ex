@@ -52,8 +52,10 @@ defmodule Breeze.Implicit do
   the root element's `br-change` or `br-submit` handler. The event payload may
   be any term; Breeze's built-in implicits currently use atom-keyed maps. A
   change reply may also contain `focus: id` (or `focus: nil`) as its third
-  element. Finally, `{{:delegate, id}, state}` sends the original input event to
-  another implicit.
+  element. `{:bubble, state}` offers the original input event to the nearest
+  ancestor implicit owner, while `{{:delegate, id}, state}` sends it to a
+  specific implicit. Wheel bubbles pause briefly at a scroll boundary before
+  handing the gesture to an ancestor.
 
   ## Render modifiers
 
@@ -128,6 +130,7 @@ defmodule Breeze.Implicit do
   @typedoc "A valid return value from `c:handle_event/3`."
   @type event_reply ::
           {:noreply, state()}
+          | {:bubble, state()}
           | {{:change, event_payload()}, state()}
           | {{:change, event_payload()}, state(), [event_option()]}
           | {{:submit, event_payload()}, state()}

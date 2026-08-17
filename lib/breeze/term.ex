@@ -37,6 +37,8 @@ defmodule Breeze.Term do
     implicit_state: %{},
     retained_implicit_state: %{},
     implicit_meta: %{},
+    wheel_handoffs: %{},
+    wheel_target_lock: nil,
     rendered_contents: %{},
     rendered_boxes: %{},
     input_routing_signature: nil,

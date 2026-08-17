@@ -155,6 +155,8 @@ defmodule Breeze.Runtime.State do
         reader: nil,
         assigns: assigns,
         children: %{},
+        wheel_handoffs: %{},
+        wheel_target_lock: nil,
         render_timer: nil,
         input_routing_signature: nil
     }

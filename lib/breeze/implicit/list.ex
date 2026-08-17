@@ -167,7 +167,7 @@ defmodule Breeze.Implicit.List do
       ) do
     viewport = Viewport.from_dimensions(element)
     offset = Viewport.clamp_scroll_y(state.offset + Common.wheel_repeat(mouse), viewport)
-    {:noreply, %{state | offset: offset}}
+    wheel_reply(state, offset)
   end
 
   def handle_event(
@@ -177,7 +177,7 @@ defmodule Breeze.Implicit.List do
       ) do
     viewport = Viewport.from_dimensions(element)
     offset = Viewport.clamp_scroll_y(state.offset - Common.wheel_repeat(mouse), viewport)
-    {:noreply, %{state | offset: offset}}
+    wheel_reply(state, offset)
   end
 
   def handle_event(_, _, state), do: {:noreply, state}
@@ -185,6 +185,9 @@ defmodule Breeze.Implicit.List do
   def handle_modifiers(:root, _flags, state), do: Common.root_scroll_modifier(state)
 
   def handle_modifiers(:child, flags, state), do: Common.selected_modifier(flags, state)
+
+  defp wheel_reply(%{offset: offset} = state, offset), do: {:bubble, state}
+  defp wheel_reply(state, offset), do: {:noreply, %{state | offset: offset}}
 
   defp move_selection(%{values: []} = state, _delta, _element), do: state
 

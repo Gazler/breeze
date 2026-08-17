@@ -442,7 +442,11 @@ defmodule Breeze.Implicit.Tree do
     viewport = Viewport.from_dimensions(element)
     offset = Viewport.clamp_scroll_y(state.offset + delta, viewport)
 
-    {:noreply, Map.put(state, :offset, offset)}
+    if offset == state.offset do
+      {:bubble, state}
+    else
+      {:noreply, Map.put(state, :offset, offset)}
+    end
   end
 
   defp expand_row(state, value),
