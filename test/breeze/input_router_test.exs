@@ -1009,8 +1009,8 @@ defmodule Breeze.InputRouterTest do
     assert Process.alive?(router)
 
     assert :ok = Breeze.Server.stop(router)
-    refute_receive {:terminal_write, "\e[<u\e[>4;0m"}, 50
-    refute_receive {:terminal_write, "\e[?1049l"}, 50
+    refute_received {:terminal_write, "\e[<u\e[>4;0m"}
+    refute_received {:terminal_write, "\e[?1049l"}
   end
 
   test "startup failure restores the terminal before returning the error" do
@@ -1039,8 +1039,8 @@ defmodule Breeze.InputRouterTest do
     assert_receive {:terminal_write, "\e[?1049l"}
 
     assert :ok = callback.(1)
-    refute_receive {:terminal_write, "\e[<u\e[>4;0m"}, 50
-    refute_receive {:terminal_write, "\e[?1049l"}, 50
+    refute_received {:terminal_write, "\e[<u\e[>4;0m"}
+    refute_received {:terminal_write, "\e[?1049l"}
   end
 
   test "failure during terminal setup also restores the terminal" do
@@ -1068,8 +1068,8 @@ defmodule Breeze.InputRouterTest do
     assert_receive {:terminal_write, "\e[?1049l"}
 
     assert :ok = callback.(1)
-    refute_receive {:terminal_write, "\e[<u\e[>4;0m"}, 50
-    refute_receive {:terminal_write, "\e[?1049l"}, 50
+    refute_received {:terminal_write, "\e[<u\e[>4;0m"}
+    refute_received {:terminal_write, "\e[?1049l"}
   end
 
   test "stop global keys are handled even while the app server is blocked" do
