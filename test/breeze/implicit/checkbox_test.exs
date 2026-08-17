@@ -93,16 +93,13 @@ defmodule Breeze.Implicit.CheckboxTest do
   end
 
   describe "handle_event/3" do
-    test "Space toggles and emits the boolean value" do
-      state = %{checked: false, disabled: false}
+    test "Enter and Space toggle and emit the boolean value" do
+      for key <- ["Enter", " "] do
+        state = %{checked: false, disabled: false}
 
-      assert {{:change, %{value: true}}, %{checked: true}} =
-               Checkbox.handle_event(:input, %{"key" => " "}, state)
-    end
-
-    test "Enter does not toggle" do
-      state = %{checked: false, disabled: false}
-      assert {:noreply, ^state} = Checkbox.handle_event(:input, %{"key" => "Enter"}, state)
+        assert {{:change, %{value: true}}, %{checked: true}} =
+                 Checkbox.handle_event(:input, %{"key" => key}, state)
+      end
     end
 
     test "the first left press toggles regardless of prior focus" do
@@ -123,6 +120,7 @@ defmodule Breeze.Implicit.CheckboxTest do
       mouse = %{"mouse" => %{"button" => "left", "action" => "press"}}
 
       assert {:noreply, ^state} = Checkbox.handle_event(:input, %{"key" => " "}, state)
+      assert {:noreply, ^state} = Checkbox.handle_event(:input, %{"key" => "Enter"}, state)
       assert {:noreply, ^state} = Checkbox.handle_event(:input, mouse, state)
     end
   end
@@ -193,7 +191,7 @@ defmodule Breeze.Implicit.CheckboxTest do
     refute content =~ "[ ] Mouse"
   end
 
-  test "Space toggles a rendered checkbox while Enter does not" do
+  test "Space and Enter toggle a rendered checkbox" do
     terminal = %Termite.Terminal{size: %{width: 30, height: 5}}
     {:ok, pid} = start_child_server(view: CheckboxView, terminal: terminal)
 
@@ -203,8 +201,8 @@ defmodule Breeze.Implicit.CheckboxTest do
     assert {:noreply, "mouse", true} = ChildServer.dispatch_input(pid, " ")
     assert %{assigns: %{checked: true}} = ChildServer.metadata(pid)
 
-    assert {:noreply, "mouse", false} = ChildServer.dispatch_input(pid, "Enter")
-    assert %{assigns: %{checked: true}} = ChildServer.metadata(pid)
+    assert {:noreply, "mouse", true} = ChildServer.dispatch_input(pid, "Enter")
+    assert %{assigns: %{checked: false}} = ChildServer.metadata(pid)
   end
 
   test "an uncontrolled checkbox retains its implicit state" do

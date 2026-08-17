@@ -336,6 +336,7 @@ defmodule Breeze.Storybook.RenderingTest do
     assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
     plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
 
+    assert plain_content =~ "press Enter or Space to toggle"
     assert plain_content =~ "[x] Mouse input"
     assert plain_content =~ "[ ] Inspector"
     assert plain_content =~ "⟦x⟧ Unavailable"

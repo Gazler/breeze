@@ -20,7 +20,7 @@ defmodule Breeze.Implicit.Checkbox do
 
   def handle_event(_, _, %{disabled: true} = state), do: {:noreply, state}
 
-  def handle_event(_, %{"key" => " "}, state), do: toggle(state)
+  def handle_event(_, %{"key" => key}, state) when key in ["Enter", " "], do: toggle(state)
 
   def handle_event(_, %{"mouse" => %{"button" => "left", "action" => "press"}}, state),
     do: toggle(state)
