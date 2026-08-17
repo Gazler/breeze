@@ -703,6 +703,21 @@ defmodule Breeze.Server do
     {:noreply, enqueue_reader_data(state, data)}
   end
 
+  def handle_info({reader, {:event, event}}, %{reader: reader} = state) do
+    case safe_call(fn ->
+           Breeze.ChildServer.dispatch_info(state.view_pid, event, state.terminal)
+         end) do
+      {:ok, {:stop, _focused}} ->
+        stop_runtime(state)
+
+      {:ok, {:noreply, focused}} ->
+        {:noreply, %{state | focused: focused}}
+
+      {:crash, crash} ->
+        {:noreply, enter_crash_state(state, crash)}
+    end
+  end
+
   def handle_info({reader, {:signal, :winch}}, %{reader: reader, crash: crash} = state)
       when not is_nil(crash) do
     terminal = resize_terminal(state)

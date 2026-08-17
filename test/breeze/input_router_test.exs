@@ -207,6 +207,27 @@ defmodule Breeze.InputRouterTest do
     end
   end
 
+  defmodule ReaderEventView do
+    use Breeze.View
+
+    def mount(opts, term) do
+      {:ok, assign(term, parent: Keyword.fetch!(opts, :parent), value: "initial")}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <box>value={@value}</box>
+      """
+    end
+
+    def handle_info({:browser_event, value} = event, term) when is_binary(value) do
+      send(term.assigns.parent, {:reader_event_handled, event})
+      {:noreply, assign(term, value: value)}
+    end
+
+    def handle_info(_message, term), do: {:noreply, term}
+  end
+
   defmodule RoutedLiveChild do
     use Breeze.View
 
@@ -844,6 +865,31 @@ defmodule Breeze.InputRouterTest do
     after
       if Process.alive?(runtime_pid), do: :sys.resume(runtime_pid)
     end
+  end
+
+  test "terminal reader events are dispatched to the root view" do
+    {:ok, router} =
+      start_input_router(
+        view: ReaderEventView,
+        start_opts: [parent: self()],
+        alt_screen: false,
+        enhanced_keyboard: false,
+        hide_cursor: false,
+        terminal_opts: [adapter: FakeAdapter]
+      )
+
+    router_state = :sys.get_state(router)
+    server = router_state.server_pid
+    event = {:browser_event, "table"}
+
+    send(router, {router_state.reader, {:event, event}})
+
+    assert_receive {:reader_event_handled, ^event}, 500
+
+    wait_until(fn ->
+      view = server |> :sys.get_state() |> Map.fetch!(:view_pid)
+      :sys.get_state(view).assigns.value == "table"
+    end)
   end
 
   test "input router owns the session view supervisor and stops it on hangup" do

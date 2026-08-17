@@ -146,6 +146,11 @@ defmodule Breeze.InputRouter do
     {:noreply, state}
   end
 
+  def handle_info({reader, {:event, _event}} = message, %{reader: reader} = state) do
+    send(state.server_pid, message)
+    {:noreply, state}
+  end
+
   def handle_info({reader, {:signal, :hup}}, %{reader: reader} = state) do
     stop(state)
   end
