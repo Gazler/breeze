@@ -1442,6 +1442,38 @@ defmodule Breeze.Blocks do
   defp table_align_class(:center), do: "text-center"
   defp table_align_class(_align), do: "text-left"
 
+  attr :id, :string, required: true
+  attr :active, :boolean, default: false
+  attr :variant, :string, default: "dots", values: ["dots", "bars"]
+  attr :class, :string, default: nil
+  attr :style, :any, default: nil
+  attr :rest, :global
+
+  def spinner(assigns) do
+    assigns =
+      assign(
+        assigns,
+        class:
+          merge_class(
+            "w-1 h-1 overflow-hidden text-primary bg-panel",
+            class_override(assigns)
+          )
+      )
+
+    ~H"""
+    <box
+      id={@id}
+      implicit={Breeze.Implicit.AsyncSpinner}
+      spinner-active={@active}
+      spinner-variant={@variant}
+      class={@class}
+      style={Breeze.Blocks.inline_style(assigns)}
+      {@rest}
+    >
+    </box>
+    """
+  end
+
   attr :id, :string, default: nil
   attr :focusable, :boolean, default: true
   attr :class, :string, default: nil

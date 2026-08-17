@@ -43,7 +43,7 @@ defmodule Breeze.LiveView.CoreTest do
   test "child server render_snapshot exposes animate-capable implicit boxes" do
     {:ok, pid} = start_child_server(view: SpinnerChild, start_opts: [])
 
-    assert {:ok, _acc, _box, [%{box: %BackBreeze.Box{}, every_ms: 120, id: "spinner"}]} =
+    assert {:ok, _acc, _box, [%{box: %BackBreeze.Box{}, every_ms: 80, id: "spinner"}]} =
              ChildServer.render_snapshot(pid, focused: nil, implicit_state: %{})
   end
 

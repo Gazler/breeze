@@ -113,6 +113,22 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule SpinnerExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.spinner id="spinner" active/>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule PanelFocusWithinExample do
     use Breeze.View
     import Breeze.Blocks
@@ -993,6 +1009,28 @@ defmodule Breeze.BlocksTest do
     assert acc.focusables == ["confirm"]
     assert box.content =~ "Confirm"
     assert box.content =~ ~r/\e\[[0-9;]*7;[0-9;]*m/
+  end
+
+  test "spinner uses the dots animation and paints the panel background by default" do
+    terminal = %Termite.Terminal{size: %{width: 20, height: 4}}
+    {:ok, pid} = start_child_server(view: SpinnerExample, terminal: terminal)
+
+    assert {:ok, _acc, _box,
+            [
+              %{
+                id: "spinner",
+                every_ms: 80,
+                active_when_pending: false,
+                box: %BackBreeze.Box{style: style}
+              }
+            ]} = ChildServer.render_snapshot(pid, terminal: terminal)
+
+    assert style.width == 1
+    assert style.height == 1
+    assert style.background_color == Breeze.Theme.color(ChildServer.metadata(pid).theme, :panel)
+
+    assert {Breeze.Implicit.AsyncSpinner, %{variant: :dots, active?: true}} =
+             ChildServer.metadata(pid).implicit_state["spinner"]
   end
 
   test "panel highlights when a descendant is focused" do

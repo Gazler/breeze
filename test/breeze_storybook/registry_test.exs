@@ -15,6 +15,7 @@ defmodule Breeze.Storybook.RegistryTest do
     modal: "modal",
     panel: "panel",
     scroll: "scroll",
+    spinner: "spinner",
     table: "table",
     tabs: "tabs",
     textarea: "textarea",
@@ -39,6 +40,13 @@ defmodule Breeze.Storybook.RegistryTest do
     [%{id: "flash", variants: variants}] = Registry.stories("storybook", file: "flash.story.exs")
 
     assert Enum.map(variants, & &1.id) == ["default", "square", "rounded"]
+  end
+
+  test "spinner story covers each animation variant" do
+    assert [%{id: "spinner", group: "Blocks", variants: variants}] =
+             Registry.stories("storybook", file: "spinner.story.exs")
+
+    assert Enum.map(variants, & &1.id) == ["dots", "bars"]
   end
 
   test "every public Breeze block has an associated story" do

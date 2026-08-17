@@ -25,6 +25,107 @@ defmodule Breeze.Storybook.RenderingTest do
     end
   end
 
+  test "spinner story renders its idle state and animation decoration" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    {:ok, pid} =
+      start_child_server(
+        view: Breeze.Storybook,
+        terminal: terminal,
+        start_opts: [directory: "storybook", file: "spinner.story.exs"]
+      )
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+
+    assert plain_content =~ "Asynchronous task animation"
+    assert plain_content =~ "Completed runs: 0"
+
+    preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
+
+    assert {:ok, _acc, _box,
+            [
+              %{
+                id: "storybook-spinner",
+                every_ms: 80,
+                active_when_pending: true,
+                box: spinner_box
+              }
+            ]} =
+             Breeze.ChildServer.render_snapshot(preview_pid, terminal: terminal)
+
+    panel_background =
+      preview_pid
+      |> Breeze.ChildServer.metadata()
+      |> Map.fetch!(:theme)
+      |> Breeze.Theme.color(:panel)
+
+    assert spinner_box.style.background_color == panel_background
+
+    assert {:noreply, "storybook-nav", true} =
+             Breeze.ChildServer.dispatch_event(pid, "select_variant", %{value: "bars"})
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert BackBreeze.Utils.strip_escape_chars(box.content) =~
+             "Preview: Spinner / Bars"
+
+    preview_pid = :sys.get_state(pid).children["storybook-preview"].pid
+
+    assert {:ok, _acc, _box,
+            [%{id: "storybook-spinner", every_ms: 120, active_when_pending: true}]} =
+             Breeze.ChildServer.render_snapshot(preview_pid, terminal: terminal)
+  end
+
+  test "spinner story runs work outside the event callback" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    test_pid = self()
+
+    task_fun = fn ->
+      send(test_pid, {:spinner_task_started, self()})
+
+      receive do
+        :finish_spinner_task -> :ok
+      after
+        100 -> :ok
+      end
+    end
+
+    {:ok, pid} =
+      start_child_server(
+        view: Breeze.Storybook.Stories.Blocks.SpinnerStory,
+        terminal: terminal,
+        start_opts: [task_fun: task_fun]
+      )
+
+    assert {:noreply, "storybook-spinner-run", true} =
+             Breeze.ChildServer.dispatch_input(pid, "Enter")
+
+    assert_receive {:spinner_task_started, task_pid}
+
+    assert %{assigns: %{running?: true, completed_runs: 0}} =
+             Breeze.ChildServer.metadata(pid)
+
+    assert {:ok, _acc, _box, [%{id: "storybook-spinner", active_when_pending: false}]} =
+             Breeze.ChildServer.render_snapshot(pid, terminal: terminal)
+
+    send(task_pid, :finish_spinner_task)
+
+    assert :ok =
+             wait_until(
+               fn ->
+                 match?(
+                   %{assigns: %{running?: false, completed_runs: 1}},
+                   Breeze.ChildServer.metadata(pid)
+                 )
+               end,
+               500
+             )
+
+    assert {:ok, _acc, _box, [%{id: "storybook-spinner", active_when_pending: true}]} =
+             Breeze.ChildServer.render_snapshot(pid, terminal: terminal)
+  end
+
   test "table story renders its complete Population header" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
 
