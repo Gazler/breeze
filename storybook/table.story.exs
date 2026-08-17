@@ -49,9 +49,9 @@ defmodule Breeze.Storybook.Stories.Blocks.TableStory do
       br-change="storybook_table_changed"
     >
       <:col :let={city} label="#" width={4} align="right">{city.rank}</:col>
-      <:col :let={city} label="City" width={12}>{city.city}</:col>
-      <:col :let={city} label="Country" width={12} align="center">{city.country}</:col>
-      <:col :let={city} label="Population" width={10} align="right">
+      <:col :let={city} label="City">{city.city}</:col>
+      <:col :let={city} label="Country" align="center">{city.country}</:col>
+      <:col :let={city} label="Population" align="right" header_align="center">
         <box class="text-accent">{city.population}</box>
       </:col>
     </.table>

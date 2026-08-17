@@ -750,6 +750,28 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule HeaderAlignedTableExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term |> focus("amounts")}
+
+    def render(assigns) do
+      assigns = assign(assigns, rows: [%{id: "total", amount: "37.20m"}])
+
+      ~H"""
+      <.table id="amounts" rows={@rows} class="width-24 height-4 border-none">
+        <:col :let={row} label="Amount" width={20} align="right" header_align="center">
+          {row.amount}
+        </:col>
+      </.table>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule InferredTableExample do
     use Breeze.View
     import Breeze.Blocks
@@ -1500,6 +1522,18 @@ defmodule Breeze.BlocksTest do
     assert box.content =~ "Delhi"
     assert box.content =~ "India"
     assert box.content =~ ~r/\e\[[0-9;]*48;5;4/
+  end
+
+  test "table supports header alignment independent of cell alignment" do
+    {:ok, pid} = start_child_server(view: HeaderAlignedTableExample, start_opts: [])
+
+    {:ok, _acc, box} = ChildServer.render(pid, focused: "amounts", implicit_state: %{})
+    lines = box.content |> BackBreeze.Utils.strip_escape_chars() |> String.split("\n")
+    header = Enum.find(lines, &String.contains?(&1, "Amount"))
+    row = Enum.find(lines, &String.contains?(&1, "37.20m"))
+
+    assert text_column(header, "Amount") < text_column(row, "37.20m"),
+           "expected centered header before right-aligned value:\n#{header}\n#{row}"
   end
 
   test "table inferred widths include full text and cell padding" do

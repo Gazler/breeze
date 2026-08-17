@@ -1252,6 +1252,7 @@ defmodule Breeze.Blocks do
     attr :label, :string, default: nil
     attr :width, :any, default: nil
     attr :align, :any, default: "left"
+    attr :header_align, :any, default: nil
     attr :class, :string, default: nil
     attr :style, :any, default: nil
   end
@@ -1339,11 +1340,14 @@ defmodule Breeze.Blocks do
   defp normalize_table_columns(columns, rows) do
     columns =
       Enum.map(columns, fn column ->
+        align = normalize_align(Map.get(column, :align, "left"))
+
         %{
           slot: column,
           label: Map.get(column, :label) || "",
           width: Map.get(column, :width),
-          align: normalize_align(Map.get(column, :align, "left")),
+          align: align,
+          header_align: normalize_header_align(Map.get(column, :header_align), align),
           class: Map.get(column, :class),
           style: Map.get(column, :style)
         }
@@ -1353,12 +1357,13 @@ defmodule Breeze.Blocks do
       width = column.width || inferred_table_column_width(column, rows)
       width_class = table_column_width_class(column.width)
       align_class = table_align_class(column.align)
+      header_align_class = table_align_class(column.header_align)
 
       column
       |> Map.put(:width, width)
       |> Map.put(
         :header_class,
-        "#{width_class} padding-left-1 padding-right-1 overflow-hidden #{align_class}"
+        "#{width_class} padding-left-1 padding-right-1 overflow-hidden #{header_align_class}"
       )
       |> Map.put(
         :cell_class,
@@ -1429,6 +1434,9 @@ defmodule Breeze.Blocks do
   defp normalize_align(value) when value in [:right, "right"], do: :right
   defp normalize_align(value) when value in [:center, "center"], do: :center
   defp normalize_align(_value), do: :left
+
+  defp normalize_header_align(nil, align), do: align
+  defp normalize_header_align(value, _align), do: normalize_align(value)
 
   defp table_align_class(:right), do: "text-right"
   defp table_align_class(:center), do: "text-center"

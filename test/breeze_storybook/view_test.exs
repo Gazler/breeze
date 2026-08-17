@@ -25,6 +25,44 @@ defmodule Breeze.Storybook.RenderingTest do
     end
   end
 
+  test "table story renders its complete Population header" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    {:ok, pid} =
+      start_child_server(
+        view: Breeze.Storybook,
+        terminal: terminal,
+        start_opts: [directory: "storybook", file: "table.story.exs"]
+      )
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+
+    assert Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "") =~ "Population"
+  end
+
+  test "table story stretches unbounded data columns with the available width" do
+    view = Breeze.Storybook.Stories.Blocks.TableStory
+    narrow_terminal = %Termite.Terminal{size: %{width: 44, height: 12}}
+    wide_terminal = %Termite.Terminal{size: %{width: 64, height: 12}}
+
+    {:ok, pid} = start_child_server(view: view, terminal: narrow_terminal)
+
+    assert {:ok, _acc, narrow_box} = Breeze.ChildServer.render(pid, terminal: narrow_terminal)
+    assert {:ok, _acc, wide_box} = Breeze.ChildServer.render(pid, terminal: wide_terminal)
+
+    population_column = fn box ->
+      box.content
+      |> BackBreeze.Utils.strip_escape_chars()
+      |> String.split("\n")
+      |> Enum.find(&String.contains?(&1, "Population"))
+      |> String.split("Population", parts: 2)
+      |> hd()
+      |> BackBreeze.Utils.string_length()
+    end
+
+    assert population_column.(wide_box) > population_column.(narrow_box)
+  end
+
   test "tree story keeps selection in story-local state" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
 
