@@ -266,6 +266,37 @@ defmodule Breeze.StyleTest do
       assert complete.style.border.bottom_right == "▘"
     end
 
+    test "composes a bottom edge with a rounded border independent of class order" do
+      for class <- ["border-rounded border-b-edge", "border-b-edge border-rounded"] do
+        element =
+          Style.empty()
+          |> Style.put_class(class)
+          |> Style.to_element([])
+
+        assert element.style.border.style == :custom
+        assert element.style.border.top == "─"
+        assert element.style.border.left == "│"
+        assert element.style.border.right == "│"
+        assert element.style.border.bottom == "▀"
+        assert element.style.border.bottom_left == "╰"
+        assert element.style.border.bottom_right == "╯"
+      end
+    end
+
+    test "border-b-edge enables only the bottom side by itself" do
+      element =
+        Style.empty()
+        |> Style.put_class("border-b-edge")
+        |> Style.to_element([])
+
+      assert element.style.border.bottom == "▀"
+      assert element.style.border.top == nil
+      assert element.style.border.left == nil
+      assert element.style.border.right == nil
+      assert element.style.border.bottom_left == nil
+      assert element.style.border.bottom_right == nil
+    end
+
     test "border-edge does not enable sides by itself" do
       element =
         Style.empty()

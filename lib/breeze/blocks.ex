@@ -1476,6 +1476,8 @@ defmodule Breeze.Blocks do
 
   attr :id, :string, default: nil
   attr :focusable, :boolean, default: true
+  attr :variant, :string, default: "default", values: ["default", "bordered"]
+  attr :highlight, :string, default: "primary"
   attr :class, :string, default: nil
   attr :style, :any, default: nil
   attr :rest, :global
@@ -1483,16 +1485,19 @@ defmodule Breeze.Blocks do
   slot :inner_block, required: true
 
   def button(assigns) do
+    variant = Map.get(assigns, :variant, "default")
+    highlight = Map.get(assigns, :highlight, "primary")
+
+    class =
+      merge_class(
+        button_variant_class(variant, highlight),
+        class_override(assigns)
+      )
+
     assigns =
       assigns
       |> assign(focusable: normalize_button_focusable(Map.get(assigns, :focusable, true)))
-      |> assign(
-        class:
-          merge_class(
-            "bg-primary text-bg bold height-1 overflow-hidden focus:inverse padding-left-1 padding-right-1",
-            class_override(assigns)
-          )
-      )
+      |> assign(class: class)
 
     ~H"""
     <box
@@ -1509,6 +1514,14 @@ defmodule Breeze.Blocks do
 
   defp normalize_button_focusable(value) when value in [false, "false"], do: false
   defp normalize_button_focusable(_value), do: true
+
+  defp button_variant_class("bordered", highlight) do
+    "border-rounded border-stroke bg-panel text bold height-3 overflow-hidden focus:border-b-edge focus:#{semantic_class("border", highlight)} padding-left-1 padding-right-1"
+  end
+
+  defp button_variant_class(_variant, _highlight) do
+    "bg-primary text-bg bold height-1 overflow-hidden focus:inverse padding-left-1 padding-right-1"
+  end
 
   attr :id, :string, required: true
 
@@ -2684,7 +2697,12 @@ defmodule Breeze.Blocks do
   defp utility_style_key("not-italic"), do: "font-style"
 
   defp utility_style_key(token)
-       when token in ["border-line", "border-rounded", "border-square", "border-edge"],
+       when token in [
+              "border-line",
+              "border-rounded",
+              "border-square",
+              "border-edge"
+            ],
        do: "border-shape"
 
   defp utility_style_key(token)

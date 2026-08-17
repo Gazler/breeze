@@ -180,7 +180,8 @@ defmodule Breeze.View do
      `top-n`, `right-n`, `bottom-n`, `left-n`, and `z-n`
    * borders - `border`, `border-x`, `border-y`, `border-t`, `border-r`,
      `border-b`, `border-l`, and `rounded`, plus terminal-specific
-     `border-edge`, `border-square`, `border-none`, and `border-invisible`
+     `border-edge`, `border-b-edge`, `border-square`, `border-none`, and
+     `border-invisible`
    * overflow - `overflow-auto`, `overflow-hidden`, and `overflow-scroll`
 
   Breeze also provides terminal-specific utilities for colors, scrollbars,
@@ -199,6 +200,13 @@ defmodule Breeze.View do
 
   Each selected border side occupies one terminal cell inside an explicitly
   declared width or height, just like the standard line and rounded borders.
+
+  `border-b-edge` replaces only the bottom stroke with the inward-facing edge
+  glyph, preserving the base border's other sides and corners:
+
+  ```heex
+  <box class="border-rounded border-b-edge">Rounded frame with an edge bottom</box>
+  ```
 
   ### Grid layout
 

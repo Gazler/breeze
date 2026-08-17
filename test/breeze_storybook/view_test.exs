@@ -25,6 +25,143 @@ defmodule Breeze.Storybook.RenderingTest do
     end
   end
 
+  test "button story shows the latest keyboard and mouse press" do
+    terminal = %Termite.Terminal{size: %{width: 44, height: 10}}
+
+    {:ok, pid} =
+      start_child_server(
+        view: Breeze.Storybook.Stories.Blocks.ButtonStory,
+        terminal: terminal
+      )
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert BackBreeze.Utils.strip_escape_chars(box.content) =~ "Latest press: None"
+
+    assert {:noreply, "storybook-button-primary", _changed?} =
+             Breeze.ChildServer.set_focus(pid, "storybook-button-primary")
+
+    assert {:noreply, "storybook-button-primary", true} =
+             Breeze.ChildServer.dispatch_input(pid, "Enter")
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert BackBreeze.Utils.strip_escape_chars(box.content) =~ "Latest press: Confirm"
+
+    bounds = :sys.get_state(pid).mouse_targets["storybook-button-cancel"]
+
+    mouse = %{
+      "mouse" => %{
+        "button" => "left",
+        "x" => div(bounds.left + bounds.right, 2),
+        "y" => div(bounds.top + bounds.bottom, 2)
+      }
+    }
+
+    assert {:noreply, "storybook-button-cancel", true} =
+             Breeze.ChildServer.dispatch_input(pid, put_in(mouse, ["mouse", "action"], "press"))
+
+    assert %{assigns: %{latest_press: "Confirm"}} = Breeze.ChildServer.metadata(pid)
+
+    assert {:noreply, "storybook-button-cancel", true} =
+             Breeze.ChildServer.dispatch_input(
+               pid,
+               put_in(mouse, ["mouse", "action"], "release")
+             )
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert BackBreeze.Utils.strip_escape_chars(box.content) =~ "Latest press: Cancel"
+  end
+
+  test "button story switches between default and bordered variants" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+
+    {:ok, pid} =
+      start_child_server(
+        view: Breeze.Storybook,
+        terminal: terminal,
+        start_opts: [directory: "storybook", file: "button.story.exs"]
+      )
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    plain_content = BackBreeze.Utils.strip_escape_chars(box.content)
+
+    assert plain_content =~ "Preview: Button / Default"
+    assert plain_content =~ " Default  Bordered "
+    assert plain_content =~ ~s|<.button id="confirm" class="w-12">Confirm|
+
+    assert {:noreply, "storybook-nav", true} =
+             Breeze.ChildServer.dispatch_event(pid, "select_variant", %{value: "bordered"})
+
+    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    plain_content = BackBreeze.Utils.strip_escape_chars(box.content)
+
+    assert plain_content =~ "Preview: Button / Bordered"
+    assert plain_content =~ ~s|variant="bordered"|
+  end
+
+  test "bordered button story adds colored focus edges across the bottom border" do
+    terminal = %Termite.Terminal{size: %{width: 44, height: 10}}
+    theme = Breeze.Theme.builtin(:nebula)
+
+    {:ok, pid} =
+      start_child_server(
+        view: Breeze.Storybook.Stories.Blocks.ButtonStory,
+        terminal: terminal,
+        theme: theme,
+        assigns: %{__breeze_story_variant__: "bordered"}
+      )
+
+    assert {:ok, _acc, box} =
+             Breeze.ChildServer.render(pid, terminal: terminal, focused: "not-focused")
+
+    assert BackBreeze.Utils.strip_escape_chars(box.content) =~ "Confirm"
+    refute BackBreeze.Utils.strip_escape_chars(box.content) =~ "▀"
+
+    primary_code = theme |> Breeze.Theme.color(:primary) |> Tuple.to_list() |> Enum.join(";")
+    error_code = theme |> Breeze.Theme.color(:error) |> Tuple.to_list() |> Enum.join(";")
+    panel_code = theme |> Breeze.Theme.color(:panel) |> Tuple.to_list() |> Enum.join(";")
+
+    confirm = :sys.get_state(pid).rendered_boxes["storybook-button-primary"]
+    unfocused_delete = :sys.get_state(pid).rendered_boxes["storybook-button-delete"]
+
+    assert confirm.style.width == 12
+    assert unfocused_delete.style.background_color == Breeze.Theme.color(theme, :panel)
+
+    assert {:ok, _acc, focused_confirm_box} =
+             Breeze.ChildServer.render(pid,
+               terminal: terminal,
+               focused: "storybook-button-primary"
+             )
+
+    focused_confirm_content = BackBreeze.Utils.strip_escape_chars(focused_confirm_box.content)
+
+    assert focused_confirm_content =~ "╰▀▀▀▀▀▀▀▀▀▀╯"
+
+    assert focused_confirm_box.content =~
+             ~r/48;2;#{panel_code}[^m]*38;2;#{primary_code}m╰▀/u
+
+    refute focused_confirm_box.content =~ ~r/\e\[[0-9;]*7;[0-9;]*mConfirm/u
+
+    assert {:ok, _acc, focused_box} =
+             Breeze.ChildServer.render(pid,
+               terminal: terminal,
+               focused: "storybook-button-delete"
+             )
+
+    focused_delete = :sys.get_state(pid).rendered_boxes["storybook-button-delete"]
+
+    assert focused_delete.style.background_color == unfocused_delete.style.background_color
+    assert focused_delete.style.border_color == Breeze.Theme.color(theme, :error)
+
+    focused_delete_content = BackBreeze.Utils.strip_escape_chars(focused_box.content)
+
+    assert focused_delete_content =~ "╰▀▀▀▀▀▀▀▀▀▀╯"
+
+    assert focused_box.content =~
+             ~r/48;2;#{panel_code}[^m]*38;2;#{error_code}m╰▀/u
+
+    refute focused_box.content =~ ~r/\e\[[0-9;]*7;[0-9;]*mDelete/u
+  end
+
   test "spinner story renders its idle state and animation decoration" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
 
@@ -768,7 +905,7 @@ defmodule Breeze.Storybook.InteractionLayoutTest do
     )
   end
 
-  test "tabbing into the button preview moves the focused panel state" do
+  test "tabbing through the button variants into the preview moves the focused panel state" do
     {terminal, pid} =
       start_storybook_server!("button.story.exs", theme: Breeze.Theme.builtin(:gruvbox))
 
@@ -794,6 +931,12 @@ defmodule Breeze.Storybook.InteractionLayoutTest do
 
     assert panel_title_color?(initial_header, "Storybook", @focused_panel_color)
     assert panel_title_color?(initial_header, "Preview: Button", @unfocused_panel_color)
+
+    send(pid, {reader, {:data, "\t"}})
+
+    wait_until(fn ->
+      :sys.get_state(pid).focused == "storybook-variant-tabs"
+    end)
 
     send(pid, {reader, {:data, "\t"}})
 

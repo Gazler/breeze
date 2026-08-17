@@ -46,13 +46,13 @@ defmodule Breeze.Storybook.Stories.Blocks.ModalStory do
 
     ~H"""
     <box class="w-full h-full bg">
-      <box
+      <.button
         id="storybook-modal-trigger"
-        class="absolute left-2 top-1 w-20 h-3 rounded focus:border-primary"
-        focusable
+        variant="bordered"
+        class="absolute left-2 top-1 w-20 text-center"
       >
-        <box class="font-bold text-center">Open Modal</box>
-      </box>
+        Open Modal
+      </.button>
       <.modal
         :if={@show_modal}
         id="storybook-modal"
@@ -66,14 +66,9 @@ defmodule Breeze.Storybook.Stories.Blocks.ModalStory do
         <box class="w-full">Escape closes it normally.</box>
         <box>
         </box>
-        <box
-          id="storybook-modal-close"
-          focusable
-          default-focus
-          class="w-16 h-3 rounded focus:border-primary"
-        >
-          <box class="font-bold text-center">Close</box>
-        </box>
+        <.button id="storybook-modal-close" variant="bordered" default-focus class="w-16 text-center">
+          Close
+        </.button>
       </.modal>
     </box>
     """
@@ -94,6 +89,28 @@ defmodule Breeze.Storybook.Stories.Blocks.ModalStory do
         %{assigns: %{show_modal: true}, focused: "storybook-modal-close"} = term
       )
       when key in ["Enter", " "] do
+    {:noreply, assign(term, show_modal: false)}
+  end
+
+  def handle_event(
+        _,
+        %{
+          "mouse" => %{"button" => "left", "action" => "release"},
+          "target" => "storybook-modal-trigger"
+        },
+        term
+      ) do
+    {:noreply, assign(term, show_modal: true)}
+  end
+
+  def handle_event(
+        _,
+        %{
+          "mouse" => %{"button" => "left", "action" => "release"},
+          "target" => "storybook-modal-close"
+        },
+        %{assigns: %{show_modal: true}} = term
+      ) do
     {:noreply, assign(term, show_modal: false)}
   end
 

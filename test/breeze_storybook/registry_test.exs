@@ -49,6 +49,13 @@ defmodule Breeze.Storybook.RegistryTest do
     assert Enum.map(variants, & &1.id) == ["dots", "bars"]
   end
 
+  test "button story covers the filled and bordered variants" do
+    assert [%{id: "button", group: "Blocks", variants: variants}] =
+             Registry.stories("storybook", file: "button.story.exs")
+
+    assert Enum.map(variants, & &1.id) == ["default", "bordered"]
+  end
+
   test "every public Breeze block has an associated story" do
     assert MapSet.new(Map.keys(@block_story_ids)) ==
              MapSet.new(Breeze.Blocks.__breeze_components__())

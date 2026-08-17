@@ -113,6 +113,22 @@ defmodule Breeze.BlocksTest do
     def handle_info(_, term), do: {:noreply, term}
   end
 
+  defmodule BorderedButtonExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.button id="confirm" variant="bordered" class="width-14 text-center">Confirm</.button>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+    def handle_info(_, term), do: {:noreply, term}
+  end
+
   defmodule SpinnerExample do
     use Breeze.View
     import Breeze.Blocks
@@ -1016,6 +1032,35 @@ defmodule Breeze.BlocksTest do
     assert acc.focusables == ["confirm"]
     assert box.content =~ "Confirm"
     assert box.content =~ ~r/\e\[[0-9;]*7;[0-9;]*m/
+  end
+
+  test "bordered button renders a focused edge across its bottom border" do
+    theme = Breeze.Theme.builtin(:nebula)
+    {:ok, pid} = start_child_server(view: BorderedButtonExample, theme: theme)
+
+    assert {:ok, _acc, unfocused_box} =
+             ChildServer.render(pid, focused: "not-focused", implicit_state: %{})
+
+    refute BackBreeze.Utils.strip_escape_chars(unfocused_box.content) =~ "▀"
+
+    assert :sys.get_state(pid).rendered_boxes["confirm"].style.border ==
+             BackBreeze.Border.rounded()
+
+    assert {:ok, _acc, box} =
+             ChildServer.render(pid, focused: "confirm", implicit_state: %{})
+
+    button = :sys.get_state(pid).rendered_boxes["confirm"]
+
+    assert button.style.height == 3
+    assert button.style.border.bottom == "▀"
+    assert button.style.border.bottom_left == "╰"
+    assert button.style.border.bottom_right == "╯"
+    assert button.style.border_color == Breeze.Theme.color(theme, :primary)
+
+    assert box.content
+           |> BackBreeze.Utils.strip_escape_chars()
+           |> String.split("\n")
+           |> Enum.at(2) == "╰▀▀▀▀▀▀▀▀▀▀▀▀╯"
   end
 
   test "spinner uses the dots animation and paints the panel background by default" do

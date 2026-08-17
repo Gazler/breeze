@@ -502,6 +502,9 @@ defmodule Breeze.Style do
   defp apply_style("border-b", acc, _theme), do: select_border_sides(acc, [:bottom])
   defp apply_style("border-l", acc, _theme), do: select_border_sides(acc, [:left])
 
+  defp apply_style("border-b-edge", acc, _theme),
+    do: select_border_side_style(acc, :bottom, :edge)
+
   defp apply_style("border-" <> color, acc, theme),
     do: apply_border_color(color, acc, theme)
 
@@ -558,13 +561,27 @@ defmodule Breeze.Style do
     {style, Map.put(attrs, @border_state_attribute, state)}
   end
 
+  defp select_border_side_style({style, attrs}, side, border_style) do
+    state = border_state(attrs)
+    base_style = if(state.style == :none, do: nil, else: state.style)
+
+    state = %{
+      state
+      | style: base_style,
+        sides: Enum.uniq(state.sides ++ [side]),
+        side_styles: Map.put(state.side_styles, side, border_style)
+    }
+
+    {style, Map.put(attrs, @border_state_attribute, state)}
+  end
+
   defp reset_border({style, attrs}) do
-    state = %{border_state(attrs) | style: :none, sides: []}
+    state = %{border_state(attrs) | style: :none, sides: [], side_styles: %{}}
     {style, Map.put(attrs, @border_state_attribute, state)}
   end
 
   defp border_state(attrs) do
-    Map.get(attrs, @border_state_attribute, %{style: nil, sides: []})
+    Map.get(attrs, @border_state_attribute, %{style: nil, sides: [], side_styles: %{}})
   end
 
   defp finalize_border({style, attrs}) do
@@ -578,14 +595,14 @@ defmodule Breeze.Style do
       {%{sides: []}, attrs} ->
         {%{style | border: BackBreeze.Border.none()}, attrs}
 
-      {%{style: border_style, sides: sides}, attrs} ->
-        border = border_for_sides(border_style || :line, sides)
+      {%{style: border_style, sides: sides, side_styles: side_styles}, attrs} ->
+        border = border_for_sides(border_style || :line, sides, side_styles)
         {%{style | border: border}, attrs}
     end
   end
 
-  defp border_for_sides(border_style, sides) do
-    template = border_template(border_style)
+  defp border_for_sides(border_style, sides, side_styles) do
+    template = border_style |> border_template() |> override_border_sides(side_styles)
     sides = MapSet.new(sides)
 
     %BackBreeze.Border{
@@ -606,6 +623,16 @@ defmodule Breeze.Style do
   defp border_template(:invisible), do: BackBreeze.Border.invisible()
   defp border_template(:square), do: square_border()
   defp border_template(:edge), do: edge_border()
+
+  defp override_border_sides(template, side_styles) do
+    Enum.reduce(side_styles, template, fn {side, border_style}, acc ->
+      glyph = border_style |> border_template() |> Map.fetch!(side)
+
+      acc
+      |> Map.put(:style, :custom)
+      |> Map.put(side, glyph)
+    end)
+  end
 
   defp border_side(template, sides, side) do
     if MapSet.member?(sides, side), do: Map.fetch!(template, side)
