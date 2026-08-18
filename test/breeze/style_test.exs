@@ -1037,9 +1037,9 @@ defmodule Breeze.StyleTest do
       )
       |> Style.to_element(theme: theme, focus: true)
 
-    assert unfocused.style.foreground_color == {106, 128, 131}
-    assert focused.style.foreground_color == {147, 161, 161}
-    assert unfocused.style.background_color == {44, 78, 86}
-    assert focused.style.background_color == {63, 94, 100}
+    assert unfocused.style.foreground_color == {107, 129, 132}
+    assert focused.style.foreground_color == {148, 162, 162}
+    assert unfocused.style.background_color == {44, 79, 86}
+    assert focused.style.background_color == {64, 94, 100}
   end
 end

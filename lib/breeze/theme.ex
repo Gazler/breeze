@@ -94,6 +94,8 @@ defmodule Breeze.Theme do
     * `:solarized_light` and `:solarized_dark` as variant aliases
   """
 
+  alias Breeze.Theme.Contrast
+
   @enforce_keys [:defaults, :palette, :extras]
   defstruct name: nil,
             mode: :custom,
@@ -115,6 +117,9 @@ defmodule Breeze.Theme do
   }
   @palette_aliases %{fg: :text}
   @palette_keys ~w(muted primary secondary warning error success accent surface panel)a
+  @minimum_text_contrast 4.5
+  @minimum_muted_contrast 3.0
+  @minimum_ui_contrast 3.0
   @known_key_lookup (Map.keys(@default_aliases) ++
                        Map.values(@default_aliases) ++
                        Map.keys(@palette_aliases) ++
@@ -302,7 +307,10 @@ defmodule Breeze.Theme do
   Builds a theme from the terminal palette.
 
   Falls back to `system16/1` while retaining the system-theme request when a
-  complete palette is not yet available.
+  complete palette is not yet available. Complete RGB palettes retain their
+  probed hue and chroma while Oklab lightness is adjusted when needed: body and
+  semantic text target `4.5:1` across generated surfaces, while deliberately
+  subdued text and borders target `3:1`.
   """
   @spec system(keyword()) :: t()
   def system(opts \\ []) do
@@ -312,12 +320,14 @@ defmodule Breeze.Theme do
       )
 
     if system_palette_available?(terminal_palette) do
+      neutrals = system_neutrals(terminal_palette)
+
       %__MODULE__{
         name: Keyword.get(opts, :name, "system"),
         mode: :system,
         dark: Keyword.get(opts, :dark, infer_dark(terminal_palette)),
-        defaults: system_defaults(terminal_palette),
-        palette: system_palette(terminal_palette),
+        defaults: system_defaults(neutrals),
+        palette: system_palette(terminal_palette, neutrals),
         extras: %{},
         variables: Keyword.get(opts, :variables, %{}) |> Map.put(:palette_probe_status, :ready),
         terminal_palette: terminal_palette
@@ -344,33 +354,23 @@ defmodule Breeze.Theme do
   def new(true, opts), do: default(opts)
   def new(:system16, opts), do: system16(opts)
   def new(:system, opts), do: system(opts)
+  def new(%__MODULE__{} = theme, []), do: theme
 
-  def new(%__MODULE__{} = theme, opts) do
-    case theme.mode do
-      :system ->
-        system(
-          name: theme.name,
-          dark: theme.dark,
-          variables: theme.variables,
-          palette:
-            Keyword.get(opts, :palette, theme.terminal_palette) ||
-              terminal_palette_from_terminal(opts[:terminal])
-        )
+  def new(%__MODULE__{mode: mode} = theme, opts) when mode in [:system, :system16] do
+    refreshed_palette =
+      opts
+      |> Keyword.get(:palette)
+      |> Kernel.||(terminal_palette_from_terminal(opts[:terminal]))
+      |> normalize_terminal_palette()
 
-      :system16 ->
-        system16(
-          name: theme.name,
-          dark: theme.dark,
-          variables: theme.variables,
-          palette:
-            Keyword.get(opts, :palette, theme.terminal_palette) ||
-              terminal_palette_from_terminal(opts[:terminal])
-        )
-
-      :custom ->
-        theme
+    if is_nil(refreshed_palette) or refreshed_palette == theme.terminal_palette do
+      theme
+    else
+      refresh_system_theme(theme, refreshed_palette)
     end
   end
+
+  def new(%__MODULE__{} = theme, _opts), do: theme
 
   def new(theme, opts) when is_list(theme) do
     if Keyword.keyword?(theme), do: theme |> Map.new() |> new(opts), else: default(opts)
@@ -465,6 +465,16 @@ defmodule Breeze.Theme do
     mix(left, right, max(0.0, min(weight * 1.0, 1.0)))
   end
 
+  @doc """
+  Returns the contrast ratio between two RGB or hexadecimal colors.
+
+  The result uses the WCAG relative-luminance calculation and ranges from
+  `1.0` (identical luminance) to `21.0` (black against white). Terminal color
+  indexes cannot be measured without their RGB palette, so they return `nil`.
+  """
+  @spec contrast_ratio(color(), color()) :: float() | nil
+  defdelegate contrast_ratio(left, right), to: Contrast, as: :ratio
+
   @doc "Lightens a color by blending it toward white."
   @spec lighten(color(), float()) :: color()
   def lighten(color, amount) when is_number(amount) do
@@ -526,19 +536,16 @@ defmodule Breeze.Theme do
   defp normalize_mode("custom"), do: :custom
   defp normalize_mode(_), do: nil
 
-  defp system_defaults(terminal_palette) do
-    background =
-      terminal_palette_lookup(terminal_palette, :background) ||
-        terminal_palette_lookup(terminal_palette, 0) || {0, 0, 0}
-
-    foreground =
-      terminal_palette_lookup(terminal_palette, :foreground) ||
-        terminal_palette_lookup(terminal_palette, 7) || {255, 255, 255}
+  defp system_defaults(%{background: background, foreground: foreground} = neutrals) do
+    backgrounds = [background, neutrals.surface, neutrals.panel]
 
     %{
       foreground_color: foreground,
       background_color: background,
-      border_color: mix(foreground, background, 0.35)
+      border_color:
+        foreground
+        |> mix(background, 0.35)
+        |> Contrast.adjust(backgrounds, @minimum_ui_contrast)
     }
   end
 
@@ -578,9 +585,13 @@ defmodule Breeze.Theme do
     }
   end
 
-  defp system_palette(terminal_palette) do
-    background = system_defaults(terminal_palette).background_color
-    foreground = system_defaults(terminal_palette).foreground_color
+  defp system_palette(terminal_palette, %{
+         background: background,
+         foreground: foreground,
+         surface: surface,
+         panel: panel
+       }) do
+    backgrounds = [background, surface, panel]
 
     primary =
       terminal_palette_lookup(terminal_palette, 4) ||
@@ -607,16 +618,57 @@ defmodule Breeze.Theme do
         terminal_palette_lookup(terminal_palette, 13) || primary
 
     %{
-      muted: mix(foreground, background, 0.55),
-      primary: primary,
-      secondary: secondary,
-      warning: warning,
-      error: error,
-      success: success,
-      accent: accent,
-      surface: mix(background, foreground, 0.08),
-      panel: mix(background, foreground, 0.14)
+      muted:
+        foreground
+        |> mix(background, 0.55)
+        |> Contrast.adjust(backgrounds, @minimum_muted_contrast),
+      primary: Contrast.adjust(primary, backgrounds, @minimum_text_contrast),
+      secondary: Contrast.adjust(secondary, backgrounds, @minimum_text_contrast),
+      warning: Contrast.adjust(warning, backgrounds, @minimum_text_contrast),
+      error: Contrast.adjust(error, backgrounds, @minimum_text_contrast),
+      success: Contrast.adjust(success, backgrounds, @minimum_text_contrast),
+      accent: Contrast.adjust(accent, backgrounds, @minimum_text_contrast),
+      surface: surface,
+      panel: panel
     }
+  end
+
+  defp system_neutrals(terminal_palette) do
+    background =
+      terminal_palette_lookup(terminal_palette, :background) ||
+        terminal_palette_lookup(terminal_palette, 0) || {0, 0, 0}
+
+    foreground =
+      terminal_palette_lookup(terminal_palette, :foreground) ||
+        terminal_palette_lookup(terminal_palette, 7) || {255, 255, 255}
+
+    contrast_target = Contrast.preferred_target(background)
+
+    surface =
+      background
+      |> mix(foreground, 0.08)
+      |> Contrast.keep_contrast_side(contrast_target, background, @minimum_text_contrast)
+
+    panel =
+      background
+      |> mix(foreground, 0.14)
+      |> Contrast.keep_contrast_side(contrast_target, background, @minimum_text_contrast)
+
+    %{
+      background: background,
+      foreground:
+        Contrast.adjust(foreground, [background, surface, panel], @minimum_text_contrast),
+      surface: surface,
+      panel: panel
+    }
+  end
+
+  defp refresh_system_theme(%__MODULE__{mode: :system} = theme, palette) do
+    system(name: theme.name, dark: theme.dark, variables: theme.variables, palette: palette)
+  end
+
+  defp refresh_system_theme(%__MODULE__{mode: :system16} = theme, palette) do
+    system16(name: theme.name, dark: theme.dark, variables: theme.variables, palette: palette)
   end
 
   defp tone_mix(left, right, weight, fallback) do
