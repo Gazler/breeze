@@ -57,12 +57,6 @@ defmodule Breeze.InputRouterTest do
         send(owner, {ref, {:data, "\e]4;4;rgb:3333/5555/aaaa\a"}})
         send(owner, {ref, {:data, "\e]4;5;rgb:9999/3333/aaaa\a"}})
         send(owner, {ref, {:data, "\e]4;6;rgb:3333/aaaa/aaaa\a"}})
-        send(owner, {ref, {:data, "\e]4;9;rgb:dddd/6666/4444\a"}})
-        send(owner, {ref, {:data, "\e]4;10;rgb:4444/cccc/5555\a"}})
-        send(owner, {ref, {:data, "\e]4;11;rgb:e6e6/d1d1/5a5a\a"}})
-        send(owner, {ref, {:data, "\e]4;12;rgb:5f5f/7b7b/e0e0\a"}})
-        send(owner, {ref, {:data, "\e]4;13;rgb:b3b3/6b6b/d4d4\a"}})
-        send(owner, {ref, {:data, "\e]4;14;rgb:5a5a/d6d6/d6d6\a"}})
       end
 
       {:ok, term}
@@ -91,14 +85,8 @@ defmodule Breeze.InputRouterTest do
         send(owner, {ref, {:data, "\e]4;3;rgb:cccc/bbbb/3333\a"}})
         send(owner, {ref, {:data, "\e]4;4;rgb:3333/5555/aaaa\a"}})
         send(owner, {ref, {:data, "\e]4;5;rgb:9999/3333/aaaa\a"}})
-        send(owner, {ref, {:data, "\e]4;6;rgb:3333/aaaa/aaaa\a"}})
-        send(owner, {ref, {:data, "\e]4;9;rgb:dddd/6666/4444\a"}})
-        send(owner, {ref, {:data, "\e]4;10;rgb:4444/cccc/5555\a"}})
-        send(owner, {ref, {:data, "\e]4;11;rgb:e6e6/d1d1/5a5a\a"}})
-        send(owner, {ref, {:data, "\e]4;12;rgb:5f5f/7b7b/e0e0\a"}})
-        send(owner, {ref, {:data, "\e]4;13;rgb:b3b3/6b6b/d4d4\a"}})
         send(owner, {ref, {:data, "\e]"}})
-        send(owner, {ref, {:data, "4;14;rgb:5a5a/d6d6/d6d6\a"}})
+        send(owner, {ref, {:data, "4;6;rgb:3333/aaaa/aaaa\a"}})
       end
 
       {:ok, term}
@@ -109,13 +97,7 @@ defmodule Breeze.InputRouterTest do
     @behaviour Termite.Terminal.Adapter
 
     @late_palette_reply "\e]4;5;rgb:9999/3333/aaaa\a" <>
-                          "\e]4;6;rgb:3333/aaaa/aaaa\a" <>
-                          "\e]4;9;rgb:dddd/6666/4444\a" <>
-                          "\e]4;10;rgb:4444/cccc/5555\a" <>
-                          "\e]4;11;rgb:e6e6/d1d1/5a5a\a" <>
-                          "\e]4;12;rgb:5f5f/7b7b/e0e0\a" <>
-                          "\e]4;13;rgb:b3b3/6b6b/d4d4\a" <>
-                          "\e]4;14;rgb:5a5a/d6d6/d6d6\a"
+                          "\e]4;6;rgb:3333/aaaa/aaaa\a"
 
     def start(opts) do
       {:ok,

@@ -6,7 +6,7 @@ defmodule Breeze.Theme.Probe do
   @palette_cache_table __MODULE__.PaletteCache
   @palette_waiters_table __MODULE__.PaletteWaiters
   @palette_probe_timeout_ms 120
-  @required_palette_indexes [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14]
+  @semantic_palette_indexes [1, 2, 3, 4, 5, 6]
 
   @spec cached_terminal_palette(%Termite.Terminal{} | nil) :: map() | nil
   def cached_terminal_palette(%Termite.Terminal{} = terminal) do
@@ -170,7 +170,7 @@ defmodule Breeze.Theme.Probe do
     foreground_background = ["\e]10;?\e\\", "\e]11;?\e\\"]
 
     indexed =
-      Enum.map(@required_palette_indexes, fn index ->
+      Enum.map(@semantic_palette_indexes, fn index ->
         ["\e]4;", Integer.to_string(index), ";?\e\\"]
       end)
 
@@ -294,7 +294,7 @@ defmodule Breeze.Theme.Probe do
 
   defp palette_probe_complete?(palette) when is_map(palette) do
     Enum.all?([:background, :foreground], &match?({_, _, _}, Map.get(palette, &1))) and
-      Enum.all?(@required_palette_indexes, &match?({_, _, _}, Map.get(palette, &1)))
+      Enum.all?(@semantic_palette_indexes, &match?({_, _, _}, Map.get(palette, &1)))
   end
 end
 

@@ -7,8 +7,6 @@ defmodule Breeze.InputRouter do
   alias Breeze.InputCapture
   alias Breeze.Theme.Probe, as: ThemeProbe
 
-  @theme_probe_drain_timeout_ms 1_000
-
   defstruct [
     :terminal,
     :reader,
@@ -343,11 +341,14 @@ defmodule Breeze.InputRouter do
   defp start_theme_probe_drain(state, probe) do
     cancel_theme_probe_timer(probe)
 
+    # Keep consuming straggling OSC replies for one more response window. This
+    # prevents terminal replies becoming keyboard input without leaving an
+    # unsupported runtime probe pending for a full extra second.
     timer =
       Process.send_after(
         self(),
         {:theme_probe_drain_timeout, probe.key, probe.ref},
-        @theme_probe_drain_timeout_ms
+        ThemeProbe.runtime_palette_probe_timeout_ms()
       )
 
     %{state | theme_probe: %{probe | status: :draining, timer: timer}}
