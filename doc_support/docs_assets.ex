@@ -82,6 +82,10 @@ defmodule Breeze.Docs.Assets do
     <script>
       (function () {
         const themeStorageKey = "breeze-component-preview-theme";
+        const reducedMotionQuery = window.matchMedia
+          ? window.matchMedia("(prefers-reduced-motion: reduce)")
+          : null;
+        let reducedMotionBound = false;
 
         function storedTheme() {
           try {
@@ -128,8 +132,8 @@ defmodule Breeze.Docs.Assets do
           return sources.find(function (source) { return source.theme === theme; }) || sources[0];
         }
 
-        function decodeAnsiSource(source) {
-          const binary = window.atob(source.content);
+        function decodeAnsiContent(content) {
+          const binary = window.atob(content);
           const bytes = Uint8Array.from(binary, function (character) {
             return character.charCodeAt(0);
           });
@@ -137,14 +141,63 @@ defmodule Breeze.Docs.Assets do
           return new TextDecoder().decode(bytes);
         }
 
-        function renderAnsiPreviews(theme) {
+        function animationFrames(source) {
+          return Array.isArray(source.frames) && source.frames.length > 0
+            ? source.frames
+            : [source.content];
+        }
+
+        function renderAnsiFrame(previewEl, encodedContent, frameIndex) {
+          const ansiUp = new AnsiUp();
+          previewEl.replaceChildren();
+          previewEl.dataset.frame = String(frameIndex);
+
+          const lines = decodeAnsiContent(encodedContent).split("\\n");
+
+          for (const line of lines) {
+            const lineEl = document.createElement("div");
+            lineEl.className = "breeze-ansi-line";
+            lineEl.innerHTML = ansiUp.ansi_to_html(line);
+            previewEl.appendChild(lineEl);
+          }
+        }
+
+        function stopAnsiAnimation(container) {
+          if (container.breezeAnsiTimer) {
+            window.clearInterval(container.breezeAnsiTimer);
+            container.breezeAnsiTimer = null;
+          }
+        }
+
+        function startAnsiAnimation(container, previewEl, source) {
+          stopAnsiAnimation(container);
+
+          const frames = animationFrames(source);
+          renderAnsiFrame(previewEl, frames[0], 0);
+
+          if (frames.length < 2 || (reducedMotionQuery && reducedMotionQuery.matches)) return;
+
+          const interval = Math.max(Number(source.interval) || 100, 16);
+          let frameIndex = 0;
+
+          container.breezeAnsiTimer = window.setInterval(function () {
+            if (!container.isConnected || (reducedMotionQuery && reducedMotionQuery.matches)) {
+              stopAnsiAnimation(container);
+              return;
+            }
+
+            frameIndex = (frameIndex + 1) % frames.length;
+            renderAnsiFrame(previewEl, frames[frameIndex], frameIndex);
+          }, interval);
+        }
+
+        function renderAnsiPreviews(theme, force) {
           if (!window.AnsiUp) return;
 
           for (const container of document.querySelectorAll(".breeze-ansi[data-ansi-preview]")) {
-            const scriptEl = sourceForTheme(container, theme);
-            if (!scriptEl) continue;
+            const source = sourceForTheme(container, theme);
+            if (!source) continue;
 
-            const ansiUp = new AnsiUp();
             let previewEl = container.querySelector(".breeze-ansi-preview");
 
             if (!previewEl) {
@@ -153,22 +206,29 @@ defmodule Breeze.Docs.Assets do
               container.appendChild(previewEl);
             }
 
-            if (previewEl.dataset.theme === scriptEl.theme) continue;
+            if (!force && previewEl.dataset.theme === source.theme) continue;
 
-            previewEl.replaceChildren();
-            previewEl.dataset.theme = scriptEl.theme;
-            previewEl.style.backgroundColor = scriptEl.background || "";
-            previewEl.style.color = scriptEl.foreground || "";
-
-            const lines = decodeAnsiSource(scriptEl).split("\\n");
-
-            for (const line of lines) {
-              const lineEl = document.createElement("div");
-              lineEl.className = "breeze-ansi-line";
-              lineEl.innerHTML = ansiUp.ansi_to_html(line);
-              previewEl.appendChild(lineEl);
-            }
+            previewEl.dataset.theme = source.theme;
+            previewEl.style.backgroundColor = source.background || "";
+            previewEl.style.color = source.foreground || "";
+            startAnsiAnimation(container, previewEl, source);
           }
+        }
+
+        function bindReducedMotionPreference() {
+          if (!reducedMotionQuery || reducedMotionBound) return;
+
+          const rerender = function () {
+            renderAnsiPreviews(selectedTheme(), true);
+          };
+
+          if (reducedMotionQuery.addEventListener) {
+            reducedMotionQuery.addEventListener("change", rerender);
+          } else if (reducedMotionQuery.addListener) {
+            reducedMotionQuery.addListener(rerender);
+          }
+
+          reducedMotionBound = true;
         }
 
         function bindThemeSelectors() {
@@ -219,6 +279,7 @@ defmodule Breeze.Docs.Assets do
         }
 
         function initializeBuiltInComponentsPage() {
+          bindReducedMotionPreference();
           renderAnsiPreviews(bindThemeSelectors());
           bindCodeToggles();
         }

@@ -22,6 +22,8 @@ defmodule Breeze.Docs.BlockPreviews do
     {:solarized_dark, "Solarized Dark"}
   ]
   @default_theme :gruvbox
+  @spinner_dots_frames ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+  @spinner_bars_frames ["|", "/", "-", "\\"]
 
   def write_markdown!(path \\ @output_path) do
     File.mkdir_p!(Path.dirname(path))
@@ -47,6 +49,12 @@ defmodule Breeze.Docs.BlockPreviews do
        [
          {"Default", preview(__MODULE__.ButtonPreview, size: {24, 3})},
          {"Focused", preview(__MODULE__.ButtonPreview, size: {24, 3}, focused: "preview-button")}
+       ]},
+      {"Checkbox",
+       [
+         {"Unchecked", preview(__MODULE__.CheckboxPreview, size: {28, 3})},
+         {"Checked", preview(__MODULE__.CheckedCheckboxPreview, size: {28, 3})},
+         {"Disabled", preview(__MODULE__.DisabledCheckboxPreview, size: {28, 3})}
        ]},
       {"Dropdown",
        [
@@ -108,6 +116,24 @@ defmodule Breeze.Docs.BlockPreviews do
             }
           )}
        ]},
+      {"Spinner",
+       [
+         {"Idle", preview(__MODULE__.SpinnerIdlePreview, size: {24, 3})},
+         {"Dots",
+          animated_preview(
+            __MODULE__.SpinnerDotsPreview,
+            @spinner_dots_frames,
+            80,
+            size: {24, 3}
+          )},
+         {"Bars",
+          animated_preview(
+            __MODULE__.SpinnerBarsPreview,
+            @spinner_bars_frames,
+            120,
+            size: {24, 3}
+          )}
+       ]},
       {"Table",
        [
          {"Initial", preview(__MODULE__.TablePreview, size: {44, 8})},
@@ -143,6 +169,19 @@ defmodule Breeze.Docs.BlockPreviews do
     end
   end
 
+  defp animated_preview(view, frames, interval, opts) do
+    fn theme ->
+      content = render_view(view, Keyword.put(opts, :theme, theme))
+      rendered_frames = Enum.map(frames, &replace_spinner_frame!(content, &1))
+
+      %{
+        content: List.first(rendered_frames),
+        frames: rendered_frames,
+        interval: interval
+      }
+    end
+  end
+
   defp interactive_preview(view, opts, fun) do
     fn theme -> render_with_session(view, Keyword.put(opts, :theme, theme), fun) end
   end
@@ -156,7 +195,10 @@ defmodule Breeze.Docs.BlockPreviews do
           previews =
             Enum.map(@themes, fn {id, theme_label} ->
               theme = Theme.builtin(id)
-              %{id: id, label: theme_label, theme: theme, content: render_fun.(theme)}
+
+              render_fun.(theme)
+              |> normalize_rendered_preview()
+              |> Map.merge(%{id: id, label: theme_label, theme: theme})
             end)
 
           default_preview = Enum.find(previews, &(&1.id == @default_theme))
@@ -240,6 +282,7 @@ defmodule Breeze.Docs.BlockPreviews do
   end
 
   defp component_ref("Button"), do: "Breeze.Blocks.button/1"
+  defp component_ref("Checkbox"), do: "Breeze.Blocks.checkbox/1"
   defp component_ref("Flash Group"), do: "Breeze.Blocks.flash_group/1"
   defp component_ref("Input"), do: "Breeze.Blocks.input/1"
   defp component_ref("Keybinding Bar"), do: "Breeze.Blocks.keybinding_bar/1"
@@ -249,12 +292,14 @@ defmodule Breeze.Docs.BlockPreviews do
   defp component_ref("Tabs"), do: "Breeze.Blocks.tabs/1"
   defp component_ref("Markdown"), do: "Breeze.Blocks.markdown/1"
   defp component_ref("Scroll"), do: "Breeze.Blocks.scroll/1"
+  defp component_ref("Spinner"), do: "Breeze.Blocks.spinner/1"
   defp component_ref("Panel"), do: "Breeze.Blocks.panel/1"
   defp component_ref("Modal"), do: "Breeze.Blocks.modal/1"
   defp component_ref("Textarea"), do: "Breeze.Blocks.textarea/1"
   defp component_ref("Tree"), do: "Breeze.Blocks.tree/1"
 
   defp component_code("Button"), do: render_template_source(__MODULE__.ButtonPreview)
+  defp component_code("Checkbox"), do: render_template_source(__MODULE__.CheckboxPreview)
   defp component_code("Flash Group"), do: render_template_source(__MODULE__.FlashGroupPreview)
   defp component_code("Input"), do: render_template_source(__MODULE__.InputPreview)
 
@@ -267,6 +312,7 @@ defmodule Breeze.Docs.BlockPreviews do
   defp component_code("Tabs"), do: render_template_source(__MODULE__.TabsPreview)
   defp component_code("Markdown"), do: render_template_source(__MODULE__.MarkdownPreview)
   defp component_code("Scroll"), do: render_template_source(__MODULE__.ScrollPreview)
+  defp component_code("Spinner"), do: render_template_source(__MODULE__.SpinnerDotsPreview)
   defp component_code("Panel"), do: render_template_source(__MODULE__.PanelPreview)
   defp component_code("Modal"), do: render_template_source(__MODULE__.ModalPreview)
   defp component_code("Textarea"), do: render_template_source(__MODULE__.TextareaPreview)
@@ -380,24 +426,51 @@ defmodule Breeze.Docs.BlockPreviews do
     end
   end
 
+  defp normalize_rendered_preview(content) when is_binary(content), do: %{content: content}
+
+  defp normalize_rendered_preview(%{content: content} = preview) when is_binary(content),
+    do: preview
+
+  defp replace_spinner_frame!(content, frame) do
+    if String.contains?(content, "·") do
+      String.replace(content, "·", frame)
+    else
+      raise "spinner preview did not render its idle frame"
+    end
+  end
+
   defp preview_sources_json(previews) do
     previews
     |> Enum.map_join(",", fn preview ->
-      fields = [
-        {"theme", to_string(preview.id)},
-        {"background", theme_color(preview.theme, :background)},
-        {"foreground", theme_color(preview.theme, :text)},
-        {"content", Base.encode64(preview.content)}
-      ]
+      fields =
+        [
+          {"theme", to_string(preview.id)},
+          {"background", theme_color(preview.theme, :background)},
+          {"foreground", theme_color(preview.theme, :text)},
+          {"content", Base.encode64(preview.content)}
+        ] ++ animation_fields(preview)
 
       encoded_fields =
         Enum.map_join(fields, ",", fn {key, value} ->
-          json_string(key) <> ":" <> json_string(value)
+          json_string(key) <> ":" <> json_value(value)
         end)
 
       "{" <> encoded_fields <> "}"
     end)
     |> then(&("[" <> &1 <> "]"))
+  end
+
+  defp animation_fields(%{frames: frames, interval: interval}) do
+    [{"frames", Enum.map(frames, &Base.encode64/1)}, {"interval", interval}]
+  end
+
+  defp animation_fields(_preview), do: []
+
+  defp json_value(value) when is_binary(value), do: json_string(value)
+  defp json_value(value) when is_integer(value), do: Integer.to_string(value)
+
+  defp json_value(values) when is_list(values) do
+    "[" <> Enum.map_join(values, ",", &json_value/1) <> "]"
   end
 
   defp json_string(value) do
@@ -445,6 +518,48 @@ defmodule Breeze.Docs.BlockPreviews do
     def render(assigns) do
       ~H"""
       <.button id="preview-button">Deploy update</.button>
+      """
+    end
+  end
+
+  defmodule CheckboxPreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      ~H"""
+      <.checkbox id="preview-checkbox" checked={false}>Email alerts</.checkbox>
+      """
+    end
+  end
+
+  defmodule CheckedCheckboxPreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      ~H"""
+      <.checkbox id="preview-checkbox-checked" checked>Email alerts</.checkbox>
+      """
+    end
+  end
+
+  defmodule DisabledCheckboxPreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      ~H"""
+      <.checkbox id="preview-checkbox-disabled" checked disabled>Email alerts</.checkbox>
       """
     end
   end
@@ -737,6 +852,63 @@ defmodule Breeze.Docs.BlockPreviews do
       <.scroll id="preview-scroll" class="w-26 h-8 border">
         <box :for={row <- @rows}>{row}</box>
       </.scroll>
+      """
+    end
+  end
+
+  defmodule SpinnerIdlePreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      ~H"""
+      <box class="inline bg-panel">
+        <box>Ready</box>
+        <box class="w-1">
+        </box>
+        <.spinner id="preview-spinner-idle"/>
+      </box>
+      """
+    end
+  end
+
+  defmodule SpinnerDotsPreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      ~H"""
+      <box class="inline bg-panel">
+        <box>Loading</box>
+        <box class="w-1">
+        </box>
+        <.spinner id="preview-spinner" active/>
+      </box>
+      """
+    end
+  end
+
+  defmodule SpinnerBarsPreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      ~H"""
+      <box class="inline bg-panel">
+        <box>Loading</box>
+        <box class="w-1">
+        </box>
+        <.spinner id="preview-spinner-bars" active variant="bars"/>
+      </box>
       """
     end
   end
