@@ -482,17 +482,17 @@ defmodule TaskPad.ViewTest do
 
     on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert Breeze.Test.render!(session) =~ "Task Pad"
+    assert Breeze.Test.render_text!(session) =~ "Task Pad"
 
     for key <- String.graphemes("Write tests") do
       assert {:noreply, "new-task", true} = Breeze.Test.input(session, key)
     end
 
     assert {:noreply, "tasks", true} = Breeze.Test.input(session, "Enter")
-    assert Breeze.Test.render!(session) =~ "Write tests"
+    assert Breeze.Test.render_text!(session) =~ "Write tests"
 
     assert {:noreply, "tasks", true} = Breeze.Test.input(session, "Enter")
-    assert Breeze.Test.render!(session) =~ "[x] Write tests"
+    assert Breeze.Test.render_text!(session) =~ "[x] Write tests"
   end
 end
 ```

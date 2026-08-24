@@ -1,8 +1,6 @@
 defmodule Breeze.Implicit.TabsTest do
   use ExUnit.Case, async: true
 
-  import Breeze.TestSupport.ProcessHelpers, only: [start_child_server: 1]
-
   alias Breeze.Implicit.Tabs
 
   defmodule ClickableTabsView do
@@ -172,34 +170,19 @@ defmodule Breeze.Implicit.TabsTest do
     end
 
     test "clicking a rendered tab label updates the selected tab" do
-      terminal = %Termite.Terminal{size: %{width: 30, height: 10}}
-      {:ok, pid} = start_child_server(view: ClickableTabsView, terminal: terminal)
-
-      assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-      state = :sys.get_state(pid)
-
-      bounds = state.mouse_targets["tabs-tab-details"]
-      x = div(bounds.left + bounds.right, 2)
-      y = div(bounds.top + bounds.bottom, 2)
+      session = Breeze.Test.start!(ClickableTabsView, size: {30, 10})
+      on_exit(fn -> Breeze.Test.stop(session) end)
 
       assert {_status, "tabs", _changed} =
-               Breeze.ChildServer.dispatch_input(pid, %{
-                 "mouse" => %{
-                   "button" => "left",
-                   "action" => "press",
-                   "x" => x,
-                   "y" => y
-                 }
-               })
+               Breeze.Test.click(session, "tabs-tab-details")
 
-      assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-      assert box.content =~ "details"
+      assert Breeze.Test.render_text!(session) =~ "details"
 
       assert %{implicit_state: %{"tabs" => {Breeze.Implicit.Tabs, state}}} =
-               Breeze.ChildServer.metadata(pid)
+               Breeze.Test.metadata(session)
 
       assert state.selected == "details"
-      assert Breeze.ChildServer.metadata(pid).focused == "tabs"
+      assert Breeze.Test.focused(session) == "tabs"
     end
   end
 end

@@ -309,29 +309,24 @@ defmodule Breeze.ExampleSnapshot.ResponsiveTest do
   use Breeze.TestSupport.ExampleSnapshotCase, async: true
 
   test "responsive example progressively adds layout chrome" do
-    compact = Breeze.Test.start!(Responsive, size: {39, 24})
-    medium = Breeze.Test.start!(Responsive, size: {60, 24})
-    large = Breeze.Test.start!(Responsive, size: {80, 24})
+    session = Breeze.Test.start!(Responsive, size: {39, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    on_exit(fn ->
-      Breeze.Test.stop(compact)
-      Breeze.Test.stop(medium)
-      Breeze.Test.stop(large)
-    end)
-
-    compact_content = Breeze.Test.render!(compact)
+    compact_content = Breeze.Test.render_text!(session)
     assert compact_content =~ "39×24 · base breakpoint"
     assert compact_content =~ "[O] [A] [Q] [N]"
     assert compact_content =~ "Nodes"
     refute compact_content =~ "▁"
     refute compact_content =~ "╭"
 
-    medium_content = Breeze.Test.render!(medium)
+    session = Breeze.Test.resize(session, {60, 24})
+    medium_content = Breeze.Test.render_text!(session)
     assert medium_content =~ "60×24 · md breakpoint"
     assert medium_content =~ "Overview  Activity  Queue  Nodes"
     assert medium_content =~ "▁"
 
-    large_content = Breeze.Test.render!(large)
+    session = Breeze.Test.resize(session, {80, 24})
+    large_content = Breeze.Test.render_text!(session)
     assert large_content =~ "80×24 · lg breakpoint"
     assert large_content =~ "╭"
     assert large_content =~ "single row"
@@ -385,7 +380,7 @@ defmodule Breeze.ExampleSnapshot.DocsTest do
     _ = Breeze.Test.render!(session)
     assert {:noreply, _focused, true} = Breeze.Test.input(session, "\t")
     assert {:noreply, "doc", true} = Breeze.Test.input(session, "\t")
-    assert {:focused, "doc"} = {:focused, Breeze.Test.metadata(session).focused}
+    assert Breeze.Test.focused(session) == "doc"
     assert {:noreply, _focused, true} = Breeze.Test.input(session, "PageDown")
 
     assert_snapshot(Breeze.Test.render!(session), "examples/docs/function-scrolled.ansi",

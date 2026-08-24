@@ -2,8 +2,6 @@ defmodule Breeze.Storybook.SnapshotTest do
   use ExUnit.Case, async: true
   use Breeze.SnapshotAssertions
 
-  alias Breeze.ChildServer
-
   defp start_storybook!(file, opts \\ []) do
     session =
       Breeze.Test.start!(Breeze.Storybook,
@@ -17,7 +15,7 @@ defmodule Breeze.Storybook.SnapshotTest do
   end
 
   defp set_focus!(session, focused) do
-    assert {:noreply, ^focused, true} = ChildServer.set_focus(session.pid, focused)
+    assert {:noreply, ^focused, true} = Breeze.Test.focus(session, focused)
   end
 
   test "dropdown story snapshots closed and open states" do

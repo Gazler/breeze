@@ -2,22 +2,19 @@ defmodule Breeze.Storybook.RenderingTest do
   use Breeze.TestSupport.StorybookCase, async: true
 
   test "renders stories for the keybinding bar, Markdown, and tree blocks" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-
     for {file, expected_content} <- [
           {"keybinding_bar.story.exs", ["Active keybindings", "Enter Select", "d Details"]},
           {"markdown.story.exs", ["# Release Notes", "formatted text", "inline code"]},
           {"tree.story.exs", ["breeze", "lib", "blocks.ex"]}
         ] do
-      {:ok, pid} =
-        start_child_server(
-          view: Breeze.Storybook,
-          terminal: terminal,
+      session =
+        Breeze.Test.start!(Breeze.Storybook,
+          size: {80, 24},
           start_opts: [directory: "storybook", file: file]
         )
 
-      assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-      plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+      on_exit(fn -> Breeze.Test.stop(session) end)
+      plain_content = Breeze.Test.render_text!(session)
 
       for content <- expected_content do
         assert plain_content =~ content
@@ -26,73 +23,50 @@ defmodule Breeze.Storybook.RenderingTest do
   end
 
   test "button story shows the latest keyboard and mouse press" do
-    terminal = %Termite.Terminal{size: %{width: 44, height: 10}}
+    session =
+      Breeze.Test.start!(Breeze.Storybook.Stories.Blocks.ButtonStory, size: {44, 10})
 
-    {:ok, pid} =
-      start_child_server(
-        view: Breeze.Storybook.Stories.Blocks.ButtonStory,
-        terminal: terminal
-      )
-
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert BackBreeze.Utils.strip_escape_chars(box.content) =~ "Latest press: None"
+    on_exit(fn -> Breeze.Test.stop(session) end)
+    assert Breeze.Test.render_text!(session) =~ "Latest press: None"
 
     assert {:noreply, "storybook-button-primary", _changed?} =
-             Breeze.ChildServer.set_focus(pid, "storybook-button-primary")
+             Breeze.Test.focus(session, "storybook-button-primary")
 
     assert {:noreply, "storybook-button-primary", true} =
-             Breeze.ChildServer.dispatch_input(pid, "Enter")
+             Breeze.Test.input(session, "Enter")
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert BackBreeze.Utils.strip_escape_chars(box.content) =~ "Latest press: Confirm"
-
-    bounds = :sys.get_state(pid).mouse_targets["storybook-button-cancel"]
-
-    mouse = %{
-      "mouse" => %{
-        "button" => "left",
-        "x" => div(bounds.left + bounds.right, 2),
-        "y" => div(bounds.top + bounds.bottom, 2)
-      }
-    }
+    assert Breeze.Test.render_text!(session) =~ "Latest press: Confirm"
 
     assert {:noreply, "storybook-button-cancel", true} =
-             Breeze.ChildServer.dispatch_input(pid, put_in(mouse, ["mouse", "action"], "press"))
+             Breeze.Test.click(session, "storybook-button-cancel")
 
-    assert %{assigns: %{latest_press: "Confirm"}} = Breeze.ChildServer.metadata(pid)
+    assert %{assigns: %{latest_press: "Confirm"}} = Breeze.Test.metadata(session)
 
     assert {:noreply, "storybook-button-cancel", true} =
-             Breeze.ChildServer.dispatch_input(
-               pid,
-               put_in(mouse, ["mouse", "action"], "release")
-             )
+             Breeze.Test.click(session, "storybook-button-cancel", action: :release)
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert BackBreeze.Utils.strip_escape_chars(box.content) =~ "Latest press: Cancel"
+    assert Breeze.Test.render_text!(session) =~ "Latest press: Cancel"
   end
 
   test "button story switches between default and bordered variants" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-
-    {:ok, pid} =
-      start_child_server(
-        view: Breeze.Storybook,
-        terminal: terminal,
+    session =
+      Breeze.Test.start!(Breeze.Storybook,
+        size: {80, 24},
         start_opts: [directory: "storybook", file: "button.story.exs"]
       )
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    plain_content = BackBreeze.Utils.strip_escape_chars(box.content)
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    plain_content = Breeze.Test.render_text!(session)
 
     assert plain_content =~ "Preview: Button / Default"
     assert plain_content =~ " Default  Bordered "
     assert plain_content =~ ~s|<.button id="confirm" class="w-12">Confirm|
 
     assert {:noreply, "storybook-nav", true} =
-             Breeze.ChildServer.dispatch_event(pid, "select_variant", %{value: "bordered"})
+             Breeze.Test.event(session, "select_variant", %{value: "bordered"})
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    plain_content = BackBreeze.Utils.strip_escape_chars(box.content)
+    plain_content = Breeze.Test.render_text!(session)
 
     assert plain_content =~ "Preview: Button / Bordered"
     assert plain_content =~ ~s|variant="bordered"|
@@ -264,33 +238,28 @@ defmodule Breeze.Storybook.RenderingTest do
   end
 
   test "table story renders its complete Population header" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-
-    {:ok, pid} =
-      start_child_server(
-        view: Breeze.Storybook,
-        terminal: terminal,
+    session =
+      Breeze.Test.start!(Breeze.Storybook,
+        size: {80, 24},
         start_opts: [directory: "storybook", file: "table.story.exs"]
       )
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "") =~ "Population"
+    assert Breeze.Test.render_text!(session) =~ "Population"
   end
 
   test "table story stretches unbounded data columns with the available width" do
     view = Breeze.Storybook.Stories.Blocks.TableStory
-    narrow_terminal = %Termite.Terminal{size: %{width: 44, height: 12}}
-    wide_terminal = %Termite.Terminal{size: %{width: 64, height: 12}}
+    session = Breeze.Test.start!(view, size: {44, 12})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: view, terminal: narrow_terminal)
+    narrow_content = Breeze.Test.render_text!(session)
+    session = Breeze.Test.resize(session, {64, 12})
+    wide_content = Breeze.Test.render_text!(session)
 
-    assert {:ok, _acc, narrow_box} = Breeze.ChildServer.render(pid, terminal: narrow_terminal)
-    assert {:ok, _acc, wide_box} = Breeze.ChildServer.render(pid, terminal: wide_terminal)
-
-    population_column = fn box ->
-      box.content
-      |> BackBreeze.Utils.strip_escape_chars()
+    population_column = fn content ->
+      content
       |> String.split("\n")
       |> Enum.find(&String.contains?(&1, "Population"))
       |> String.split("Population", parts: 2)
@@ -298,43 +267,38 @@ defmodule Breeze.Storybook.RenderingTest do
       |> BackBreeze.Utils.string_length()
     end
 
-    assert population_column.(wide_box) > population_column.(narrow_box)
+    assert population_column.(wide_content) > population_column.(narrow_content)
   end
 
   test "tree story keeps selection in story-local state" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-
-    {:ok, pid} =
-      start_child_server(
-        view: Breeze.Storybook,
-        terminal: terminal,
+    session =
+      Breeze.Test.start!(Breeze.Storybook,
+        size: {80, 24},
         start_opts: [directory: "storybook", file: "tree.story.exs"]
       )
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
     assert {:noreply, "storybook-preview::storybook-tree", true} =
-             Breeze.ChildServer.set_focus(pid, "storybook-preview::storybook-tree")
+             Breeze.Test.focus(session, "storybook-preview::storybook-tree")
 
     assert {:noreply, "storybook-preview::storybook-tree", true} =
-             Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+             Breeze.Test.input(session, "ArrowDown")
 
-    child = :sys.get_state(pid).children["storybook-preview"].pid
+    child = :sys.get_state(session.pid).children["storybook-preview"].pid
     assert :sys.get_state(child).assigns.selected == "lib"
   end
 
   test "checkbox story renders checked, unchecked, and disabled controls" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-
-    {:ok, pid} =
-      start_child_server(
-        view: Breeze.Storybook,
-        terminal: terminal,
+    session =
+      Breeze.Test.start!(Breeze.Storybook,
+        size: {80, 24},
         start_opts: [directory: "storybook", file: "checkbox.story.exs"]
       )
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    plain_content = Breeze.Test.render_text!(session)
 
     assert plain_content =~ "press Enter or Space to toggle"
     assert plain_content =~ "[x] Mouse input"
@@ -343,37 +307,32 @@ defmodule Breeze.Storybook.RenderingTest do
   end
 
   test "dropdown story renders a single visible closed indicator" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
+    _ = Breeze.Test.render!(session)
+    select_story!(session.pid, "dropdown")
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    select_story!(pid, "dropdown")
-
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
     lines = String.split(plain_content, "\n")
 
     assert Enum.any?(lines, &(String.contains?(&1, "POST") and String.contains?(&1, "▼")))
   end
 
   test "storybook can boot from a single story file" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-
-    {:ok, pid} =
-      start_child_server(
-        view: Breeze.Storybook,
-        terminal: terminal,
+    session =
+      Breeze.Test.start!(Breeze.Storybook,
+        size: {80, 24},
         start_opts: [directory: "storybook", file: "dropdown.story.exs"]
       )
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    state = :sys.get_state(pid)
+    _ = Breeze.Test.render!(session)
+    assigns = Breeze.Test.metadata(session).assigns
 
-    assert Enum.map(state.assigns.stories, & &1.id) == ["dropdown"]
-    assert state.assigns.current_story_id == "dropdown"
+    assert Enum.map(assigns.stories, & &1.id) == ["dropdown"]
+    assert assigns.current_story_id == "dropdown"
   end
 end
 
@@ -404,16 +363,13 @@ defmodule Breeze.Storybook.DetailRenderingTest do
   end
 
   test "dropdown story does not duplicate the trigger row in the preview" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
+    _ = Breeze.Test.render!(session)
+    select_story!(session.pid, "dropdown")
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    select_story!(pid, "dropdown")
-
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
 
     assert plain_content
            |> String.split("\n")
@@ -421,33 +377,25 @@ defmodule Breeze.Storybook.DetailRenderingTest do
   end
 
   test "dropdown story keeps the selected value after choosing an item" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    select_story!(pid, "dropdown")
-
-    assert {:noreply, "storybook-preview::storybook-dropdown", true} =
-             Breeze.ChildServer.set_focus(
-               pid,
-               "storybook-preview::storybook-dropdown"
-             )
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    _ = Breeze.Test.render!(session)
+    select_story!(session.pid, "dropdown")
 
     assert {:noreply, "storybook-preview::storybook-dropdown", true} =
-             Breeze.ChildServer.dispatch_input(pid, "Enter")
+             Breeze.Test.focus(session, "storybook-preview::storybook-dropdown")
 
     assert {:noreply, "storybook-preview::storybook-dropdown", true} =
-             Breeze.ChildServer.dispatch_input(pid, "ArrowDown")
+             Breeze.Test.input(session, "Enter")
 
     assert {:noreply, "storybook-preview::storybook-dropdown", true} =
-             Breeze.ChildServer.dispatch_input(pid, "Enter")
+             Breeze.Test.input(session, "ArrowDown")
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    assert {:noreply, "storybook-preview::storybook-dropdown", true} =
+             Breeze.Test.input(session, "Enter")
 
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
 
     assert plain_content
            |> String.split("\n")
@@ -521,29 +469,19 @@ defmodule Breeze.Storybook.InputUpdateRenderingTest do
   use Breeze.TestSupport.StorybookCase, async: true
 
   test "input story updates its value through delegated story events" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    select_story!(pid, "input")
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    _ = Breeze.Test.render!(session)
+    select_story!(session.pid, "input")
 
     assert {:noreply, "storybook-preview::storybook-input-active", true} =
-             Breeze.ChildServer.set_focus(
-               pid,
-               "storybook-preview::storybook-input-active"
-             )
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+             Breeze.Test.focus(session, "storybook-preview::storybook-input-active")
 
     assert {:noreply, "storybook-preview::storybook-input-active", true} =
-             Breeze.ChildServer.dispatch_input(pid, "!")
+             Breeze.Test.input(session, "!")
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
-    assert plain_content =~ "dev@example.com!"
+    assert Breeze.Test.render_text!(session) =~ "dev@example.com!"
   end
 end
 
@@ -583,23 +521,18 @@ defmodule Breeze.Storybook.TextareaRenderingTest do
   end
 
   test "textarea story grows after inserting a newline" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-
-    {:ok, pid} =
-      start_child_server(
-        view: Breeze.Storybook,
-        terminal: terminal,
+    session =
+      Breeze.Test.start!(Breeze.Storybook,
+        size: {80, 24},
         start_opts: [directory: "storybook", file: "textarea.story.exs"]
       )
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
     assert {:noreply, "storybook-preview::storybook-textarea-active", true} =
-             Breeze.ChildServer.set_focus(pid, "storybook-preview::storybook-textarea-active")
+             Breeze.Test.focus(session, "storybook-preview::storybook-textarea-active")
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-
-    child = :sys.get_state(pid).children["storybook-preview"].pid
+    child = :sys.get_state(session.pid).children["storybook-preview"].pid
 
     initial_height =
       child
@@ -610,10 +543,10 @@ defmodule Breeze.Storybook.TextareaRenderingTest do
       |> length()
 
     assert {:noreply, "storybook-preview::storybook-textarea-active", true} =
-             Breeze.ChildServer.dispatch_input(pid, "Enter")
+             Breeze.Test.input(session, "Enter")
 
     assert {:noreply, "storybook-preview::storybook-textarea-active", true} =
-             Breeze.ChildServer.dispatch_input(pid, "N")
+             Breeze.Test.input(session, "N")
 
     updated_child_state = :sys.get_state(child)
 
@@ -623,9 +556,7 @@ defmodule Breeze.Storybook.TextareaRenderingTest do
     assert updated_height == initial_height + 1
     assert updated_child_state.assigns.message =~ "\nN"
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
     assert plain_content =~ "Keep migration notes short."
     assert plain_content =~ "N"
   end
@@ -635,28 +566,19 @@ defmodule Breeze.Storybook.ModalRenderingTest do
   use Breeze.TestSupport.StorybookCase, async: true
 
   test "modal story opens the real modal from its trigger" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    select_story!(pid, "modal")
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    _ = Breeze.Test.render!(session)
+    select_story!(session.pid, "modal")
 
     assert {:noreply, "storybook-preview::storybook-modal-trigger", true} =
-             Breeze.ChildServer.set_focus(
-               pid,
-               "storybook-preview::storybook-modal-trigger"
-             )
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+             Breeze.Test.focus(session, "storybook-preview::storybook-modal-trigger")
 
     assert {:noreply, "storybook-preview::storybook-modal-trigger", true} =
-             Breeze.ChildServer.dispatch_input(pid, "Enter")
+             Breeze.Test.input(session, "Enter")
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
 
     assert plain_content =~ "Confirm Action"
     assert plain_content =~ "Confirm Action"
@@ -721,13 +643,10 @@ defmodule Breeze.Storybook.LayoutTest do
   use Breeze.TestSupport.StorybookCase, async: true
 
   test "renders a keybindings bar" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
-
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
 
     assert plain_content =~ "d Details"
     assert plain_content =~ "F2 Debug"
@@ -783,27 +702,21 @@ defmodule Breeze.Storybook.LayoutTest do
   end
 
   test "storybook nav renders the selected marker and label without overlap" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
-
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
 
     assert plain_content =~ ">Button"
   end
 
   test "panel focus moves from the story nav to the button preview" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
-
-    assert {:ok, _acc, nav_box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
     nav_header =
-      nav_box.content
-      |> BackBreeze.Utils.strip_escape_chars()
+      session
+      |> Breeze.Test.render_text!()
       |> String.split("\n")
       |> hd()
 
@@ -811,16 +724,11 @@ defmodule Breeze.Storybook.LayoutTest do
     assert nav_header =~ "╭─Preview: Button"
 
     assert {:noreply, "storybook-preview::storybook-button-primary", true} =
-             Breeze.ChildServer.set_focus(
-               pid,
-               "storybook-preview::storybook-button-primary"
-             )
-
-    assert {:ok, _acc, preview_box} = Breeze.ChildServer.render(pid, terminal: terminal)
+             Breeze.Test.focus(session, "storybook-preview::storybook-button-primary")
 
     preview_header =
-      preview_box.content
-      |> BackBreeze.Utils.strip_escape_chars()
+      session
+      |> Breeze.Test.render_text!()
       |> String.split("\n")
       |> hd()
 
@@ -829,65 +737,60 @@ defmodule Breeze.Storybook.LayoutTest do
   end
 
   test "F2 toggles the debug pane" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
+    _ = Breeze.Test.render!(session)
+    refute Breeze.Test.metadata(session).assigns.show_debug
+    refute Map.has_key?(:sys.get_state(session.pid).children, "debug")
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    refute :sys.get_state(pid).assigns.show_debug
-    refute Map.has_key?(:sys.get_state(pid).children, "debug")
+    assert {:noreply, "storybook-nav", true} = Breeze.Test.input(session, "F2")
+    assert Breeze.Test.metadata(session).assigns.show_debug
 
-    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "F2")
-    assert :sys.get_state(pid).assigns.show_debug
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert Map.has_key?(:sys.get_state(pid).children, "debug")
+    _ = Breeze.Test.render!(session)
+    assert Map.has_key?(:sys.get_state(session.pid).children, "debug")
   end
 
   test "F3 cycles the storybook theme" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-
-    {:ok, pid} =
-      start_child_server(
-        view: Breeze.Storybook,
-        terminal: terminal,
+    session =
+      Breeze.Test.start!(Breeze.Storybook,
+        size: {80, 24},
         theme: Breeze.Theme.builtin(:gruvbox)
       )
 
-    assert Breeze.ChildServer.metadata(pid).theme.name == "gruvbox-dark"
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    child = :sys.get_state(pid).children["storybook-preview"].pid
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert Breeze.Test.metadata(session).theme.name == "gruvbox-dark"
+    _ = Breeze.Test.render!(session)
+    child = :sys.get_state(session.pid).children["storybook-preview"].pid
     assert Breeze.ChildServer.metadata(child).theme.name == "gruvbox-dark"
 
-    assert {:noreply, "storybook-nav", true} = Breeze.ChildServer.dispatch_input(pid, "F3")
+    assert {:noreply, "storybook-nav", true} = Breeze.Test.input(session, "F3")
 
-    metadata = Breeze.ChildServer.metadata(pid)
+    metadata = Breeze.Test.metadata(session)
     assert metadata.theme.name == "nord"
     assert metadata.assigns.breeze.theme.name == :nord
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    _ = Breeze.Test.render!(session)
     assert Breeze.ChildServer.metadata(child).theme.name == "nord"
   end
 
   test "F3 cycles the storybook theme while focus is inside the preview" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-
-    {:ok, pid} =
-      start_child_server(
-        view: Breeze.Storybook,
-        terminal: terminal,
+    session =
+      Breeze.Test.start!(Breeze.Storybook,
+        size: {80, 24},
         theme: Breeze.Theme.builtin(:gruvbox)
       )
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
     assert {:noreply, "storybook-preview::storybook-button-primary", true} =
-             Breeze.ChildServer.set_focus(pid, "storybook-preview::storybook-button-primary")
+             Breeze.Test.focus(session, "storybook-preview::storybook-button-primary")
 
     assert {:noreply, "storybook-preview::storybook-button-primary", true} =
-             Breeze.ChildServer.dispatch_input(pid, "F3")
+             Breeze.Test.input(session, "F3")
 
-    assert Breeze.ChildServer.metadata(pid).theme.name == "nord"
+    assert Breeze.Test.metadata(session).theme.name == "nord"
   end
 end
 
@@ -1049,50 +952,42 @@ defmodule Breeze.Storybook.VariantInteractionLayoutTest do
   use Breeze.TestSupport.StorybookCase, async: true
 
   test "list story renders variant tabs below the description and switches variants" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
+    _ = Breeze.Test.render!(session)
+    select_story!(session.pid, "list")
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    select_story!(pid, "list")
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
     assert plain_content =~ "Muted"
     assert plain_content =~ "Accent"
     assert plain_content =~ "variant=\"muted\""
 
     assert {:noreply, "storybook-variant-tabs", true} =
-             Breeze.ChildServer.set_focus(pid, "storybook-variant-tabs")
+             Breeze.Test.focus(session, "storybook-variant-tabs")
 
     assert {:noreply, "storybook-variant-tabs", true} =
-             Breeze.ChildServer.dispatch_input(pid, "ArrowRight")
+             Breeze.Test.input(session, "ArrowRight")
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
     assert plain_content =~ "Preview: List / Accent"
     assert plain_content =~ "variant=\"accent\""
   end
 
   test "list story variant tabs wrap left cleanly without collapsing to the trailing tab" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    select_story!(pid, "list")
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    _ = Breeze.Test.render!(session)
+    select_story!(session.pid, "list")
 
     assert {:noreply, "storybook-variant-tabs", true} =
-             Breeze.ChildServer.set_focus(pid, "storybook-variant-tabs")
+             Breeze.Test.focus(session, "storybook-variant-tabs")
 
     assert {:noreply, "storybook-variant-tabs", true} =
-             Breeze.ChildServer.dispatch_input(pid, "ArrowLeft")
+             Breeze.Test.input(session, "ArrowLeft")
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
     assert plain_content =~ "Preview: List / Accent"
     assert plain_content =~ " Muted  Accent "
   end
@@ -1177,28 +1072,21 @@ defmodule Breeze.Storybook.NavigationTest do
   use Breeze.TestSupport.StorybookCase, async: true
 
   test "Ctrl+Up and Ctrl+Down navigate stories regardless of current focus" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
     assert {:noreply, "storybook-preview::storybook-button-primary", true} =
-             Breeze.ChildServer.set_focus(pid, "storybook-preview::storybook-button-primary")
+             Breeze.Test.focus(session, "storybook-preview::storybook-button-primary")
 
     assert {:noreply, "storybook-nav", true} =
-             Breeze.ChildServer.dispatch_input(pid, %{"ctrlKey" => true, "key" => "ArrowDown"})
+             Breeze.Test.input(session, %{"ctrlKey" => true, "key" => "ArrowDown"})
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
-    assert plain_content =~ "Preview: Checkbox"
+    assert Breeze.Test.render_text!(session) =~ "Preview: Checkbox"
 
     assert {:noreply, "storybook-nav", true} =
-             Breeze.ChildServer.dispatch_input(pid, %{"ctrlKey" => true, "key" => "ArrowUp"})
+             Breeze.Test.input(session, %{"ctrlKey" => true, "key" => "ArrowUp"})
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
-    assert plain_content =~ "Preview: Button"
+    assert Breeze.Test.render_text!(session) =~ "Preview: Button"
   end
 end
 
@@ -1206,44 +1094,34 @@ defmodule Breeze.Storybook.VariantNavigationTest do
   use Breeze.TestSupport.StorybookCase, async: true
 
   test "Ctrl+H/L and Ctrl+Left/Right navigate variants regardless of current focus" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    select_story!(pid, "list")
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    _ = Breeze.Test.render!(session)
+    select_story!(session.pid, "list")
 
     assert {:noreply, "storybook-preview::storybook-list-muted", true} =
-             Breeze.ChildServer.set_focus(pid, "storybook-preview::storybook-list-muted")
+             Breeze.Test.focus(session, "storybook-preview::storybook-list-muted")
 
     assert {:noreply, "storybook-variant-tabs", true} =
-             Breeze.ChildServer.dispatch_input(pid, %{"ctrlKey" => true, "key" => "ArrowRight"})
+             Breeze.Test.input(session, %{"ctrlKey" => true, "key" => "ArrowRight"})
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
-    assert plain_content =~ "Preview: List / Accent"
+    assert Breeze.Test.render_text!(session) =~ "Preview: List / Accent"
 
     assert {:noreply, "storybook-variant-tabs", true} =
-             Breeze.ChildServer.dispatch_input(pid, %{"ctrlKey" => true, "key" => "h"})
+             Breeze.Test.input(session, %{"ctrlKey" => true, "key" => "h"})
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
-    assert plain_content =~ "Preview: List / Muted"
+    assert Breeze.Test.render_text!(session) =~ "Preview: List / Muted"
 
     assert {:noreply, "storybook-variant-tabs", true} =
-             Breeze.ChildServer.dispatch_input(pid, %{"ctrlKey" => true, "key" => "l"})
+             Breeze.Test.input(session, %{"ctrlKey" => true, "key" => "l"})
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
-    assert plain_content =~ "Preview: List / Accent"
+    assert Breeze.Test.render_text!(session) =~ "Preview: List / Accent"
 
     assert {:noreply, "storybook-variant-tabs", true} =
-             Breeze.ChildServer.dispatch_input(pid, %{"ctrlKey" => true, "key" => "ArrowLeft"})
+             Breeze.Test.input(session, %{"ctrlKey" => true, "key" => "ArrowLeft"})
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
-    assert plain_content =~ "Preview: List / Muted"
+    assert Breeze.Test.render_text!(session) =~ "Preview: List / Muted"
   end
 end
 

@@ -355,20 +355,17 @@ defmodule Breeze.Implicit.TextareaTest do
   end
 
   test "public textarea block updates through br-change" do
-    terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = start_child_server(view: BlockTextareaView, terminal: terminal)
+    session = Breeze.Test.start!(BlockTextareaView, size: {40, 12})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, initial_box} = ChildServer.render(pid, terminal: terminal)
-    initial_content = Regex.replace(~r/\e\[[0-9;]*m/u, initial_box.content, "")
+    initial_content = Breeze.Test.render_text!(session)
     assert initial_content =~ "› "
     assert initial_content =~ "hello"
 
-    assert {:noreply, "composer", true} = ChildServer.dispatch_input(pid, "Enter")
-    assert {:noreply, "composer", true} = ChildServer.dispatch_input(pid, "w")
+    assert {:noreply, "composer", true} = Breeze.Test.input(session, "Enter")
+    assert {:noreply, "composer", true} = Breeze.Test.input(session, "w")
 
-    assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
     lines = String.split(plain_content, "\n")
 
     assert Enum.any?(lines, &String.contains?(&1, "hello"))
@@ -377,13 +374,13 @@ defmodule Breeze.Implicit.TextareaTest do
   end
 
   test "public textarea block can submit on enter" do
-    terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = start_child_server(view: SubmitTextareaView, terminal: terminal)
+    session = Breeze.Test.start!(SubmitTextareaView, size: {40, 12})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
-    assert {:noreply, "composer", true} = ChildServer.dispatch_input(pid, "Enter")
+    _ = Breeze.Test.render!(session)
+    assert {:noreply, "composer", true} = Breeze.Test.input(session, "Enter")
 
-    assert %{assigns: %{submitted: "hello", message: "hello"}} = ChildServer.metadata(pid)
+    assert %{assigns: %{submitted: "hello", message: "hello"}} = Breeze.Test.metadata(session)
   end
 
   test "disabled public textarea renders without becoming focusable or implicit" do
