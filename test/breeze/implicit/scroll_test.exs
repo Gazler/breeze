@@ -1,11 +1,8 @@
 defmodule Breeze.Implicit.ScrollTest do
   use ExUnit.Case, async: true
 
-  import Breeze.TestSupport.ProcessHelpers, only: [start_child_server: 1]
-
   alias BackBreeze.TextSpan
   alias BackBreeze.VirtualText.Source
-  alias Breeze.ChildServer
   alias Breeze.Implicit.Scroll
   alias Breeze.Viewport
 
@@ -241,38 +238,38 @@ defmodule Breeze.Implicit.ScrollTest do
 
   describe "virtual text integration" do
     test "scrolls root content while keeping absolute overlay children visible" do
-      terminal = %Termite.Terminal{size: %{width: 24, height: 8}}
+      session = Breeze.Test.start!(VirtualScrollView, size: {24, 8})
+      on_exit(fn -> Breeze.Test.stop(session) end)
 
-      {:ok, pid} = start_child_server(view: VirtualScrollView, terminal: terminal)
-      assert {:ok, _acc, initial_box} = ChildServer.render(pid, terminal: terminal)
+      initial_content = Breeze.Test.render_text!(session)
 
-      assert initial_box.content =~ "Fixed overlay"
-      assert initial_box.content =~ "Line "
-      assert initial_box.content =~ "01"
+      assert initial_content =~ "Fixed overlay"
+      assert initial_content =~ "Line "
+      assert initial_content =~ "01"
 
-      assert {:noreply, "large-scroll", _consumed} = ChildServer.dispatch_input(pid, "PageDown")
-      assert {:ok, _acc, next_box} = ChildServer.render(pid, terminal: terminal)
+      assert {:noreply, "large-scroll", _consumed} = Breeze.Test.input(session, "PageDown")
+      next_content = Breeze.Test.render_text!(session)
 
-      assert next_box.content =~ "Fixed overlay"
-      refute next_box.content =~ "01"
-      assert next_box.content =~ "05"
+      assert next_content =~ "Fixed overlay"
+      refute next_content =~ "01"
+      assert next_content =~ "05"
     end
 
     test "scrolls nested grid virtual text content" do
-      terminal = %Termite.Terminal{size: %{width: 24, height: 8}}
+      session = Breeze.Test.start!(NestedGridVirtualScrollView, size: {24, 8})
+      on_exit(fn -> Breeze.Test.stop(session) end)
 
-      {:ok, pid} = start_child_server(view: NestedGridVirtualScrollView, terminal: terminal)
-      assert {:ok, _acc, initial_box} = ChildServer.render(pid, terminal: terminal)
-      assert Breeze.ChildServer.metadata(pid).focused == "large-scroll-content"
+      initial_content = Breeze.Test.render_text!(session)
+      assert Breeze.Test.focused(session) == "large-scroll-content"
 
-      assert initial_box.content =~ "Line 01"
+      assert initial_content =~ "Line 01"
 
       assert {:noreply, "large-scroll-content", true} =
-               ChildServer.dispatch_input(pid, "PageDown")
+               Breeze.Test.input(session, "PageDown")
 
-      assert {:ok, _acc, next_box} = ChildServer.render(pid, terminal: terminal)
-      refute next_box.content =~ "Line 01"
-      assert next_box.content =~ "Line 06"
+      next_content = Breeze.Test.render_text!(session)
+      refute next_content =~ "Line 01"
+      assert next_content =~ "Line 06"
     end
   end
 end

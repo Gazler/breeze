@@ -1,8 +1,6 @@
 defmodule Breeze.Implicit.CheckboxTest do
   use ExUnit.Case, async: true
 
-  import Breeze.TestSupport.ProcessHelpers, only: [start_child_server: 1]
-
   alias Breeze.ChildServer
   alias Breeze.Implicit.Checkbox
 
@@ -160,97 +158,80 @@ defmodule Breeze.Implicit.CheckboxTest do
   end
 
   test "a first click focuses and toggles the rendered checkbox" do
-    terminal = %Termite.Terminal{size: %{width: 30, height: 5}}
-    {:ok, pid} = start_child_server(view: CheckboxView, terminal: terminal)
+    session = Breeze.Test.start!(CheckboxView, size: {30, 5})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
-    assert strip_ansi(box.content) =~ "[ ] Mouse"
+    assert Breeze.Test.render_text!(session) =~ "[ ] Mouse"
 
-    assert {:noreply, "mouse", true} = click(pid, "mouse")
+    assert {:noreply, "mouse", true} = Breeze.Test.click(session, "mouse")
 
-    assert %{focused: "mouse", assigns: %{checked: true}} = ChildServer.metadata(pid)
-    assert %{"mouse" => {Checkbox, %{checked: true}}} = ChildServer.metadata(pid).implicit_state
+    assert %{focused: "mouse", assigns: %{checked: true}} = Breeze.Test.metadata(session)
 
-    assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
-    content = strip_ansi(box.content)
+    assert %{"mouse" => {Checkbox, %{checked: true}}} =
+             Breeze.Test.metadata(session).implicit_state
+
+    content = Breeze.Test.render_text!(session)
     assert content =~ "|x| Mouse"
     refute content =~ "[x] Mouse"
 
-    assert {:noreply, "mouse", true} = click(pid, "mouse")
-    assert %{assigns: %{checked: false}} = ChildServer.metadata(pid)
+    assert {:noreply, "mouse", true} = Breeze.Test.click(session, "mouse")
+    assert %{assigns: %{checked: false}} = Breeze.Test.metadata(session)
   end
 
   test "focus uses bar delimiters as a non-color cue" do
-    terminal = %Termite.Terminal{size: %{width: 20, height: 3}}
-    {:ok, pid} = start_child_server(view: UncontrolledCheckboxView, terminal: terminal)
+    session = Breeze.Test.start!(UncontrolledCheckboxView, size: {20, 3})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
-    content = strip_ansi(box.content)
+    content = Breeze.Test.render_text!(session)
 
     assert content =~ "| | Mouse"
     refute content =~ "[ ] Mouse"
   end
 
   test "Space and Enter toggle a rendered checkbox" do
-    terminal = %Termite.Terminal{size: %{width: 30, height: 5}}
-    {:ok, pid} = start_child_server(view: CheckboxView, terminal: terminal)
+    session = Breeze.Test.start!(CheckboxView, size: {30, 5})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
-    assert {:noreply, "mouse", true} = ChildServer.set_focus(pid, "mouse")
+    assert {:noreply, "mouse", true} = Breeze.Test.focus(session, "mouse")
 
-    assert {:noreply, "mouse", true} = ChildServer.dispatch_input(pid, " ")
-    assert %{assigns: %{checked: true}} = ChildServer.metadata(pid)
+    assert {:noreply, "mouse", true} = Breeze.Test.input(session, " ")
+    assert %{assigns: %{checked: true}} = Breeze.Test.metadata(session)
 
-    assert {:noreply, "mouse", true} = ChildServer.dispatch_input(pid, "Enter")
-    assert %{assigns: %{checked: false}} = ChildServer.metadata(pid)
+    assert {:noreply, "mouse", true} = Breeze.Test.input(session, "Enter")
+    assert %{assigns: %{checked: false}} = Breeze.Test.metadata(session)
   end
 
   test "an uncontrolled checkbox retains its implicit state" do
-    terminal = %Termite.Terminal{size: %{width: 20, height: 3}}
-    {:ok, pid} = start_child_server(view: UncontrolledCheckboxView, terminal: terminal)
+    session = Breeze.Test.start!(UncontrolledCheckboxView, size: {20, 3})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
-    assert {:noreply, "mouse", true} = ChildServer.dispatch_input(pid, " ")
-    assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
+    _ = Breeze.Test.render!(session)
+    assert {:noreply, "mouse", true} = Breeze.Test.input(session, " ")
 
-    assert strip_ansi(box.content) =~ "|x| Mouse"
+    assert Breeze.Test.render_text!(session) =~ "|x| Mouse"
   end
 
   test "a disabled checkbox cannot receive focus or toggle" do
     terminal = %Termite.Terminal{size: %{width: 30, height: 5}}
 
-    {:ok, pid} =
-      start_child_server(
-        view: DisabledCheckboxView,
+    session =
+      Breeze.Test.start!(DisabledCheckboxView,
         terminal: terminal,
         theme: Breeze.Theme.builtin(:nebula)
       )
 
-    assert {:ok, acc, box} = ChildServer.render(pid, terminal: terminal)
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert {:ok, acc, box} = ChildServer.render(session.pid, terminal: terminal)
     refute "mouse" in acc.focusables
     assert box.content =~ ~r/\e\[[0-9;]*38;2;125;163;200m⟦ ⟧ Mouse/
 
-    assert {:noreply, "other", false} = click(pid, "mouse")
+    assert {:noreply, "other", false} = Breeze.Test.click(session, "mouse")
 
-    assert %{focused: "other", assigns: assigns} = ChildServer.metadata(pid)
+    assert %{focused: "other", assigns: assigns} = Breeze.Test.metadata(session)
     refute Map.has_key?(assigns, :changed_to)
 
     assert %{"mouse" => {Checkbox, %{checked: false, disabled: true}}} =
-             ChildServer.metadata(pid).implicit_state
+             Breeze.Test.metadata(session).implicit_state
   end
-
-  defp click(pid, id) do
-    bounds = :sys.get_state(pid).mouse_targets[id]
-
-    ChildServer.dispatch_input(pid, %{
-      "mouse" => %{
-        "button" => "left",
-        "action" => "press",
-        "x" => div(bounds.left + bounds.right, 2),
-        "y" => div(bounds.top + bounds.bottom, 2)
-      }
-    })
-  end
-
-  defp strip_ansi(content), do: Regex.replace(~r/\e\[[0-9;]*m/u, content, "")
 end

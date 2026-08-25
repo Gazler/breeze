@@ -496,150 +496,112 @@ defmodule Breeze.Implicit.InputTest do
   end
 
   test "nested input layout stores screen-relative coordinates" do
-    terminal = %Termite.Terminal{size: %{width: 40, height: 10}}
-    {:ok, pid} = start_child_server(view: NestedInputView, terminal: terminal)
+    session = Breeze.Test.start!(NestedInputView, size: {40, 10})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
-
-    assert %Breeze.Term{
-             elements: %{
-               "url" => %Breeze.Viewport{left: 2, top: 2}
-             }
-           } = :sys.get_state(pid)
+    assert %Breeze.Viewport{left: 2, top: 2} = Breeze.Test.element!(session, "url")
   end
 
-  test "child server renders a fixed-width input with a scrolled visible slice" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = start_child_server(view: OverflowInputView, terminal: terminal)
+  test "a fixed-width input renders a scrolled visible slice" do
+    session = Breeze.Test.start!(OverflowInputView, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
+    plain_content = Breeze.Test.render_text!(session)
 
-    assert %Breeze.Term{
-             implicit_state: %{
-               "website" => {Breeze.Implicit.Input, %{value: _, cursor: 78}}
-             }
-           } = :sys.get_state(pid)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    assert %{"website" => {Breeze.Implicit.Input, %{value: _, cursor: 78}}} =
+             Breeze.Test.metadata(session).implicit_state
 
     assert plain_content =~ "?include=author,history "
     refute plain_content =~ "https://jsonplaceholder.typicode.com/posts"
   end
 
-  test "child server keeps the cursor pinned when typing at the overflow edge" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = start_child_server(view: OverflowInputView, terminal: terminal)
+  test "typing at the overflow edge keeps the cursor pinned" do
+    session = Breeze.Test.start!(OverflowInputView, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, initial_box} = ChildServer.render(pid, terminal: terminal)
+    assert Breeze.Test.render_text!(session) =~ "?include=author,history "
 
-    assert Regex.replace(~r/\e\[[0-9;]*m/u, initial_box.content, "") =~
-             "?include=author,history "
+    assert {:noreply, "website", true} = Breeze.Test.input(session, "!")
 
-    assert {:noreply, "website", true} = ChildServer.dispatch_input(pid, "!")
-
-    assert %Breeze.Term{
-             implicit_state: %{
-               "website" => {Breeze.Implicit.Input, %{value: value, cursor: 79}}
-             }
-           } = :sys.get_state(pid)
+    assert %{"website" => {Breeze.Implicit.Input, %{value: value, cursor: 79}}} =
+             Breeze.Test.metadata(session).implicit_state
 
     assert String.ends_with?(value, "history!")
 
-    assert {:ok, _acc, next_box} = ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, next_box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
 
     assert plain_content =~ "include=author,history! "
     refute plain_content =~ "comments?include=author,history"
   end
 
-  test "child server scrolls back left after backspace from the overflow edge" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = start_child_server(view: OverflowInputView, terminal: terminal)
+  test "backspace from the overflow edge scrolls back left" do
+    session = Breeze.Test.start!(OverflowInputView, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
-    assert {:noreply, "website", true} = ChildServer.dispatch_input(pid, "!")
+    _ = Breeze.Test.render!(session)
+    assert {:noreply, "website", true} = Breeze.Test.input(session, "!")
 
-    assert {:noreply, "website", true} = ChildServer.dispatch_input(pid, "\x7f")
+    assert {:noreply, "website", true} = Breeze.Test.input(session, "\x7f")
 
-    assert %Breeze.Term{
-             implicit_state: %{
-               "website" => {Breeze.Implicit.Input, %{value: value, cursor: 78}}
-             }
-           } = :sys.get_state(pid)
+    assert %{"website" => {Breeze.Implicit.Input, %{value: value, cursor: 78}}} =
+             Breeze.Test.metadata(session).implicit_state
 
     assert String.ends_with?(value, "history")
 
-    assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
 
     assert plain_content =~ "?include=author,history "
     refute plain_content =~ "include=author,history!"
   end
 
-  test "child server reveals earlier content when moving left out of the overflow edge" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = start_child_server(view: OverflowInputView, terminal: terminal)
+  test "moving left out of the overflow edge reveals earlier content" do
+    session = Breeze.Test.start!(OverflowInputView, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
+    _ = Breeze.Test.render!(session)
 
     Enum.each(1..12, fn _ ->
-      assert {:noreply, "website", true} = ChildServer.dispatch_input(pid, "ArrowLeft")
+      assert {:noreply, "website", true} = Breeze.Test.input(session, "ArrowLeft")
     end)
 
-    assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
 
     assert plain_content =~ "23/comments?include=aut "
     refute plain_content =~ "?include=author,history "
   end
 
   test "public input block keeps its left inset after change rerenders" do
-    terminal = %Termite.Terminal{size: %{width: 40, height: 10}}
-    {:ok, pid} = start_child_server(view: BlockInputView, terminal: terminal)
+    session = Breeze.Test.start!(BlockInputView, size: {40, 10})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, initial_box} = ChildServer.render(pid, terminal: terminal)
-    assert Regex.replace(~r/\e\[[0-9;]*m/u, initial_box.content, "") =~ " hello world"
+    assert Breeze.Test.render_text!(session) =~ " hello world"
 
-    assert {:noreply, "url"} = ChildServer.dispatch_info(pid, :append_bang, terminal)
+    assert {:noreply, "url"} = Breeze.Test.info(session, :append_bang)
 
-    assert {:ok, _acc, next_box} = ChildServer.render(pid, terminal: terminal)
-
-    assert Regex.replace(~r/\e\[[0-9;]*m/u, next_box.content, "") =~ " hello world!"
+    assert Breeze.Test.render_text!(session) =~ " hello world!"
   end
 
   test "public input block keeps padding inside the box and cursor aligned" do
-    terminal = %Termite.Terminal{size: %{width: 24, height: 10}}
-    {:ok, pid} = start_child_server(view: PaddedBlockInputView, terminal: terminal)
+    session = Breeze.Test.start!(PaddedBlockInputView, size: {24, 10})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, box} = ChildServer.render(pid, terminal: terminal)
-
-    plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
+    plain_content = Breeze.Test.render_text!(session)
 
     assert plain_content =~ "\n hello"
 
-    assert %Breeze.Term{
-             elements: %{
-               "url" => %Breeze.Viewport{left: 0, top: 0}
-             }
-           } = :sys.get_state(pid)
+    assert %Breeze.Viewport{left: 0, top: 0} = Breeze.Test.element!(session, "url")
   end
 
-  test "child server delete updates a scrolled input through the normal key path" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-    {:ok, pid} = start_child_server(view: OverflowInputView, terminal: terminal)
+  test "delete updates a scrolled input through the normal key path" do
+    session = Breeze.Test.start!(OverflowInputView, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, _box} = ChildServer.render(pid, terminal: terminal)
-    assert {:noreply, "website", true} = ChildServer.dispatch_input(pid, "ArrowLeft")
-    assert {:noreply, "website", true} = ChildServer.dispatch_input(pid, "Delete")
+    _ = Breeze.Test.render!(session)
+    assert {:noreply, "website", true} = Breeze.Test.input(session, "ArrowLeft")
+    assert {:noreply, "website", true} = Breeze.Test.input(session, "Delete")
 
-    assert %Breeze.Term{
-             implicit_state: %{
-               "website" => {Breeze.Implicit.Input, %{value: value, cursor: 77}}
-             }
-           } = :sys.get_state(pid)
+    assert %{"website" => {Breeze.Implicit.Input, %{value: value, cursor: 77}}} =
+             Breeze.Test.metadata(session).implicit_state
 
     refute String.contains?(value, "history")
     assert String.ends_with?(value, "histor")
@@ -666,31 +628,31 @@ defmodule Breeze.Implicit.InputTest do
   end
 
   test "focused inputs consume printable keys before global keybindings" do
-    {:ok, pid} =
-      start_child_server(
-        view: OverflowInputView,
+    session =
+      Breeze.Test.start!(OverflowInputView,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
-    assert {:ok, _acc, _box} = ChildServer.render(pid, [])
-    assert {:noreply, "website", true} = ChildServer.dispatch_input(pid, "q")
-    assert {:ok, _acc, box} = ChildServer.render(pid, [])
-    assert box.content =~ "historyq"
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    _ = Breeze.Test.render!(session)
+    assert {:noreply, "website", true} = Breeze.Test.input(session, "q")
+    assert Breeze.Test.render_text!(session) =~ "historyq"
   end
 
   test "focused inputs consume batched printable chunks before global keybindings" do
-    {:ok, pid} =
-      start_child_server(
-        view: OverflowInputView,
+    session =
+      Breeze.Test.start!(OverflowInputView,
         global_keybindings: [{"q", fn _event, term -> {:stop, term} end}]
       )
 
-    assert {:ok, _acc, _box} = ChildServer.render(pid, [])
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    _ = Breeze.Test.render!(session)
 
     assert {:noreply, "website", true} =
-             ChildServer.dispatch_input(pid, %{"key" => "qq", "__batched_printable__" => true})
+             Breeze.Test.input(session, %{"key" => "qq", "__batched_printable__" => true})
 
-    assert {:ok, _acc, box} = ChildServer.render(pid, [])
-    assert box.content =~ "historyqq"
+    assert Breeze.Test.render_text!(session) =~ "historyqq"
   end
 end

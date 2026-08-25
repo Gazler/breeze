@@ -234,7 +234,8 @@ defmodule Breeze.LoggerTest do
 
   @tag capture_log: true
   test "logger view renders recent log lines" do
-    {:ok, pid} = start_child_server(view: Breeze.Logger, start_opts: [max_lines: 2])
+    session = Breeze.Test.start!(Breeze.Logger, start_opts: [max_lines: 2])
+    on_exit(fn -> Breeze.Test.stop(session) end)
     wait_until(fn -> true end)
 
     first = "logger-view-first-#{System.unique_integer([:positive])}"
@@ -247,15 +248,15 @@ defmodule Breeze.LoggerTest do
     Logger.flush()
 
     wait_until(fn ->
-      {:ok, _acc, box} = ChildServer.render(pid, focused: nil, implicit_state: %{})
-      box.content =~ second and box.content =~ third
+      content = Breeze.Test.render_text!(session)
+      content =~ second and content =~ third
     end)
 
-    {:ok, _acc, box} = ChildServer.render(pid, focused: nil, implicit_state: %{})
+    content = Breeze.Test.render_text!(session)
 
-    refute box.content =~ first
-    assert box.content =~ second
-    assert box.content =~ third
+    refute content =~ first
+    assert content =~ second
+    assert content =~ third
   end
 
   test "logger height applies to the whole component" do
@@ -364,50 +365,51 @@ defmodule Breeze.LoggerTest do
 
   @tag capture_log: true
   test "focused logger still receives non-scroll keys" do
-    {:ok, pid} = start_child_server(view: Breeze.Logger, start_opts: [height: 6, max_lines: 20])
-    {:ok, _acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+    session = Breeze.Test.start!(Breeze.Logger, start_opts: [height: 6, max_lines: 20])
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert {:noreply, "logger", _changed?} = Breeze.Test.focus(session, "logger")
 
     Logger.info("clear-me-#{System.unique_integer([:positive])}")
     Logger.flush()
 
     wait_until(fn ->
-      {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
-      box.content =~ "clear-me-"
+      Breeze.Test.render_text!(session) =~ "clear-me-"
     end)
 
     assert {:noreply, "logger", true} =
-             ChildServer.dispatch_event(pid, :input, %{"key" => "c"})
+             Breeze.Test.event(session, :input, %{"key" => "c"})
 
     wait_until(fn ->
-      {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
-      box.content =~ "Press c to clear." and not (box.content =~ "clear-me-")
+      content = Breeze.Test.render_text!(session)
+      content =~ "Press c to clear." and not (content =~ "clear-me-")
     end)
   end
 
   @tag capture_log: true
   test "logger can disable the clear shortcut" do
-    {:ok, pid} =
-      start_child_server(
-        view: Breeze.Logger,
+    session =
+      Breeze.Test.start!(Breeze.Logger,
         start_opts: [height: 6, max_lines: 20, clear_key: nil]
       )
 
-    {:ok, _acc, _box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    assert {:noreply, "logger", _changed?} = Breeze.Test.focus(session, "logger")
 
     Logger.info("dont-clear-me-#{System.unique_integer([:positive])}")
     Logger.flush()
 
     wait_until(fn ->
-      {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
-      box.content =~ "dont-clear-me-"
+      Breeze.Test.render_text!(session) =~ "dont-clear-me-"
     end)
 
     assert {:noreply, "logger", false} =
-             ChildServer.dispatch_event(pid, :input, %{"key" => "c"})
+             Breeze.Test.event(session, :input, %{"key" => "c"})
 
-    {:ok, _acc, box} = ChildServer.render(pid, focused: "logger", implicit_state: %{})
-    assert box.content =~ "dont-clear-me-"
-    refute box.content =~ "Press c to clear."
+    content = Breeze.Test.render_text!(session)
+    assert content =~ "dont-clear-me-"
+    refute content =~ "Press c to clear."
   end
 
   @tag capture_log: true

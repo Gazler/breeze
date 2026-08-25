@@ -71,7 +71,6 @@ defmodule PostingTestCase do
       import Breeze.TestSupport.ProcessHelpers,
         only: [
           start_app_server: 1,
-          start_child_server: 1,
           start_server: 1,
           stop_gen_server: 1
         ]
@@ -86,14 +85,10 @@ defmodule Posting.LayoutTest do
   use PostingTestCase, async: true
 
   test "compact layout hides header metadata and the collection panel below md" do
-    compact_terminal = %Termite.Terminal{size: %{width: 59, height: 24}}
+    session = Breeze.Test.start!(Posting, size: {59, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, compact_pid} = start_child_server(view: Posting, terminal: compact_terminal)
-
-    assert {:ok, _acc, compact_box} =
-             Breeze.ChildServer.render(compact_pid, terminal: compact_terminal)
-
-    compact_content = visible(compact_box.content)
+    compact_content = Breeze.Test.render_text!(session)
     assert compact_content =~ "Req It Ralph"
     assert compact_content =~ "Headers  Body  Query  Auth  Info  Options"
     refute compact_content =~ "gruvbox/"
@@ -119,27 +114,20 @@ defmodule Posting.LayoutTest do
            |> String.trim_leading()
            |> String.starts_with?("│")
 
-    md_terminal = %Termite.Terminal{size: %{width: 60, height: 24}}
-
-    {:ok, md_pid} = start_child_server(view: Posting, terminal: md_terminal)
-
-    assert {:ok, _acc, md_box} = Breeze.ChildServer.render(md_pid, terminal: md_terminal)
-
-    md_content = visible(md_box.content)
+    session = Breeze.Test.resize(session, {60, 24})
+    md_content = Breeze.Test.render_text!(session)
     assert md_content =~ "gruvbox/"
     assert md_content =~ "gazler@"
     assert md_content =~ "echo post"
   end
 
   test "request bar uses inward-facing edge borders" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
-
-    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    session = Breeze.Test.start!(Posting, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
     request_row =
-      box.content
-      |> visible()
+      session
+      |> Breeze.Test.render_text!()
       |> String.split("\n")
       |> Enum.find(&String.contains?(&1, "https://jsonplaceholder"))
       |> String.trim()
@@ -149,61 +137,56 @@ defmodule Posting.LayoutTest do
   end
 
   test "F1 opens help modal and focuses it, Escape closes and restores url focus" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Posting, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
+    assert Breeze.Test.render_text!(session) =~ "https://jsonplaceholder.typicode.com/posts"
+    assert Breeze.Test.focused(session) == "url"
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert visible(box.content) =~ "https://jsonplaceholder.typicode.com/posts"
-    assert %{focused: "url"} = Breeze.ChildServer.metadata(pid)
+    assert {:noreply, "help", true} = Breeze.Test.input(session, "F1")
 
-    assert {:noreply, "help", true} = Breeze.ChildServer.dispatch_input(pid, "F1")
+    help = Breeze.Test.render_text!(session)
+    assert help =~ "Keyboard Shortcuts"
+    assert help =~ "Close this dialog"
+    assert Breeze.Test.focused(session) == "help"
 
-    assert {:ok, _acc, help_box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert visible(help_box.content) =~ "Keyboard Shortcuts"
-    assert visible(help_box.content) =~ "Close this dialog"
-    assert %{focused: "help"} = Breeze.ChildServer.metadata(pid)
+    assert {:noreply, "url", true} = Breeze.Test.input(session, "Escape")
 
-    assert {:noreply, "url", true} = Breeze.ChildServer.dispatch_input(pid, "Escape")
-
-    assert {:ok, _acc, closed_box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    refute visible(closed_box.content) =~ "Keyboard Shortcuts"
-    assert %{focused: "url"} = Breeze.ChildServer.metadata(pid)
+    refute Breeze.Test.render_text!(session) =~ "Keyboard Shortcuts"
+    assert Breeze.Test.focused(session) == "url"
   end
 
   test "Ctrl-T opens the method dropdown" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Posting, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
+    _ = Breeze.Test.render!(session)
+    assert {:noreply, "method", true} = Breeze.Test.input(session, "\x14")
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert {:noreply, "method", true} = Breeze.ChildServer.dispatch_input(pid, "\x14")
-
-    assert {:ok, _acc, open_box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert visible(open_box.content) =~ "GET"
-    assert visible(open_box.content) =~ "▲"
+    opened = Breeze.Test.render_text!(session)
+    assert opened =~ "GET"
+    assert opened =~ "▲"
 
     assert {Breeze.Implicit.Dropdown, %{open?: true}} =
-             Breeze.ChildServer.metadata(pid).implicit_state["method"]
+             Breeze.Test.metadata(session).implicit_state["method"]
   end
 
   test "Ctrl-T opens the method dropdown when the url input is focused via decoded key event" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Posting, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert %{focused: "url"} = Breeze.ChildServer.metadata(pid)
+    _ = Breeze.Test.render!(session)
+    assert Breeze.Test.focused(session) == "url"
 
     assert {:noreply, "method", true} =
-             Breeze.ChildServer.dispatch_input(pid, %{"ctrlKey" => true, "key" => "t"})
+             Breeze.Test.input(session, %{"ctrlKey" => true, "key" => "t"})
 
-    assert {:ok, _acc, open_box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert visible(open_box.content) =~ "GET"
-    assert visible(open_box.content) =~ "▲"
+    opened = Breeze.Test.render_text!(session)
+    assert opened =~ "GET"
+    assert opened =~ "▲"
 
     assert {Breeze.Implicit.Dropdown, %{open?: true}} =
-             Breeze.ChildServer.metadata(pid).implicit_state["method"]
+             Breeze.Test.metadata(session).implicit_state["method"]
   end
 end
 
@@ -211,38 +194,35 @@ defmodule Posting.HeadersLayoutTest do
   use PostingTestCase, async: true
 
   test "headers form adds a request header" do
-    terminal = %Termite.Terminal{size: %{width: 120, height: 24}}
+    session = Breeze.Test.start!(Posting, size: {120, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
-
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert visible(box.content) =~ "╱╱╱"
+    assert Breeze.Test.render_text!(session) =~ "╱╱╱"
 
     assert {:noreply, "request-header-name", true} =
-             Breeze.ChildServer.set_focus(pid, "request-header-name")
+             Breeze.Test.focus(session, "request-header-name")
 
     for key <- String.graphemes("X-Demo") do
-      assert {:noreply, "request-header-name", true} = Breeze.ChildServer.dispatch_input(pid, key)
+      assert {:noreply, "request-header-name", true} = Breeze.Test.input(session, key)
     end
 
     assert {:noreply, "request-header-value", true} =
-             Breeze.ChildServer.dispatch_input(pid, "Enter")
+             Breeze.Test.input(session, "Enter")
 
     for key <- String.graphemes("true") do
       assert {:noreply, "request-header-value", true} =
-               Breeze.ChildServer.dispatch_input(pid, key)
+               Breeze.Test.input(session, key)
     end
 
     assert {:noreply, "request-header-name", true} =
-             Breeze.ChildServer.dispatch_input(pid, "Enter")
+             Breeze.Test.input(session, "Enter")
 
-    assert {:ok, _acc, updated_box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    rendered = visible(updated_box.content)
+    rendered = Breeze.Test.render_text!(session)
 
     assert rendered =~ "X-Demo"
     assert rendered =~ "true"
     refute rendered =~ "╱╱╱"
-    assert %{focused: "request-header-name"} = Breeze.ChildServer.metadata(pid)
+    assert Breeze.Test.focused(session) == "request-header-name"
   end
 end
 
@@ -250,42 +230,39 @@ defmodule Posting.PersistentLayoutTest do
   use PostingTestCase, async: true
 
   test "header input implicit state survives switching tabs away and back" do
-    terminal = %Termite.Terminal{size: %{width: 120, height: 24}}
+    session = Breeze.Test.start!(Posting, size: {120, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    _ = Breeze.Test.render!(session)
 
     assert {:noreply, "request-header-name", true} =
-             Breeze.ChildServer.set_focus(pid, "request-header-name")
+             Breeze.Test.focus(session, "request-header-name")
 
     for key <- String.graphemes("ABCDE") do
-      assert {:noreply, "request-header-name", true} = Breeze.ChildServer.dispatch_input(pid, key)
+      assert {:noreply, "request-header-name", true} = Breeze.Test.input(session, key)
     end
 
     assert {:noreply, "request-header-name", true} =
-             Breeze.ChildServer.dispatch_input(pid, "ArrowLeft")
+             Breeze.Test.input(session, "ArrowLeft")
 
     assert {:noreply, "request-header-name", true} =
-             Breeze.ChildServer.dispatch_input(pid, "ArrowLeft")
+             Breeze.Test.input(session, "ArrowLeft")
 
     assert {Breeze.Implicit.Input, %{cursor: 3}} =
-             Breeze.ChildServer.metadata(pid).implicit_state["request-header-name"]
+             Breeze.Test.metadata(session).implicit_state["request-header-name"]
 
     assert {:noreply, _focused, true} =
-             Breeze.ChildServer.dispatch_event(pid, "request_tab", %{value: "body"})
+             Breeze.Test.event(session, "request_tab", %{value: "body"})
 
-    assert {:ok, _acc, body_box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert visible(body_box.content) =~ "No request body"
+    assert Breeze.Test.render_text!(session) =~ "No request body"
 
     assert {:noreply, _focused, true} =
-             Breeze.ChildServer.dispatch_event(pid, "request_tab", %{value: "headers"})
+             Breeze.Test.event(session, "request_tab", %{value: "headers"})
 
-    assert {:ok, _acc, headers_box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert visible(headers_box.content) =~ "ABCDE"
+    assert Breeze.Test.render_text!(session) =~ "ABCDE"
 
     assert {Breeze.Implicit.Input, %{cursor: 3}} =
-             Breeze.ChildServer.metadata(pid).implicit_state["request-header-name"]
+             Breeze.Test.metadata(session).implicit_state["request-header-name"]
   end
 end
 
@@ -421,21 +398,18 @@ defmodule Posting.ServerEditingInputTest do
   end
 
   test "posting keeps repeated wide characters contiguous in the url row" do
-    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    session = Breeze.Test.start!(Posting, size: {80, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    {:ok, pid} = start_child_server(view: Posting, terminal: terminal)
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    _ = Breeze.Test.render!(session)
 
     for key <- String.graphemes(String.duplicate("好", 6)) do
-      assert {:noreply, "url", true} = Breeze.ChildServer.dispatch_input(pid, key)
+      assert {:noreply, "url", true} = Breeze.Test.input(session, key)
     end
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
-
     url_row =
-      box.content
-      |> visible()
+      session
+      |> Breeze.Test.render_text!()
       |> String.split("\n")
       |> Enum.at(3)
 

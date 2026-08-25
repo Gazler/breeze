@@ -241,13 +241,15 @@ defmodule MyApp.CounterTest do
     session = Breeze.Test.start!(MyApp.CounterView, size: {30, 5})
     on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert Breeze.Test.render!(session) =~ "Counter: 0"
+    assert Breeze.Test.render_text!(session) =~ "Counter: 0"
 
     assert {:noreply, _focused, true} = Breeze.Test.input(session, "ArrowUp")
-    assert Breeze.Test.render!(session) =~ "Counter: 1"
+    assert Breeze.Test.render_text!(session) =~ "Counter: 1"
   end
 end
 ```
 
-Rendered content preserves raw terminal escape sequences, making it
-straightforward to add project-specific snapshot assertions.
+`render!/2` preserves raw terminal escape sequences for snapshot assertions;
+`render_text!/2` removes styling for ordinary content assertions. Tests can
+also target rendered IDs with `focus/2`, `click/3`, `wheel/4`, and `element/2`,
+or rebind a session returned by `resize/2` to exercise responsive layouts.

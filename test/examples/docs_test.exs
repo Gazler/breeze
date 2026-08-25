@@ -7,16 +7,9 @@ defmodule DocsTest do
 
     assert {:noreply, _focused, true} = Breeze.Test.event(session, "change", %{value: "URI"})
 
-    rendered =
-      session
-      |> Breeze.Test.render!()
-      |> visible()
+    rendered = Breeze.Test.render_text!(session)
 
     refute rendered =~ "__struct__"
     assert rendered =~ "append_path/2"
-  end
-
-  defp visible(content) do
-    String.replace(content, ~r/\e\[[0-9;]*m/u, "")
   end
 end

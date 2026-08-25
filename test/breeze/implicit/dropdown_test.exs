@@ -168,16 +168,15 @@ defmodule Breeze.Implicit.DropdownTest do
     assert selected_state.selected_index == 2
   end
 
-  test "selecting an item keeps focus on the dropdown in the child server" do
-    terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = start_child_server(view: DropdownView, terminal: terminal)
+  test "selecting an item keeps focus on the dropdown" do
+    session = Breeze.Test.start!(DropdownView, size: {40, 12})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert {:noreply, "method", true} = Breeze.ChildServer.dispatch_input(pid, "\x14")
-    assert {:noreply, "method", true} = Breeze.ChildServer.dispatch_input(pid, "Enter")
+    _ = Breeze.Test.render!(session)
+    assert {:noreply, "method", true} = Breeze.Test.input(session, "\x14")
+    assert {:noreply, "method", true} = Breeze.Test.input(session, "Enter")
 
-    metadata = Breeze.ChildServer.metadata(pid)
-    assert metadata.focused == "method"
+    assert Breeze.Test.focused(session) == "method"
   end
 
   test "item modifiers collapse the items when closed" do
@@ -282,80 +281,37 @@ defmodule Breeze.Implicit.DropdownTest do
   end
 
   test "clicking the rendered trigger opens the dropdown" do
-    terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = start_child_server(view: DropdownView, terminal: terminal)
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    bounds = :sys.get_state(pid).mouse_targets["method"]
-    x = div(bounds.left + bounds.right, 2)
-    y = div(bounds.top + bounds.bottom, 2)
+    session = Breeze.Test.start!(DropdownView, size: {40, 12})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
     assert {:noreply, "method", true} =
-             Breeze.ChildServer.dispatch_input(pid, %{
-               "mouse" => %{
-                 "button" => "left",
-                 "action" => "press",
-                 "x" => x,
-                 "y" => y
-               }
-             })
+             Breeze.Test.click(session, "method")
 
     assert %{implicit_state: %{"method" => {Dropdown, %{open?: true}}}} =
-             Breeze.ChildServer.metadata(pid)
+             Breeze.Test.metadata(session)
 
     assert {:noreply, "method", true} =
-             Breeze.ChildServer.dispatch_input(pid, %{
-               "mouse" => %{
-                 "button" => "left",
-                 "action" => "press",
-                 "x" => x,
-                 "y" => y
-               }
-             })
+             Breeze.Test.click(session, "method")
 
     assert %{implicit_state: %{"method" => {Dropdown, %{open?: false}}}} =
-             Breeze.ChildServer.metadata(pid)
+             Breeze.Test.metadata(session)
   end
 
   test "clicking a rendered item selects it and closes the dropdown" do
-    terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = start_child_server(view: DropdownView, terminal: terminal)
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    trigger_bounds = :sys.get_state(pid).mouse_targets["method"]
-    trigger_x = div(trigger_bounds.left + trigger_bounds.right, 2)
-    trigger_y = div(trigger_bounds.top + trigger_bounds.bottom, 2)
+    session = Breeze.Test.start!(DropdownView, size: {40, 12})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
     assert {:noreply, "method", true} =
-             Breeze.ChildServer.dispatch_input(pid, %{
-               "mouse" => %{
-                 "button" => "left",
-                 "action" => "press",
-                 "x" => trigger_x,
-                 "y" => trigger_y
-               }
-             })
-
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    item_bounds = :sys.get_state(pid).mouse_targets["method-item-2"]
-    item_x = div(item_bounds.left + item_bounds.right, 2)
-    item_y = div(item_bounds.top + item_bounds.bottom, 2)
+             Breeze.Test.click(session, "method")
 
     assert {:noreply, "method", true} =
-             Breeze.ChildServer.dispatch_input(pid, %{
-               "mouse" => %{
-                 "button" => "left",
-                 "action" => "press",
-                 "x" => item_x,
-                 "y" => item_y
-               }
-             })
+             Breeze.Test.click(session, "method-item-2")
 
     assert %{
              implicit_state: %{
                "method" => {Dropdown, %{open?: false, selected: "PUT", selected_index: 2}}
              }
-           } = Breeze.ChildServer.metadata(pid)
+           } = Breeze.Test.metadata(session)
   end
 
   test "dropdown items win mouse hit testing over smaller covered controls" do
@@ -394,60 +350,55 @@ defmodule Breeze.Implicit.DropdownTest do
   end
 
   test "opened dropdown renders its menu items" do
-    terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = start_child_server(view: DropdownView, terminal: terminal)
+    session = Breeze.Test.start!(DropdownView, size: {40, 12})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert {:noreply, "method", true} = Breeze.ChildServer.dispatch_input(pid, "\x14")
+    _ = Breeze.Test.render!(session)
+    assert {:noreply, "method", true} = Breeze.Test.input(session, "\x14")
 
-    state = :sys.get_state(pid)
+    content = Breeze.Test.render_text!(session)
 
-    assert {:ok, _acc, box} =
-             Breeze.ChildServer.render(pid, focused: state.focused, terminal: terminal)
-
-    assert box.content =~ "GET"
-    assert box.content =~ "POST"
-    assert box.content =~ "PUT"
-    assert box.content =~ "▲"
+    assert content =~ "GET"
+    assert content =~ "POST"
+    assert content =~ "PUT"
+    assert content =~ "▲"
   end
 
   test "closed dropdown renders the closed indicator without animate" do
-    terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = start_child_server(view: DropdownView, terminal: terminal)
+    session = Breeze.Test.start!(DropdownView, size: {40, 12})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, box} = Breeze.ChildServer.render(pid, terminal: terminal)
+    content = Breeze.Test.render_text!(session)
 
-    assert box.content |> String.graphemes() |> Enum.count(&(&1 == "▼")) == 1
-    assert box.content =~ "▼"
-    refute box.content =~ "▲"
+    assert content |> String.graphemes() |> Enum.count(&(&1 == "▼")) == 1
+    assert content =~ "▼"
+    refute content =~ "▲"
   end
 
   test "opened dropdown still renders inside a grid row" do
-    terminal = %Termite.Terminal{size: %{width: 40, height: 12}}
-    {:ok, pid} = start_child_server(view: GridDropdownView, terminal: terminal)
+    session = Breeze.Test.start!(GridDropdownView, size: {40, 12})
+    on_exit(fn -> Breeze.Test.stop(session) end)
 
-    assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
-    assert {:noreply, "method", true} = Breeze.ChildServer.dispatch_input(pid, "\x14")
+    _ = Breeze.Test.render!(session)
+    assert {:noreply, "method", true} = Breeze.Test.input(session, "\x14")
 
-    state = :sys.get_state(pid)
+    content = Breeze.Test.render_text!(session)
 
-    assert {:ok, _acc, box} =
-             Breeze.ChildServer.render(pid, focused: state.focused, terminal: terminal)
-
-    assert box.content =~ "GET"
-    assert box.content =~ "POST"
-    assert box.content =~ "PUT"
+    assert content =~ "GET"
+    assert content =~ "POST"
+    assert content =~ "PUT"
   end
 
   test "opening a dropdown does not expand its containing panel" do
     session = Breeze.Test.start!(PanelDropdownView, size: {80, 24})
     on_exit(fn -> Breeze.Test.stop(session) end)
 
-    Breeze.Test.render!(session)
-    closed_elements = :sys.get_state(session.pid).elements
+    closed_panel = Breeze.Test.element!(session, "panel")
+    closed_footer = Breeze.Test.element!(session, "footer")
     Breeze.Test.input(session, "Enter")
-    opened = Breeze.Test.render!(session)
-    opened_elements = :sys.get_state(session.pid).elements
+    opened = Breeze.Test.render_text!(session)
+    opened_panel = Breeze.Test.element!(session, "panel")
+    opened_footer = Breeze.Test.element!(session, "footer")
 
     assert opened =~ "Counter"
     assert opened =~ "List"
@@ -458,7 +409,7 @@ defmodule Breeze.Implicit.DropdownTest do
     theme_row = opened |> String.split("\n") |> Enum.find(&String.contains?(&1, "Theme"))
     assert theme_row =~ "List"
     refute theme_row =~ "Gruvbox"
-    assert opened_elements["panel"].height == closed_elements["panel"].height
-    assert opened_elements["footer"].top == closed_elements["footer"].top
+    assert opened_panel.height == closed_panel.height
+    assert opened_footer.top == closed_footer.top
   end
 end
