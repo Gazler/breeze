@@ -1,4 +1,47 @@
+## [0.5.1] - 2026-08-27
+
+### Features
+
+- *(Breeze.Server)* Stop sessions without halting the VM ([bb574c0](https://github.com/gazler/breeze/commit/bb574c0dc8a031a3a8e3292b044c72961c867a27))
+- *(Breeze.Blocks)* Add separate header_align to table ([7f38860](https://github.com/gazler/breeze/commit/7f388603ef1fd6d98a19f75538a21a6951bfe32b))
+- *(Breeze.InputRouter)* Support arbitrary adapter events ([9e2c5b6](https://github.com/gazler/breeze/commit/9e2c5b6ff9121a32a3d4bbaf65a7169917b16e7d))
+- *(Breeze.Blocks)* Add a spinner component ([b2328a6](https://github.com/gazler/breeze/commit/b2328a66214cf685901a0e944a9254fac2575b87))
+- *(Breeze.Style)* Support border-edge for lining up borders ([9cece40](https://github.com/gazler/breeze/commit/9cece40869e0529dac3a848f4294e39cb4245702))
+- *(Breeze.Blocks)* Add bordered button variant ([bd9896e](https://github.com/gazler/breeze/commit/bd9896ef6a3c4b53ae36c122602071bc41c54b1a))
+- *(Breeze.Theme)* Ensure there is enough contrast for system theme ([d121a53](https://github.com/gazler/breeze/commit/d121a530867be3861698bb7657378937c4f6026a))
+- *(Breeze.Test)* Add new functions to the test module ([1adad27](https://github.com/gazler/breeze/commit/1adad271bb52497f1382d5fe090138c2180cd8bb))
+
+### Bug Fixes
+
+- *(Breeze.Server)* Ensure timers are restored on hot reload ([c86eb2a](https://github.com/gazler/breeze/commit/c86eb2af0f9eab78832d002dd5bf9ad35bdafb76))
+- *(Breeze.Server)* Restore terimal state on startup fail ([c7e2888](https://github.com/gazler/breeze/commit/c7e28889b79223d31d6d406cd62960e3748555ec))
+- *(Breeze.Runtime)* Preserve live state on replacement failure ([bf7fe35](https://github.com/gazler/breeze/commit/bf7fe35bc2295390fd5f933c89e26bd279d35836))
+- *(Breeze.Example)* Return when the session ends ([c309f3c](https://github.com/gazler/breeze/commit/c309f3c360d7657df8b14b897ad15bef3d08c1b1))
+- *(Breeze.Server)* Track screen dimming for live children ([d2f122e](https://github.com/gazler/breeze/commit/d2f122e42f0bfd898ca82fe8ab658065540708bb))
+- *(Breeze.Blocks)* Ensure checkbox response to enter ([3a76991](https://github.com/gazler/breeze/commit/3a7699178bcfadca01ae258eb3ba8b73964b5e7c))
+
+### Refactor
+
+- *(Breeze.Server)* Separate session and runtime pids ([bb95a55](https://github.com/gazler/breeze/commit/bb95a55ddd26efe21644e152eadf52086586bda4))
+
+### Documentation
+
+- Update README to 0.5.0 ([6c587ea](https://github.com/gazler/breeze/commit/6c587eab0b79314f12d97f21877e1c002f78b5c8))
+- Document os_mon ([aba4c7e](https://github.com/gazler/breeze/commit/aba4c7e7deee182b5448ef307aac47b574894086))
+- Update to remove halt_fun ([f656b44](https://github.com/gazler/breeze/commit/f656b4477bd5a0b5d3214be6502aefe61241a672))
+- *(components)* Add ex_doc components for checkbox and spinner ([ecdd6f1](https://github.com/gazler/breeze/commit/ecdd6f19a66dd2957cdc0155d712e41c3647aff9))
+
+### Testing
+
+- *(Breeze.InputRouter)* Use refute_received to speed up tests ([b585e28](https://github.com/gazler/breeze/commit/b585e2873b92770519a2b12785f9fbe87c4b6571))
 ## [0.5.0] - 2026-07-30
+
+### Breaking Changes
+
+- *(Breeze.Implicit)* Require tagged init results — Breeze.Implicit.init/3 implementations must now return ([274844f](https://github.com/gazler/breeze/commit/274844fe7dda2e28fc2f79300febbe2b665f6c91))
+- Standardize mouse event payloads — Mouse event handlers must match string keys and string
+button/action values. The modifiers list is replaced by optional
+shiftKey, altKey, and ctrlKey boolean fields. ([b1b948d](https://github.com/gazler/breeze/commit/b1b948d0d500755f6bc7911002ddaaf715d4348c))
 
 ### Features
 
@@ -11,7 +54,6 @@
 - *(Breeze.Implicit)* Make key batching opt-in ([fe4ed94](https://github.com/gazler/breeze/commit/fe4ed94ac0d504e5ae5ba8d3249b7e553966aa64))
 - *(Breeze.Server.Error)* Support hard restarts with "R" ([74f5ac1](https://github.com/gazler/breeze/commit/74f5ac1ec57eac4f138028b13fa07f27147f1bc7))
 - *(Breeze.ChildServer)* Pass focus target on click events ([0ad953f](https://github.com/gazler/breeze/commit/0ad953f3df2f244178704afb21bec35f32508dc3))
-- [**breaking**] Standardize mouse event payloads ([b1b948d](https://github.com/gazler/breeze/commit/b1b948d0d500755f6bc7911002ddaaf715d4348c))
 - *(Breeze.Style)* Support tailwind style classes ([80e10ba](https://github.com/gazler/breeze/commit/80e10ba1e386aae617a6c3fea09b1e7444c50a82))
 - *(Breeze.Style)* Support max-height utilities ([a179c48](https://github.com/gazler/breeze/commit/a179c48469a171d1598e4010a7b10f38feac6e21))
 - *(Breeze.Storybook)* Add mix task for running storybook ([4eaa052](https://github.com/gazler/breeze/commit/4eaa052e8f240bfbaa75817ac36193f9f7ebb5ef))
@@ -46,7 +88,6 @@
 ### Refactor
 
 - *(Breeze.Theme)* Move all of the theme probe functions out ([8088d14](https://github.com/gazler/breeze/commit/8088d141f004badd587ad161688700b26382f276))
-- *(Breeze.Implicit)* [**breaking**] Require tagged init results ([274844f](https://github.com/gazler/breeze/commit/274844fe7dda2e28fc2f79300febbe2b665f6c91))
 - *(Breeze.Telemetry)* Wrap :telemetry to allow disabling ([4ccf506](https://github.com/gazler/breeze/commit/4ccf506b365d10a27e90a222f8348c74ecc005fb))
 - *(Breeze.View)* Separate components from views ([152e92f](https://github.com/gazler/breeze/commit/152e92f3f4052d10c7c226109000656498d3898a))
 
@@ -81,6 +122,19 @@
 - *(Breeze.ChildServer)* Supervise processes and speed up test runs ([ccae31f](https://github.com/gazler/breeze/commit/ccae31f9afd291e473987a19f66ad978e4856d6d))
 ## [0.4.0] - 2026-07-10
 
+### Breaking Changes
+
+- *(Breeze.Implicit)* Require init/3 callback — Breeze.Implicit implementations must implement init/3.
+The init/2 callback and runtime fallback have been removed; migrate
+init(children, last_state) to init(children, root_attrs, last_state). ([dc9bdc0](https://github.com/gazler/breeze/commit/dc9bdc01a45863ce8c84b4415c9a36a21ab75afe))
+- *(Breeze.Router)* Remove routing helpers — Breeze.Router and its routing helpers are no longer
+available. Applications must manage route state and render live views
+directly. ([40646c0](https://github.com/gazler/breeze/commit/40646c0e2abc7659605a2afd43611b4488a8b158))
+- *(Breeze.Theme)* Internalize built-in theme constructors — `Breeze.Theme.Builtin` constructor functions are no
+longer public. Use `Breeze.Theme.builtin/2` instead. ([a654832](https://github.com/gazler/breeze/commit/a65483243e9bf6220059be4b778e2aec3877a100))
+- *(Breeze.Storybook)* Promote the browser to the public entrypoint — Breeze.Storybook.View is replaced by Breeze.Storybook, and
+the previous Breeze.Storybook registry delegate functions are removed. ([2d3ad9c](https://github.com/gazler/breeze/commit/2d3ad9cdb27dff7e3875ab65e6db124673cfde35))
+
 ### Features
 
 - *(Breeze.Server)* Support alt_screen option ([dd01684](https://github.com/gazler/breeze/commit/dd0168472fb500b610dda777b93ef9f753b7aabc))
@@ -104,7 +158,6 @@
 - *(Breeze.View)* Add put_implicit function for setting state ([dd0c9f2](https://github.com/gazler/breeze/commit/dd0c9f22e3185c9bf64f66c662457c278bb1c606))
 - *(Breeze.Server)* Add live child snapshot and input APIs ([8357b3a](https://github.com/gazler/breeze/commit/8357b3a85de07a4914024da2627fe684a70e2709))
 - *(Breeze.Blocks)* Virtualize list and table rendering ([63cd22e](https://github.com/gazler/breeze/commit/63cd22e4b77b79130eac0a6d34878472f489b608))
-- *(Breeze.Implicit)* [**breaking**] Require init/3 callback ([dc9bdc0](https://github.com/gazler/breeze/commit/dc9bdc01a45863ce8c84b4415c9a36a21ab75afe))
 - *(Breeze.Server)* Supervise live views per Breeze session ([6715665](https://github.com/gazler/breeze/commit/6715665264441b5d0c1fa23a45421588918618d6))
 - *(Breeze.Logger)* Add supervised capture and inspector logs ([ee40315](https://github.com/gazler/breeze/commit/ee403153493326809b7ba4e90f16971432bcbf74))
 - *(Breeze.IO)* Naive alias of IO to allow IO.inspect, etc. ([10323c7](https://github.com/gazler/breeze/commit/10323c7e9f7253a2c86b4fb85bae6427017af8f2))
@@ -141,9 +194,6 @@
 
 - *(Breeze.Server)* Split runtime state helpers ([317c7b9](https://github.com/gazler/breeze/commit/317c7b9b8899e1429f9c954d213f7f29bb5f6734))
 - *(Breeze.Storybook)* Remove missing story inventory ([6f3d85d](https://github.com/gazler/breeze/commit/6f3d85d0c5cb4b7a00e45646c09424fec662be89))
-- *(Breeze.Router)* [**breaking**] Remove routing helpers ([40646c0](https://github.com/gazler/breeze/commit/40646c0e2abc7659605a2afd43611b4488a8b158))
-- *(Breeze.Theme)* [**breaking**] Internalize built-in theme constructors ([a654832](https://github.com/gazler/breeze/commit/a65483243e9bf6220059be4b778e2aec3877a100))
-- *(Breeze.Storybook)* [**breaking**] Promote the browser to the public entrypoint ([2d3ad9c](https://github.com/gazler/breeze/commit/2d3ad9cdb27dff7e3875ab65e6db124673cfde35))
 
 ### Documentation
 
