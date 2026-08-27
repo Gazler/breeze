@@ -1,6 +1,6 @@
 # Breeze
 
-Breeze is an experimental TUI library with a LiveView-inspired API, built
+Breeze is a TUI library with a LiveView-inspired API, built
 without third-party NIFs.
 
 Breeze is built on top of [Termite](https://github.com/Gazler/termite) and
@@ -8,12 +8,8 @@ Breeze is built on top of [Termite](https://github.com/Gazler/termite) and
 
 ## Project status
 
-**Breeze is experimental and still evolving.** It provides a practical
-foundation for building terminal interfaces with familiar LiveView-style
-patterns.
-
-The project began as the engine for the Snake game included in the
-[examples directory](https://github.com/Gazler/breeze/tree/master/examples).
+**Breeze is still evolving.** It provides a practical foundation for building
+terminal interfaces with familiar LiveView-style patterns.
 
 ## Features
 
@@ -44,7 +40,7 @@ Add `breeze` to the dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:breeze, "~> 0.5.0"}
+    {:breeze, "~> 0.5.1"}
   ]
 end
 ```
