@@ -405,26 +405,39 @@ defmodule TaskPad.Application do
 
   @impl true
   def start(_type, _args) do
+    breeze_opts = [
+      view: TaskPad.View,
+      theme: Breeze.Theme.builtin(:gruvbox),
+      mouse: true,
+      global_keybindings: [
+        {"F3", "Cycle theme", &Breeze.View.cycle_theme/2},
+        {"F10", "Quit", fn _event, term -> {:stop, term} end}
+      ]
+    ]
+
     children =
       if start_server?() do
         [
-          Supervisor.child_spec(
-            {Breeze.Server,
-             view: TaskPad.View,
-             theme: Breeze.Theme.builtin(:gruvbox),
-             mouse: true,
-             global_keybindings: [
-               {"F3", "Cycle theme", &Breeze.View.cycle_theme/2},
-               {"F10", "Quit", fn _event, term -> {:stop, term} end}
-             ]},
-            restart: :temporary
+          Supervisor.child_spec({Breeze.Server, breeze_opts},
+            restart: :temporary,
+            significant: true
           )
         ]
       else
         []
       end
 
-    Supervisor.start_link(children, strategy: :one_for_one, name: TaskPad.Supervisor)
+    Supervisor.start_link(children,
+      strategy: :one_for_one,
+      auto_shutdown: :any_significant,
+      name: TaskPad.Supervisor
+    )
+  end
+
+  @impl true
+  def stop(_state) do
+    System.stop(0)
+    :ok
   end
 
   defp start_server? do
@@ -450,6 +463,10 @@ The `restart: :temporary` child specification matters for an interactive
 session: returning `{:stop, term}` ends that session normally, restores its
 terminal, and leaves the application VM and sibling children running. A
 permanent child would ask the supervisor to start the terminal session again.
+
+A significant child is used to shutdown the beam when the child is stopped.
+This may not be something we want in all environments, but is useful for 
+local development.
 
 The `start_server?/0` guard keeps the interactive server out of `mix test`,
 where we use `Breeze.Test` to exercise the view directly.
