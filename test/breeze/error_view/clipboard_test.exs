@@ -6,6 +6,7 @@ defmodule Breeze.ErrorView.ClipboardTest do
   test "returns timeout when clipboard command does not finish" do
     assert {:error, :timeout} =
              Clipboard.copy("details",
+               os_type: {:unix, :linux},
                timeout: 10,
                run_fun: fn _name, _path, _text ->
                  Process.sleep(1_000)

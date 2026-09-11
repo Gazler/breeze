@@ -519,6 +519,7 @@ defmodule Breeze.LiveView.CrashTest do
           terminal: terminal,
           internal: [
             clipboard: [
+              os_type: {:unix, :linux},
               timeout: 10,
               find_executable: fn "wl-copy" -> "/usr/bin/wl-copy" end,
               run_fun: fn _name, _path, _text ->
@@ -542,19 +543,13 @@ defmodule Breeze.LiveView.CrashTest do
       drain_terminal_writes()
       send(pid, {reader, {:data, "y"}})
 
-      writes =
-        wait_until(fn ->
-          writes = drain_terminal_writes()
-          output = IO.iodata_to_binary(writes)
+      wait_until(fn -> :sys.get_state(pid).crash_scrollback? end)
 
-          if output =~ "Crash Details" and output =~ "Clipboard copy failed: :timeout" and
-               output =~ "Press q to quit, r to resume, R to hard restart." do
-            output
-          else
-            false
-          end
-        end)
+      writes = IO.iodata_to_binary(drain_terminal_writes())
 
+      assert writes =~ "Crash Details"
+      assert writes =~ "Clipboard copy failed: :timeout"
+      assert writes =~ "Press q to quit, r to resume, R to hard restart."
       assert writes =~ "\e[?1049l"
       assert writes =~ "Breeze Error"
       assert writes =~ "CrashingView"
