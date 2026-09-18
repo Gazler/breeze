@@ -185,6 +185,45 @@ end
 defmodule Breeze.ExampleSnapshot.PostingInitialTest do
   use Breeze.TestSupport.ExampleSnapshotCase, async: true
 
+  test "posting tabs scroll headers and safely switch to panels without scroll targets" do
+    session = Breeze.Test.start!(Posting, size: {120, 24})
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    Breeze.Test.focus(session, "request-header-add")
+
+    for row <- 1..20 do
+      Breeze.Test.event(session, "request_header_name_changed", %{value: "Header-#{row}"})
+      Breeze.Test.event(session, "request_header_value_changed", %{value: "value"})
+      Breeze.Test.input(session, "Enter")
+    end
+
+    Breeze.Test.render!(session)
+    Breeze.Test.focus(session, "request-tabs")
+    Breeze.Test.input(session, "Home")
+    Breeze.Test.input(session, "ArrowDown")
+
+    assert {Breeze.Implicit.Scroll, %{offset_y: 1}} =
+             Breeze.Test.metadata(session).implicit_state["request-tabs-panel-headers"]
+
+    assert Breeze.Test.focused(session) == "request-tabs"
+
+    Breeze.Test.input(session, "ArrowRight")
+    assert Breeze.Test.metadata(session).assigns.request_tab == "body"
+    Breeze.Test.render!(session)
+    Breeze.Test.input(session, "ArrowDown")
+    assert Breeze.Test.focused(session) == "request-tabs"
+
+    Breeze.Test.input(session, "ArrowLeft")
+    Breeze.Test.render!(session)
+    Breeze.Test.input(session, "Home")
+    Breeze.Test.input(session, "PageDown")
+
+    assert {Breeze.Implicit.Scroll, %{offset_y: offset}} =
+             Breeze.Test.metadata(session).implicit_state["request-tabs-panel-headers"]
+
+    assert offset > 0
+  end
+
   test "posting example initial snapshot" do
     session = Breeze.Test.start!(Posting, size: {120, 24})
     on_exit(fn -> Breeze.Test.stop(session) end)

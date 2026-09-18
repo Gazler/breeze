@@ -66,10 +66,13 @@ defmodule Breeze.Implicit.Input do
   end
 
   def handle_event(_, %{"key" => key} = event, state) do
-    TextEditor.insert_key(key, event, state)
+    case TextEditor.insert_key(key, event, state) do
+      {:noreply, state} -> {:noreply, state, consumed: false}
+      reply -> reply
+    end
   end
 
-  def handle_event(_, _, state), do: {:noreply, state}
+  def handle_event(_, _, state), do: {:noreply, state, consumed: false}
 
   def handle_modifiers(:root, _flags, state), do: placeholder_modifiers(state)
 

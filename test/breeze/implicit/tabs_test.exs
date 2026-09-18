@@ -7,25 +7,29 @@ defmodule Breeze.Implicit.TabsTest do
     use Breeze.View
     import Breeze.Blocks
 
-    def mount(_opts, term), do: {:ok, assign(term, selected_tab: "overview")}
+    def mount(opts, term),
+      do:
+        {:ok,
+         assign(term, selected_tab: "overview", variant: Keyword.get(opts, :variant, "default"))}
 
     def render(assigns) do
       ~H"""
       <.tabs
         id="tabs"
         selected={@selected_tab}
+        variant={@variant}
         br-change="select_tab"
         style="width-24 height-6"
         item_class="selected:bg-primary selected:text selected:bold width-10"
       >
         <:tab value="overview" label="Overview">
           <.scroll id="tabs-panel-overview" class="width-full height-full">
-            <box>overview</box>
+            <box :for={row <- 1..20}>overview {row}</box>
           </.scroll>
         </:tab>
         <:tab value="details" label="Details">
           <.scroll id="tabs-panel-details" class="width-full height-full">
-            <box>details</box>
+            <box :for={row <- 1..20}>details {row}</box>
           </.scroll>
         </:tab>
       </.tabs>
@@ -81,11 +85,14 @@ defmodule Breeze.Implicit.TabsTest do
         viewport_width: 20
       }
 
-      assert Tabs.handle_event(nil, %{"key" => "ArrowRight"}, state) == {:noreply, state}
-      assert Tabs.handle_event(nil, %{"key" => "ArrowLeft"}, state) == {:noreply, state}
+      assert Tabs.handle_event(nil, %{"key" => "ArrowRight"}, state) ==
+               {:noreply, state}
+
+      assert Tabs.handle_event(nil, %{"key" => "ArrowLeft"}, state) ==
+               {:noreply, state}
     end
 
-    test "delegates vertical navigation keys to the active panel target" do
+    test "leaves vertical navigation to generic event delegation" do
       state = %{
         values: ["overview", "details"],
         widths: [10, 9],
@@ -93,15 +100,14 @@ defmodule Breeze.Implicit.TabsTest do
         selected_index: 0,
         offset_x: 0,
         viewport_width: 20,
-        delegate_target: "panel-overview",
         target_prefix: "tabs-tab-"
       }
 
       assert Tabs.handle_event(nil, %{"key" => "ArrowDown"}, state) ==
-               {{:delegate, "panel-overview"}, state}
+               {:noreply, state, consumed: false}
 
       assert Tabs.handle_event(nil, %{"key" => "PageDown"}, state) ==
-               {{:delegate, "panel-overview"}, state}
+               {:noreply, state, consumed: false}
     end
 
     test "repeated horizontal navigation computes scroll offsets without crashing" do
@@ -127,7 +133,6 @@ defmodule Breeze.Implicit.TabsTest do
         selected_index: 0,
         offset_x: 0,
         viewport_width: 38,
-        delegate_target: "panel-overview",
         target_prefix: "tabs-tab-"
       }
 
@@ -151,7 +156,6 @@ defmodule Breeze.Implicit.TabsTest do
         selected_index: 0,
         offset_x: 0,
         viewport_width: 20,
-        delegate_target: "panel-overview",
         target_prefix: "tabs-tab-"
       }
 
@@ -167,6 +171,57 @@ defmodule Breeze.Implicit.TabsTest do
 
       assert next_state.selected == "details"
       assert next_state.selected_index == 1
+    end
+
+    for variant <- ["default", "underline"] do
+      test "#{variant} tabs delegate scrolling to the current panel without moving focus" do
+        session =
+          Breeze.Test.start!(ClickableTabsView,
+            size: {30, 10},
+            start_opts: [variant: unquote(variant)]
+          )
+
+        on_exit(fn -> Breeze.Test.stop(session) end)
+        Breeze.Test.focus(session, "tabs")
+
+        for {down, up} <- [
+              {"ArrowDown", "ArrowUp"},
+              {"j", "k"},
+              {"PageDown", "PageUp"},
+              {"End", "Home"}
+            ] do
+          Breeze.Test.input(session, down)
+
+          assert {Breeze.Implicit.Scroll, %{offset_y: offset}} =
+                   Breeze.Test.metadata(session).implicit_state["tabs-panel-overview"]
+
+          assert offset > 0
+          Breeze.Test.input(session, up)
+
+          assert {Breeze.Implicit.Scroll, %{offset_y: 0}} =
+                   Breeze.Test.metadata(session).implicit_state["tabs-panel-overview"]
+
+          assert Breeze.Test.focused(session) == "tabs"
+        end
+
+        Breeze.Test.input(session, "ArrowRight")
+        assert Breeze.Test.metadata(session).assigns.selected_tab == "details"
+        Breeze.Test.render!(session)
+        Breeze.Test.input(session, "ArrowDown")
+
+        assert {Breeze.Implicit.Scroll, %{offset_y: 1}} =
+                 Breeze.Test.metadata(session).implicit_state["tabs-panel-details"]
+
+        assert Breeze.Test.focused(session) == "tabs"
+
+        Breeze.Test.input(session, "ArrowLeft")
+        assert Breeze.Test.metadata(session).assigns.selected_tab == "overview"
+        Breeze.Test.render!(session)
+        Breeze.Test.input(session, "ArrowDown")
+
+        assert {Breeze.Implicit.Scroll, %{offset_y: 1}} =
+                 Breeze.Test.metadata(session).implicit_state["tabs-panel-overview"]
+      end
     end
 
     test "clicking a rendered tab label updates the selected tab" do

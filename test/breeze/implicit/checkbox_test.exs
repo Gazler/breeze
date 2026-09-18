@@ -117,8 +117,12 @@ defmodule Breeze.Implicit.CheckboxTest do
       state = %{checked: false, disabled: true}
       mouse = %{"mouse" => %{"button" => "left", "action" => "press"}}
 
-      assert {:noreply, ^state} = Checkbox.handle_event(:input, %{"key" => " "}, state)
-      assert {:noreply, ^state} = Checkbox.handle_event(:input, %{"key" => "Enter"}, state)
+      assert {:noreply, ^state} =
+               Checkbox.handle_event(:input, %{"key" => " "}, state)
+
+      assert {:noreply, ^state} =
+               Checkbox.handle_event(:input, %{"key" => "Enter"}, state)
+
       assert {:noreply, ^state} = Checkbox.handle_event(:input, mouse, state)
     end
   end

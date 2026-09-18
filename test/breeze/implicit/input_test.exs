@@ -432,12 +432,12 @@ defmodule Breeze.Implicit.InputTest do
   end
 
   test "control-newline keys are ignored" do
-    assert {:noreply, %{value: "hello", cursor: 2}} =
+    assert {:noreply, %{value: "hello", cursor: 2}, consumed: false} =
              Input.handle_event(nil, %{"key" => "\n"}, %{value: "hello", cursor: 2})
   end
 
   test "non-binary keys are ignored" do
-    assert {:noreply, %{value: "hello", cursor: 2}} =
+    assert {:noreply, %{value: "hello", cursor: 2}, consumed: false} =
              Input.handle_event(nil, %{"key" => %{"key" => "F2"}}, %{value: "hello", cursor: 2})
   end
 
@@ -462,7 +462,7 @@ defmodule Breeze.Implicit.InputTest do
   end
 
   test "control characters are not treated as insertable input" do
-    assert {:noreply, %{value: "hello", cursor: 2}} =
+    assert {:noreply, %{value: "hello", cursor: 2}, consumed: false} =
              Input.handle_event(nil, %{"key" => "\x01"}, %{value: "hello", cursor: 2})
   end
 

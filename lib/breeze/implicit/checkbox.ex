@@ -25,7 +25,7 @@ defmodule Breeze.Implicit.Checkbox do
   def handle_event(_, %{"mouse" => %{"button" => "left", "action" => "press"}}, state),
     do: toggle(state)
 
-  def handle_event(_, _, state), do: {:noreply, state}
+  def handle_event(_, _, state), do: {:noreply, state, consumed: false}
 
   def handle_modifiers(:root, _flags, state) do
     state

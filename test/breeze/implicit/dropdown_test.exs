@@ -151,7 +151,9 @@ defmodule Breeze.Implicit.DropdownTest do
 
     {:ok, state} = Dropdown.init(children, %{:"dropdown-selected" => "POST"}, %{})
 
-    assert {:noreply, open_state} = Dropdown.handle_event(nil, %{"key" => "Enter"}, state)
+    assert {:noreply, open_state} =
+             Dropdown.handle_event(nil, %{"key" => "Enter"}, state)
+
     assert open_state.open? == true
     assert open_state.highlighted_index == 1
 
@@ -277,7 +279,9 @@ defmodule Breeze.Implicit.DropdownTest do
     ]
 
     {:ok, state} = Dropdown.init(children, %{:"dropdown-selected" => "POST"}, %{})
-    assert {:noreply, ^state} = Dropdown.handle_event(nil, %{"key" => "\x14"}, state)
+
+    assert {:noreply, ^state} =
+             Dropdown.handle_event(nil, %{"key" => "\x14"}, state)
   end
 
   test "clicking the rendered trigger opens the dropdown" do

@@ -43,7 +43,6 @@ defmodule Breeze.Implicit.Tabs do
        selected_index: selected_index,
        offset_x: offset_x,
        viewport_width: viewport_width,
-       delegate_target: Map.get(root_attrs, :"tab-delegate"),
        target_prefix: root_attrs |> Map.get(:id, "") |> Kernel.<>("-tab-")
      }}
   end
@@ -70,12 +69,6 @@ defmodule Breeze.Implicit.Tabs do
     emit_change(%{prev_state | offset_x: compute_offset_x(prev_state)})
   end
 
-  def handle_event(_, %{"key" => key}, %{delegate_target: target} = state)
-      when key in ["ArrowDown", "ArrowUp", "j", "k", "PageDown", "PageUp", "Home", "End"] and
-             is_binary(target) do
-    {{:delegate, target}, state}
-  end
-
   def handle_event(
         _,
         %{"mouse" => %{"button" => "left", "action" => "press"}, "target" => target},
@@ -84,7 +77,7 @@ defmodule Breeze.Implicit.Tabs do
       when is_binary(target) do
     case clicked_value(state, target) do
       nil ->
-        {:noreply, state}
+        {:noreply, state, consumed: false}
 
       value ->
         index = Enum.find_index(state.values, &(&1 == value)) || state.selected_index
@@ -93,7 +86,7 @@ defmodule Breeze.Implicit.Tabs do
     end
   end
 
-  def handle_event(_, _, state), do: {:noreply, state}
+  def handle_event(_, _, state), do: {:noreply, state, consumed: false}
 
   def handle_modifiers(:root, _flags, _state), do: []
 

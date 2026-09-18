@@ -1144,7 +1144,7 @@ defmodule Breeze.Blocks do
       id={@id}
       implicit={Breeze.Implicit.Tabs}
       focusable
-      tab-delegate={if @panel && @active do
+      br-delegate-events={if @panel && @active do
       "#{@id}-panel-#{@active.value}"
     end}
       tab-selected={@active.value}
@@ -1183,7 +1183,7 @@ defmodule Breeze.Blocks do
       id={@id}
       implicit={Breeze.Implicit.Tabs}
       focusable
-      tab-delegate={if @panel && @active do
+      br-delegate-events={if @panel && @active do
       "#{@id}-panel-#{@active.value}"
     end}
       tab-selected={@active.value}

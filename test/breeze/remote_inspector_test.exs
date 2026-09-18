@@ -972,7 +972,10 @@ defmodule Breeze.RemoteInspectorTest do
     events = Breeze.RenderState.bootstrap(%Breeze.Term{}, acc).events
 
     assert events["remote-inspector-tabs"] ==
-             %{change: {:breeze_remote_inspector, "tab_changed"}}
+             %{
+               change: {:breeze_remote_inspector, "tab_changed"},
+               delegate_events: "remote-inspector-tabs-panel-tree"
+             }
 
     assert events["remote-inspector-render-tree"] ==
              %{change: {:breeze_remote_inspector, "render_tree_changed"}}

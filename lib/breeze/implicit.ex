@@ -47,13 +47,41 @@ defmodule Breeze.Implicit do
   the target's `Breeze.Viewport` to the payload as `"element"` when one is
   available.
 
-  Every reply stores the returned state. `{:noreply, state}` stops there.
+  Every reply stores the returned state. Without an explicit `consumed` option,
+  a `:noreply` reply consumes the event when its state changes; otherwise the event
+  continues to the view. This preserves existing handler behavior.
+  `consumed: true` explicitly stops routing. `consumed: false` opts into fallback
+  delegation or view handling, regardless of whether the returned state changes.
+
+      # Recognized navigation at a boundary still belongs to this control.
+      def handle_event(_, %{"key" => "ArrowDown"}, state),
+        do: {:noreply, state, consumed: true}
+
+      # Unknown events may be delegated or passed to the view.
+      def handle_event(_, _, state), do: {:noreply, state, consumed: false}
+
   `{{:change, event}, state}` and `{{:submit, event}, state}` route `event` through
   the root element's `br-change` or `br-submit` handler. The event payload may
   be any term; Breeze's built-in implicits currently use atom-keyed maps. A
   change reply may also contain `focus: id` (or `focus: nil`) as its third
   element. Finally, `{{:delegate, id}, state}` sends the original input event to
   another implicit.
+
+  Use `br-delegate-events="target-id"` on an element to forward events its implicit
+  does not consume to another element, without moving focus. Change and submit
+  replies always consume the event. Only explicit `consumed: false` replies allow
+  fallback delegation from an implicit, even if the returned state has changed.
+  Delegation runs before the view's `handle_event/3`. If no implicit consumes the
+  event, it falls through to the view. The `consumed` option applies to implicit
+  handlers, not view callbacks.
+  The target receives its own viewport; missing targets and delegation cycles stop
+  safely. Elements without an implicit can also declare a delegation target.
+
+      <.checkbox id="option" br-delegate-events="panel">Option</.checkbox>
+
+  Currently, checkbox, input, and tabs opt into fallback handling for unhandled
+  events. Other built-in controls retain state-based consumption without opting
+  into delegation.
 
   ## Render modifiers
 
@@ -128,6 +156,7 @@ defmodule Breeze.Implicit do
   @typedoc "A valid return value from `c:handle_event/3`."
   @type event_reply ::
           {:noreply, state()}
+          | {:noreply, state(), [{:consumed, boolean()}]}
           | {{:change, event_payload()}, state()}
           | {{:change, event_payload()}, state(), [event_option()]}
           | {{:submit, event_payload()}, state()}

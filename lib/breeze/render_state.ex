@@ -84,6 +84,7 @@ defmodule Breeze.RenderState do
           events
           |> maybe_put_event(id, :change, change)
           |> maybe_put_event(id, :submit, submit)
+          |> maybe_put_event(id, :delegate_events, Keyword.get(elem, :"br-delegate-events"))
 
         {next_implicit_state, next_events}
       end)
@@ -274,8 +275,18 @@ defmodule Breeze.RenderState do
                   MapSet.put(visited, id)
                 )
 
+              {:noreply, val, opts} when is_list(opts) ->
+                term = put_implicit_state(term, id, mod, val)
+
+                case Keyword.fetch(opts, :consumed) do
+                  {:ok, false} -> delegate_event(term, id, payload, route_change_fun, visited)
+                  {:ok, true} -> {:noreply, true, term}
+                  :error -> {:noreply, val != implicit, term}
+                end
+
               {:noreply, val} ->
                 term = put_implicit_state(term, id, mod, val)
+
                 {:noreply, val != implicit, term}
             end
 
@@ -291,9 +302,25 @@ defmodule Breeze.RenderState do
                 )
 
               _ ->
-                {:noreply, false, term}
+                delegate_event(term, id, payload, route_change_fun, visited)
             end
         end
+    end
+  end
+
+  defp delegate_event(term, id, payload, route_change_fun, visited) do
+    case get_in(term.events, [id, :delegate_events]) do
+      target when is_binary(target) and target != "" ->
+        do_dispatch_implicit_event(
+          term,
+          target,
+          payload,
+          route_change_fun,
+          MapSet.put(visited, id)
+        )
+
+      _ ->
+        {:noreply, false, term}
     end
   end
 
