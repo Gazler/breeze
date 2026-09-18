@@ -101,6 +101,9 @@ defmodule Breeze.ErrorView do
       {:key, key} when key in ["y", "Y", "c", "C"] ->
         {:copy_details, crash}
 
+      {:key, key} when key in ["p", "P"] ->
+        {:print_details, crash}
+
       {:key, key} when key in ["\t", "ArrowRight", "l"] ->
         {:update, %{crash | focused: rotate_focus(crash.focused, 1)}}
 
@@ -157,7 +160,12 @@ defmodule Breeze.ErrorView do
           </box>
         </box>
       </box>
-      <box :for={line <- @footer_lines} style={"width-#{@outer_width - 2}"}>{line}</box>
+      <box
+        :for={line <- footer_lines(@outer_width - 2, @footer_height, @crash, @breeze.clipboard.supported)}
+        style={"width-#{@outer_width - 2}"}
+      >
+        {line}
+      </box>
     </box>
     """
   end
@@ -416,15 +424,22 @@ defmodule Breeze.ErrorView do
     |> pad_lines(width, height)
   end
 
-  defp footer_lines(_width, 0, _crash), do: []
+  defp footer_lines(width, height, crash, supported \\ false)
 
-  defp footer_lines(width, height, crash) do
+  defp footer_lines(_width, 0, _crash, _supported), do: []
+
+  defp footer_lines(width, height, crash, supported) do
     default =
-      "Tab panes. Arrows/j/k. y copies details. r resumes. R hard restarts. q quits."
+      "Tab panes. y copies details. p prints. r resumes. R hard restarts. q quits."
 
-    [
-      crash[:notice] || default
-    ]
+    notice =
+      case crash[:notice] do
+        :clipboard_sent when supported -> "Sent crash details to terminal clipboard."
+        :clipboard_sent -> "Copy attempted; OSC 52 support unknown. Press p to print details."
+        notice -> notice || default
+      end
+
+    [notice]
     |> pad_lines(width, height)
   end
 

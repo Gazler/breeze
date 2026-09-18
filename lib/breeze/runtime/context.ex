@@ -15,7 +15,7 @@ defmodule Breeze.Runtime.Context do
 
   @doc false
   def new(server_state, metadata) do
-    screen = server_state.terminal.size || %{width: 0, height: 0}
+    screen = server_state.terminal_state.terminal.size || %{width: 0, height: 0}
 
     metadata =
       metadata

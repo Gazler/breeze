@@ -14,12 +14,15 @@ defmodule Breeze.Server.StateReplacement do
 
     candidate =
       state
-      |> Map.put(:terminal, staging_terminal(state.terminal))
+      |> put_in(
+        [Access.key(:terminal_state), Access.key(:terminal)],
+        staging_terminal(state.terminal_state.terminal)
+      )
       |> Map.put(:view_pid, nil)
       |> Map.put(:start_opts, runtime_state.start_opts || [])
       |> Map.put(:children, %{})
       |> Map.put(:crash, nil)
-      |> Map.put(:crash_scrollback?, false)
+      |> put_in([Access.key(:terminal_state), Access.key(:crash_scrollback?)], false)
       |> Input.reset_pipeline(global_keybindings: global_keybindings)
       |> Map.put(:frame, %State.Frame{
         last_render_at: System.monotonic_time(:millisecond),
@@ -33,7 +36,7 @@ defmodule Breeze.Server.StateReplacement do
       })
 
     context = %{
-      terminal: state.terminal,
+      terminal: state.terminal_state.terminal,
       hooks: state.rendered.runtime_hooks,
       debug: state.debug,
       inspector_state: state.inspector_state,
@@ -70,7 +73,7 @@ defmodule Breeze.Server.StateReplacement do
 
         {:ok,
          candidate
-         |> Map.put(:terminal, context.terminal)
+         |> put_in([Access.key(:terminal_state), Access.key(:terminal)], context.terminal)
          |> Map.put(:debug, debug)
          |> Map.put(:inspector_state, inspector_state)
          |> Map.put(:frame, frame)
@@ -164,7 +167,8 @@ defmodule Breeze.Server.StateReplacement do
       assigns: assigns,
       runtime_state: runtime_state,
       server: self(),
-      terminal: state.terminal,
+      terminal: state.terminal_state.terminal,
+      clipboard: state.terminal_state.clipboard.capabilities,
       theme: state.theme,
       apply_theme_defaults?: state.apply_theme_defaults?,
       process_flags: state.child_process_flags || [],

@@ -22,6 +22,7 @@ defmodule Breeze.Term do
     last_render_at: nil,
     last_interaction_at: nil,
     assigns: %{},
+    clipboard: %{osc52: :unknown, supported: false},
     external_assigns: %{},
     global_keybindings: [],
     local_keybindings: [],

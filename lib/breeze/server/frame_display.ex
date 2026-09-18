@@ -96,8 +96,8 @@ defmodule Breeze.Server.FrameDisplay do
 
   def pause_current(state) do
     display = %{
-      width: Map.get(state.terminal.size, :width, 0),
-      height: Map.get(state.terminal.size, :height, 0),
+      width: Map.get(state.terminal_state.terminal.size, :width, 0),
+      height: Map.get(state.terminal_state.terminal.size, :height, 0),
       lines: state.frame.last_lines || [],
       overlays: state.frame.last_overlays || []
     }
@@ -126,7 +126,7 @@ defmodule Breeze.Server.FrameDisplay do
   def resolve(
         %{
           frame: %{display: %{lines: lines} = display},
-          terminal: %{size: %{width: width, height: height}}
+          terminal_state: %{terminal: %{size: %{width: width, height: height}}}
         },
         _live_lines,
         _live_overlays

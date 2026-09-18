@@ -409,6 +409,58 @@ defmodule Breeze.LiveView.CrashTest do
     end)
   end
 
+  test "crash screen sends OSC 52 through its terminal for both yank keys" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+      reader = terminal.reader
+      {:ok, pid} = start_app_server(view: CrashingView, terminal: terminal)
+
+      send(pid, {reader, {:data, "c"}})
+      wait_until(fn -> :sys.get_state(pid).crash end)
+
+      for {support, notice} <- [
+            {:unknown, "Copy attempted; OSC 52 support unknown. Press p to print details."},
+            {:supported, "Sent crash details to terminal clipboard."}
+          ],
+          key <- ["y", "Y"] do
+        send(
+          pid,
+          {:breeze_clipboard, reader, %{osc52: support, supported: support == :supported}}
+        )
+
+        wait_until(fn ->
+          :sys.get_state(pid).terminal_state.clipboard.capabilities.osc52 == support
+        end)
+
+        previous_ref = Map.get(:sys.get_state(pid).crash, :notice_ref)
+        drain_terminal_writes()
+        send(pid, {reader, {:data, key}})
+
+        wait_until(fn ->
+          crash = :sys.get_state(pid).crash
+
+          crash[:notice_ref] != previous_ref &&
+            crash[:notice] == :clipboard_sent
+        end)
+
+        assert :sys.get_state(pid).frame.base_output =~ notice
+
+        writes = IO.iodata_to_binary(drain_terminal_writes())
+        assert [_before, payload] = String.split(writes, "\e]52;c;", parts: 2)
+        [encoded, _after] = String.split(payload, "\e\\", parts: 2)
+        details = Base.decode64!(encoded)
+        assert details =~ "Crash Details"
+        assert details =~ "CrashingView"
+        assert details =~ "RuntimeError"
+        assert details =~ "boom"
+        refute :sys.get_state(pid).terminal_state.crash_scrollback?
+        refute :sys.get_state(pid).frame.base_output =~ "\e]52;"
+      end
+
+      stop_gen_server(pid)
+    end)
+  end
+
   test "crash screen copies plain details when clipboard is available" do
     parent = self()
 
@@ -508,6 +560,147 @@ defmodule Breeze.LiveView.CrashTest do
     end)
   end
 
+  for {print_key, render_errors} <- [
+        {"p", []},
+        {"P", []},
+        {"x",
+         [
+           view: CustomErrorView,
+           keybindings: [{"x", "Print", :print_details}, {"r", "Resume", :restart}]
+         ]}
+      ] do
+    test "crash screen prints details explicitly with #{print_key}" do
+      capture_log(fn ->
+        terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+        reader = terminal.reader
+
+        {:ok, pid} =
+          start_app_server(
+            view: CrashingView,
+            terminal: terminal,
+            render_errors: unquote(Macro.escape(render_errors))
+          )
+
+        send(pid, {reader, {:data, "c"}})
+        wait_until(fn -> :sys.get_state(pid).crash end)
+        drain_terminal_writes()
+        send(pid, {reader, {:data, unquote(print_key)}})
+        wait_until(fn -> :sys.get_state(pid).terminal_state.crash_scrollback? end)
+
+        writes = IO.iodata_to_binary(drain_terminal_writes())
+        assert writes =~ "Crash Details"
+        assert writes =~ "RuntimeError"
+        assert writes =~ "\e[?1049l"
+        refute writes =~ "\e]52;"
+        refute :sys.get_state(pid).terminal_state.alt_screen_active?
+
+        # Neither navigation, resize nor an expiring notice should overwrite the text.
+        ref = make_ref()
+
+        :sys.replace_state(pid, fn state ->
+          %{state | crash: Map.merge(state.crash, %{notice: "Copied", notice_ref: ref})}
+        end)
+
+        send(pid, {reader, {:data, "j"}})
+        send(pid, {reader, {:signal, :winch}})
+        send(pid, {:clear_crash_notice, ref})
+        wait_until(fn -> is_nil(:sys.get_state(pid).crash[:notice]) end)
+        refute_receive {:terminal_write, _}, 100
+
+        send(pid, {reader, {:data, "r"}})
+        wait_until(fn -> is_nil(:sys.get_state(pid).crash) end)
+        state = :sys.get_state(pid)
+        assert state.terminal_state.alt_screen_active?
+        refute state.terminal_state.crash_scrollback?
+        assert IO.iodata_to_binary(drain_terminal_writes()) =~ "\e[?1049h"
+        stop_gen_server(pid)
+      end)
+    end
+  end
+
+  for alt_screen <- [true, false], exit_via <- [:key, :stop, :at_exit] do
+    test "quitting via #{exit_via} preserves printed crash details with alt_screen=#{alt_screen}" do
+      capture_log(fn ->
+        terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+        reader = terminal.reader
+        parent = self()
+
+        {:ok, router} =
+          Breeze.TestSupport.ProcessHelpers.start_input_router(
+            view: CrashingView,
+            terminal: terminal,
+            alt_screen: unquote(alt_screen),
+            internal: [
+              at_exit_register: fn callback ->
+                send(parent, {:at_exit_callback, callback})
+                :ok
+              end
+            ]
+          )
+
+        assert_receive {:at_exit_callback, callback}
+        pid = Breeze.Server.runtime_pid(router)
+        send(router, {reader, {:data, "c"}})
+        wait_until(fn -> :sys.get_state(pid).crash end)
+        send(router, {reader, {:data, "p"}})
+        wait_until(fn -> :sys.get_state(pid).terminal_state.crash_scrollback? end)
+        assert IO.iodata_to_binary(drain_terminal_writes()) =~ "Crash Details"
+
+        monitor = Process.monitor(router)
+
+        case unquote(exit_via) do
+          :key ->
+            send(router, {reader, {:data, "q"}})
+
+          :stop ->
+            Breeze.Server.stop(router)
+
+          :at_exit ->
+            assert :ok = callback.(0)
+            Breeze.Server.stop(router)
+        end
+
+        assert_receive {:DOWN, ^monitor, :process, ^router, :normal}
+        assert :ok = callback.(0)
+
+        writes = IO.iodata_to_binary(drain_terminal_writes())
+        refute writes =~ "\e[2J"
+        refute writes =~ "\e[3J"
+        refute writes =~ "\e[?1049"
+        assert writes =~ "\e[?25h"
+      end)
+    end
+  end
+
+  test "resuming after printing restores alternate-screen cleanup for the full session" do
+    capture_log(fn ->
+      terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+      reader = terminal.reader
+
+      {:ok, router} =
+        Breeze.TestSupport.ProcessHelpers.start_input_router(
+          view: CrashingView,
+          terminal: terminal
+        )
+
+      pid = Breeze.Server.runtime_pid(router)
+      send(router, {reader, {:data, "c"}})
+      wait_until(fn -> :sys.get_state(pid).crash end)
+      send(router, {reader, {:data, "p"}})
+      wait_until(fn -> :sys.get_state(pid).terminal_state.crash_scrollback? end)
+      send(router, {reader, {:data, "r"}})
+      wait_until(fn -> is_nil(:sys.get_state(pid).crash) end)
+      assert :sys.get_state(pid).terminal_state.alt_screen_active?
+      drain_terminal_writes()
+
+      Breeze.Server.stop(router)
+      writes = IO.iodata_to_binary(drain_terminal_writes())
+      assert [clear, exit] = Regex.scan(~r/\e\[2J|\e\[\?1049l/, writes)
+      assert clear == ["\e[2J"]
+      assert exit == ["\e[?1049l"]
+    end)
+  end
+
   test "crash screen prints details to scrollback when clipboard copy times out" do
     capture_log(fn ->
       terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
@@ -519,10 +712,8 @@ defmodule Breeze.LiveView.CrashTest do
           terminal: terminal,
           internal: [
             clipboard: [
-              os_type: {:unix, :linux},
               timeout: 10,
-              find_executable: fn "wl-copy" -> "/usr/bin/wl-copy" end,
-              run_fun: fn _name, _path, _text ->
+              copy_fun: fn _text ->
                 Process.sleep(1_000)
                 {:ok, "slow-copy"}
               end
@@ -543,7 +734,7 @@ defmodule Breeze.LiveView.CrashTest do
       drain_terminal_writes()
       send(pid, {reader, {:data, "y"}})
 
-      wait_until(fn -> :sys.get_state(pid).crash_scrollback? end)
+      wait_until(fn -> :sys.get_state(pid).terminal_state.crash_scrollback? end)
 
       writes = IO.iodata_to_binary(drain_terminal_writes())
 
@@ -554,7 +745,7 @@ defmodule Breeze.LiveView.CrashTest do
       assert writes =~ "Breeze Error"
       assert writes =~ "CrashingView"
       assert writes =~ "RuntimeError"
-      assert :sys.get_state(pid).alt_screen_active? == false
+      assert :sys.get_state(pid).terminal_state.alt_screen_active? == false
 
       drain_terminal_writes()
       send(pid, {reader, {:data, "r"}})
@@ -570,7 +761,7 @@ defmodule Breeze.LiveView.CrashTest do
           end
         end)
 
-      assert restarted_state.alt_screen_active? == true
+      assert restarted_state.terminal_state.alt_screen_active? == true
 
       restart_writes = IO.iodata_to_binary(drain_terminal_writes())
       assert restart_writes =~ "\e[?1049h"

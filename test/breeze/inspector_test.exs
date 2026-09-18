@@ -183,7 +183,7 @@ defmodule Breeze.InspectorTest do
 
     state =
       %Breeze.Server{
-        terminal: terminal,
+        terminal_state: %State.Terminal{terminal: terminal},
         view: StyleMapTreeView,
         theme: theme,
         inspector_state: %State.Inspector{config: true, selected_id: "root"},
@@ -233,7 +233,7 @@ defmodule Breeze.InspectorTest do
 
     state =
       %Breeze.Server{
-        terminal: terminal,
+        terminal_state: %State.Terminal{terminal: terminal},
         view: RenderTreeView,
         theme: theme,
         input: %State.Input{last_interaction_at: 456},
@@ -371,7 +371,7 @@ defmodule Breeze.InspectorTest do
 
     state =
       %Breeze.Server{
-        terminal: terminal,
+        terminal_state: %State.Terminal{terminal: terminal},
         view: ComponentTreeView,
         theme: theme,
         inspector_state: %State.Inspector{config: true, selected_id: "url"},
@@ -502,7 +502,9 @@ defmodule Breeze.InspectorTest do
         focused: nil,
         view: __MODULE__.ExampleView,
         theme: nil,
-        terminal: %Termite.Terminal{size: %{width: 80, height: 24}},
+        terminal_state: %State.Terminal{
+          terminal: %Termite.Terminal{size: %{width: 80, height: 24}}
+        },
         rendered: %{
           mouse_targets: %{
             "field" => %{left: 0, right: 12, top: 0, bottom: 3},

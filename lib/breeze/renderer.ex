@@ -100,9 +100,18 @@ defmodule Breeze.Renderer do
   defp put_breeze_render_context(assigns, opts) when is_map(assigns) do
     context = render_context(opts)
 
-    Map.update(assigns, :breeze, Map.put(context, :flash, []), fn
-      breeze when is_map(breeze) -> breeze |> Map.merge(context) |> Map.put_new(:flash, [])
-      _ -> Map.put(context, :flash, [])
+    defaults =
+      context |> Map.put(:flash, []) |> Map.put(:clipboard, %{osc52: :unknown, supported: false})
+
+    Map.update(assigns, :breeze, defaults, fn
+      breeze when is_map(breeze) ->
+        breeze
+        |> Map.merge(context)
+        |> Map.put_new(:flash, [])
+        |> Map.put_new(:clipboard, %{osc52: :unknown, supported: false})
+
+      _ ->
+        defaults
     end)
   end
 

@@ -255,6 +255,17 @@ defmodule Breeze.View do
   `@breeze.terminal.width`, `@breeze.terminal.height`, and
   `@breeze.breakpoint`.
 
+  `@breeze.clipboard` exposes clipboard capabilities for the current terminal
+  connection as `%{osc52: :unknown, supported: false}` or
+  `%{osc52: :supported, supported: true}`. Use `@breeze.clipboard.supported`
+  for a boolean indicating advertised support; `false` means unconfirmed, not
+  necessarily unavailable. This metadata is also available to crash views. Breeze probes
+  asynchronously at session startup with a 250 ms budget. A timeout or a negative
+  capability reply leaves support unknown. Supported means the terminal advertised
+  OSC 52; it does not guarantee clipboard permission or acknowledge a copy.
+  Each SSH connection has its own result, shared by that connection's nested views.
+  The probe queries device attributes and the `Ms` capability, never clipboard data.
+
   ### Colors
 
    * `text` - set the foreground to the theme's default text color

@@ -8,7 +8,7 @@ defmodule Breeze.Server.Debug do
     state.debug.stats
     |> Map.put(:focused, state.focused)
     |> Map.put(:pending?, not is_nil(state.input.pending_ref))
-    |> Map.put(:screen, state.terminal.size)
+    |> Map.put(:screen, state.terminal_state.terminal.size)
   end
 
   def put_stat(state, key, value) do
