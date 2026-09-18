@@ -1,10 +1,11 @@
 defmodule Breeze.Storybook.RenderingTest do
   use Breeze.TestSupport.StorybookCase, async: true
 
-  test "renders stories for the keybinding bar, Markdown, and tree blocks" do
+  test "renders stories for the keybinding bar, Markdown, sparkline, and tree blocks" do
     for {file, expected_content} <- [
           {"keybinding_bar.story.exs", ["Active keybindings", "Enter Select", "d Details"]},
           {"markdown.story.exs", ["# Release Notes", "formatted text", "inline code"]},
+          {"sparkline.story.exs", ["Throughput", "CPU", "Memory", "▂▂▂▂▃▅▆▇▅▄▃▂"]},
           {"tree.story.exs", ["breeze", "lib", "blocks.ex"]}
         ] do
       session =

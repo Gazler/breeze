@@ -116,6 +116,10 @@ defmodule Breeze.Docs.BlockPreviews do
             }
           )}
        ]},
+      {"Sparkline",
+       [
+         {"Shared scale", preview(__MODULE__.SparklinePreview, size: {32, 3})}
+       ]},
       {"Spinner",
        [
          {"Idle", preview(__MODULE__.SpinnerIdlePreview, size: {24, 3})},
@@ -293,6 +297,7 @@ defmodule Breeze.Docs.BlockPreviews do
   defp component_ref("Markdown"), do: "Breeze.Blocks.markdown/1"
   defp component_ref("Scroll"), do: "Breeze.Blocks.scroll/1"
   defp component_ref("Spinner"), do: "Breeze.Blocks.spinner/1"
+  defp component_ref("Sparkline"), do: "Breeze.Blocks.sparkline/1"
   defp component_ref("Panel"), do: "Breeze.Blocks.panel/1"
   defp component_ref("Modal"), do: "Breeze.Blocks.modal/1"
   defp component_ref("Textarea"), do: "Breeze.Blocks.textarea/1"
@@ -313,6 +318,7 @@ defmodule Breeze.Docs.BlockPreviews do
   defp component_code("Markdown"), do: render_template_source(__MODULE__.MarkdownPreview)
   defp component_code("Scroll"), do: render_template_source(__MODULE__.ScrollPreview)
   defp component_code("Spinner"), do: render_template_source(__MODULE__.SpinnerDotsPreview)
+  defp component_code("Sparkline"), do: render_template_source(__MODULE__.SparklinePreview)
   defp component_code("Panel"), do: render_template_source(__MODULE__.PanelPreview)
   defp component_code("Modal"), do: render_template_source(__MODULE__.ModalPreview)
   defp component_code("Textarea"), do: render_template_source(__MODULE__.TextareaPreview)
@@ -852,6 +858,23 @@ defmodule Breeze.Docs.BlockPreviews do
       <.scroll id="preview-scroll" class="w-26 h-8 border">
         <box :for={row <- @rows}>{row}</box>
       </.scroll>
+      """
+    end
+  end
+
+  defmodule SparklinePreview do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(_opts, term), do: {:ok, term}
+    def handle_event(_, _, term), do: {:noreply, term}
+
+    def render(assigns) do
+      ~H"""
+      <box class="inline">
+        <box class="w-8">CPU</box>
+        <.sparkline values={[10, 20, 15, 40, 70, 90, 60, 30]} min={0} max={100}/>
+      </box>
       """
     end
   end
