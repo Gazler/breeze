@@ -1,7 +1,7 @@
 defmodule Breeze.Server.Error do
   @moduledoc false
 
-  @actions [:restart, :hard_restart, :stop, :copy_details]
+  @actions [:restart, :hard_restart, :stop, :copy_details, :print_details]
 
   def safe_call(fun) when is_function(fun, 0) do
     try do
@@ -92,6 +92,7 @@ defmodule Breeze.Server.Error do
       :hard_restart -> :hard_restart
       :stop -> :stop
       :copy_details -> {:copy_details, crash}
+      :print_details -> {:print_details, crash}
       :continue -> :ignore
     end
   end

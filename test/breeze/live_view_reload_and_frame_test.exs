@@ -578,7 +578,7 @@ defmodule Breeze.LiveView.ReloadAndFrameTest do
         ]
       )
 
-    assert :sys.get_state(pid).terminal.size == %{width: 120, height: 66}
+    assert :sys.get_state(pid).terminal_state.terminal.size == %{width: 120, height: 66}
 
     send(pid, {terminal.reader, {:signal, :winch}})
 
@@ -589,7 +589,7 @@ defmodule Breeze.LiveView.ReloadAndFrameTest do
       end
     end)
 
-    assert :sys.get_state(pid).terminal.size == %{width: 120, height: 66}
+    assert :sys.get_state(pid).terminal_state.terminal.size == %{width: 120, height: 66}
 
     stop_gen_server(pid)
   end
@@ -602,9 +602,13 @@ defmodule Breeze.LiveView.ReloadAndFrameTest do
     drain_terminal_writes()
 
     :sys.replace_state(pid, fn state ->
-      terminal = %{state.terminal | size: %{state.terminal.size | height: 26}}
+      terminal = %{
+        state.terminal_state.terminal
+        | size: %{state.terminal_state.terminal.size | height: 26}
+      }
+
       frame = %{state.frame | last_payload: nil}
-      %{state | terminal: terminal, frame: frame}
+      %{state | terminal_state: %{state.terminal_state | terminal: terminal}, frame: frame}
     end)
 
     send(pid, {terminal.reader, {:data, "+"}})

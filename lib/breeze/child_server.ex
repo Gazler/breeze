@@ -75,6 +75,9 @@ defmodule Breeze.ChildServer do
     GenServer.call(pid, {:put_terminal, terminal})
   end
 
+  @doc false
+  def put_clipboard(pid, clipboard), do: GenServer.call(pid, {:put_clipboard, clipboard})
+
   def put_theme(pid, theme, opts \\ []) do
     GenServer.call(pid, {:put_theme, theme, opts})
   end
@@ -118,6 +121,7 @@ defmodule Breeze.ChildServer do
       view: view,
       server: Keyword.get(opts, :server),
       terminal: terminal,
+      clipboard: Keyword.get(opts, :clipboard, %{osc52: :unknown, supported: false}),
       theme: theme,
       theme_source: theme_input,
       apply_theme_defaults?: apply_theme_defaults?,
@@ -126,6 +130,8 @@ defmodule Breeze.ChildServer do
       assigns: initial_assigns,
       external_assigns: external_assigns
     }
+
+    term = sync_theme_assigns(term)
 
     term =
       if is_nil(runtime_state) and Code.ensure_loaded?(view) and
@@ -286,6 +292,18 @@ defmodule Breeze.ChildServer do
     end)
 
     {:reply, :ok, %{term | terminal: terminal}}
+  end
+
+  def handle_call({:put_clipboard, clipboard}, _from, term) do
+    Enum.each(term.children, fn
+      {_id, %{pid: pid}} when is_pid(pid) ->
+        if Process.alive?(pid), do: put_clipboard(pid, clipboard)
+
+      _ ->
+        :ok
+    end)
+
+    {:reply, :ok, sync_theme_assigns(%{term | clipboard: clipboard})}
   end
 
   def handle_call({:put_theme, theme_input, opts}, _from, term) do
@@ -485,6 +503,7 @@ defmodule Breeze.ChildServer do
       %{
         state_term
         | server: term.server,
+          clipboard: term.clipboard,
           terminal: term.terminal,
           reader: term.reader,
           theme: theme,
@@ -550,6 +569,7 @@ defmodule Breeze.ChildServer do
       |> put_breeze_assign(:theme, breeze_theme_assign(term))
       |> put_breeze_assign(:keybindings, active_keybindings(term))
       |> put_breeze_assign(:terminal, breeze_terminal_assign(term))
+      |> put_breeze_assign(:clipboard, term.clipboard)
       |> put_breeze_assign(:breakpoint, breeze_breakpoint_assign(term))
       |> put_breeze_assign_new(:flash, [])
 
@@ -1449,6 +1469,7 @@ defmodule Breeze.ChildServer do
         assigns: assigns,
         server: term.server,
         terminal: term.terminal,
+        clipboard: term.clipboard,
         theme: term.theme,
         theme_source: term.theme_source,
         global_keybindings: term.global_keybindings,
@@ -1513,6 +1534,7 @@ defmodule Breeze.ChildServer do
         restore_state_theme?: restore_state_theme?,
         server: term.server,
         terminal: term.terminal,
+        clipboard: term.clipboard,
         theme: term.theme,
         theme_source: term.theme_source,
         global_keybindings: term.global_keybindings,

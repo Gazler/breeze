@@ -1,3 +1,20 @@
+defmodule Breeze.Server.State.Terminal do
+  @moduledoc false
+
+  defstruct [
+    :terminal,
+    :reader,
+    :terminal_cleanup,
+    :alt_screen?,
+    :alt_screen_active?,
+    :hide_cursor?,
+    :mouse_mode,
+    :crash_scrollback?,
+    :terminal_size_override,
+    clipboard: %{capabilities: %{osc52: :unknown, supported: false}, opts: []}
+  ]
+end
+
 defmodule Breeze.Server.State.Input do
   @moduledoc false
 

@@ -219,7 +219,7 @@ defmodule Breeze.Inspector do
   @doc false
   def snapshot(state) do
     state = sync_selected_id(state)
-    screen = Map.get(state.terminal, :size, %{width: 0, height: 0})
+    screen = Map.get(state.terminal_state.terminal, :size, %{width: 0, height: 0})
     selected_id = inspector_field(state, :selected_id, :inspector_selected_id)
     hovered_id = inspector_field(state, :hovered_id, :inspector_hovered_id)
     focusable_ids = focusable_ids(state)
@@ -332,7 +332,7 @@ defmodule Breeze.Inspector do
     if remote_delegate?() do
       false
     else
-      screen = Map.get(state.terminal, :size, %{width: 0, height: 0})
+      screen = Map.get(state.terminal_state.terminal, :size, %{width: 0, height: 0})
 
       panel_top =
         case panel_position(state) do
@@ -380,7 +380,7 @@ defmodule Breeze.Inspector do
       case box do
         %BackBreeze.Box{} = box ->
           box
-          |> BackBreeze.Box.render(terminal: state.terminal)
+          |> BackBreeze.Box.render(terminal: state.terminal_state.terminal)
           |> Map.get(:content, "")
 
         _ ->
@@ -943,7 +943,7 @@ defmodule Breeze.Inspector do
       Breeze.Renderer.render_to_string(
         Breeze.InspectorPanel,
         panel_assigns(snapshot),
-        terminal: state.terminal,
+        terminal: state.terminal_state.terminal,
         theme: snapshot.theme,
         theme_source: snapshot.theme,
         apply_theme_defaults: true

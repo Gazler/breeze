@@ -6,6 +6,7 @@ defmodule Breeze.InputRouter do
   alias Breeze.InputRouter.{IExShellProxy, SilentGroupLeader, TerminalCleanup, TerminalStart}
   alias Breeze.InputCapture
   alias Breeze.Theme.Probe, as: ThemeProbe
+  alias Breeze.Clipboard.Probe, as: ClipboardProbe
 
   defstruct [
     :terminal,
@@ -14,6 +15,8 @@ defmodule Breeze.InputRouter do
     :child_view_supervisor,
     :remote_inspector_supervisor,
     :theme_probe,
+    :clipboard_probe,
+    :clipboard_buffer_ref,
     :iex_shell_proxy,
     :silent_group_leader,
     :terminal_cleanup,
@@ -73,6 +76,7 @@ defmodule Breeze.InputRouter do
         |> Keyword.put(:terminal, terminal)
         |> Keyword.put(:input_router, self())
         |> put_internal(:child_view_supervisor, child_view_supervisor)
+        |> put_internal(:terminal_cleanup, terminal_cleanup)
         |> put_internal(:remote_inspector_supervisor, remote_inspector_supervisor)
 
       server_pid =
@@ -127,17 +131,35 @@ defmodule Breeze.InputRouter do
 
   @impl true
   def handle_continue({:maybe_start_theme_probe, theme}, state) do
-    {:noreply, maybe_start_theme_probe(state, theme)}
+    state = maybe_start_theme_probe(state, theme)
+    Process.send_after(self(), :clipboard_probe_timeout, ClipboardProbe.timeout_ms())
+    terminal = Termite.Terminal.write(state.terminal, ClipboardProbe.query())
+    {:noreply, %{state | terminal: terminal, clipboard_probe: ClipboardProbe.new()}}
   end
 
   @impl true
   def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
-    if theme_probe_reply?(state, data) do
-      {:noreply, consume_theme_probe_reply(state, data)}
-    else
-      route_reader_data(reader, data, state)
-    end
+    {state, data} = consume_clipboard_reply(state, data)
+
+    route_terminal_data(reader, data, state)
   end
+
+  def handle_info(:clipboard_probe_timeout, %{clipboard_probe: probe} = state)
+      when is_map(probe) do
+    {:noreply, %{state | clipboard_probe: ClipboardProbe.expire(probe)}}
+  end
+
+  def handle_info({:clipboard_buffer_timeout, ref}, %{clipboard_buffer_ref: ref} = state) do
+    {probe, data} = ClipboardProbe.flush(state.clipboard_probe)
+
+    route_terminal_data(state.reader, data, %{
+      state
+      | clipboard_probe: probe,
+        clipboard_buffer_ref: nil
+    })
+  end
+
+  def handle_info({:clipboard_buffer_timeout, _ref}, state), do: {:noreply, state}
 
   def handle_info({reader, {:signal, :winch}} = message, %{reader: reader} = state) do
     send(state.server_pid, message)
@@ -240,6 +262,33 @@ defmodule Breeze.InputRouter do
     is_map(state.theme_probe) and
       theme_probe_data?(state.theme_probe.buffer, data)
   end
+
+  defp route_terminal_data(_reader, "", state), do: {:noreply, state}
+
+  defp route_terminal_data(reader, data, state) do
+    if theme_probe_reply?(state, data) do
+      {:noreply, consume_theme_probe_reply(state, data)}
+    else
+      route_reader_data(reader, data, state)
+    end
+  end
+
+  defp consume_clipboard_reply(%{clipboard_probe: nil} = state, data), do: {state, data}
+
+  defp consume_clipboard_reply(state, data) when is_binary(data) do
+    {probe, input, queries} = ClipboardProbe.feed(state.clipboard_probe, data)
+    terminal = Enum.reduce(queries, state.terminal, &Termite.Terminal.write(&2, &1))
+
+    if probe.clipboard != state.clipboard_probe.clipboard do
+      send(state.server_pid, {:breeze_clipboard, state.reader, probe.clipboard})
+    end
+
+    ref = if probe.buffer != "", do: make_ref()
+    if ref, do: Process.send_after(self(), {:clipboard_buffer_timeout, ref}, 50)
+    {%{state | terminal: terminal, clipboard_probe: probe, clipboard_buffer_ref: ref}, input}
+  end
+
+  defp consume_clipboard_reply(state, data), do: {state, data}
 
   defp theme_probe_data?(buffer, data) when is_binary(data) do
     String.starts_with?(data, "\e]") or incomplete_theme_probe_reply?(buffer)

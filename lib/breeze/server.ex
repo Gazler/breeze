@@ -56,14 +56,17 @@ defmodule Breeze.Server do
       `view: MyErrorView` to override the crash screen view. Defaults
       to the built-in crash view. Pass `keybindings: [...]` to configure
       custom crash screen actions as `{key, label, action}` tuples.
-      Supported actions are `:restart`, `:hard_restart`, `:stop`, and
-      `:copy_details`. A restart restores surviving runtime state when possible;
-      a hard restart remounts the root view from its original start options.
-      Custom error views receive these assigns: `@view`, the crashed
-      root view module; `@crash`, the crash map; `@kind`, the crash
-      kind; `@reason`, the exception, exit reason, or thrown value;
-      `@stacktrace`, the captured stacktrace; and
-      `@breeze.keybindings`, the configured visible keybindings.
+      Supported actions are `:restart`, `:hard_restart`, `:stop`,
+      `:copy_details`, and `:print_details`. A restart restores surviving
+      runtime state when possible. A hard restart remounts the root view from
+      its original start options. The built-in crash view uses `y` to attempt
+      clipboard copying and `p` to print details to the normal screen for manual
+      copying. Printed details remain visible until `r` resumes, `R` hard restarts,
+      or `q` quits. Custom error views receive these assigns: `@view`, the crashed
+      root view module; `@crash`, the crash map; `@kind`, the crash kind;
+      `@reason`, the exception, exit reason, or thrown value; `@stacktrace`, the
+      captured stacktrace; and `@breeze.keybindings`, the configured visible
+      keybindings.
   """
 
   use GenServer
@@ -89,8 +92,6 @@ defmodule Breeze.Server do
   @input_render_interval_ms 16
   @logger_collector_attempts 3
   defstruct [
-    :terminal,
-    :reader,
     :input_router,
     :child_view_supervisor,
     :owns_child_view_supervisor?,
@@ -98,10 +99,6 @@ defmodule Breeze.Server do
     :view_pid,
     :view,
     :start_opts,
-    :alt_screen?,
-    :alt_screen_active?,
-    :hide_cursor?,
-    :mouse_mode,
     :reload_opts,
     :reloader_pid,
     :logger_collector,
@@ -110,11 +107,9 @@ defmodule Breeze.Server do
     :apply_theme_defaults?,
     :render_errors,
     :child_process_flags,
-    :clipboard_opts,
     :crash,
-    :crash_scrollback?,
-    :terminal_size_override,
     children: %{},
+    terminal_state: %State.Terminal{},
     input: %State.Input{},
     frame: %State.Frame{},
     debug: %State.Debug{},
@@ -446,8 +441,20 @@ defmodule Breeze.Server do
 
     state =
       %__MODULE__{
-        terminal: terminal,
-        reader: terminal.reader,
+        terminal_state: %State.Terminal{
+          terminal: terminal,
+          reader: terminal.reader,
+          terminal_cleanup: Keyword.get(internal_opts, :terminal_cleanup),
+          alt_screen?: Keyword.get(opts, :alt_screen, true),
+          alt_screen_active?: Keyword.get(opts, :alt_screen, true),
+          hide_cursor?: Keyword.get(opts, :hide_cursor, true),
+          mouse_mode: Keyword.get(opts, :mouse, false),
+          terminal_size_override: terminal_size_override,
+          clipboard: %{
+            capabilities: %{osc52: :unknown, supported: false},
+            opts: Keyword.get(internal_opts, :clipboard, [])
+          }
+        },
         input_router: input_router,
         child_view_supervisor: child_view_supervisor,
         owns_child_view_supervisor?: owns_child_view_supervisor?,
@@ -455,10 +462,6 @@ defmodule Breeze.Server do
         view_pid: view_pid,
         view: view,
         start_opts: start_opts,
-        alt_screen?: Keyword.get(opts, :alt_screen, true),
-        alt_screen_active?: Keyword.get(opts, :alt_screen, true),
-        hide_cursor?: Keyword.get(opts, :hide_cursor, true),
-        mouse_mode: Keyword.get(opts, :mouse, false),
         reload_opts:
           normalize_reload_opts(
             Keyword.get(opts, :reload, Application.get_env(:breeze, :reload, false))
@@ -469,8 +472,6 @@ defmodule Breeze.Server do
         apply_theme_defaults?: apply_theme_defaults?,
         render_errors: render_errors,
         child_process_flags: child_process_flags,
-        clipboard_opts: Keyword.get(internal_opts, :clipboard, []),
-        terminal_size_override: terminal_size_override,
         input: %State.Input{
           global_keybindings: Keyword.get(opts, :global_keybindings, [])
         },
@@ -689,23 +690,26 @@ defmodule Breeze.Server do
   @impl true
   def handle_info(
         {reader, {:data, data}},
-        %{reader: reader, frame: %{resume_on_input?: true}} = state
+        %{terminal_state: %{reader: reader}, frame: %{resume_on_input?: true}} = state
       ) do
     {:noreply, state |> resume_frame_for_interaction() |> enqueue_reader_data(data)}
   end
 
-  def handle_info({reader, {:data, _data}}, %{reader: reader, frame: %{display: display}} = state)
+  def handle_info(
+        {reader, {:data, _data}},
+        %{terminal_state: %{reader: reader}, frame: %{display: display}} = state
+      )
       when not is_nil(display) do
     {:noreply, Input.reset_pipeline(state)}
   end
 
-  def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
+  def handle_info({reader, {:data, data}}, %{terminal_state: %{reader: reader}} = state) do
     {:noreply, enqueue_reader_data(state, data)}
   end
 
-  def handle_info({reader, {:event, event}}, %{reader: reader} = state) do
+  def handle_info({reader, {:event, event}}, %{terminal_state: %{reader: reader}} = state) do
     case safe_call(fn ->
-           Breeze.ChildServer.dispatch_info(state.view_pid, event, state.terminal)
+           Breeze.ChildServer.dispatch_info(state.view_pid, event, state.terminal_state.terminal)
          end) do
       {:ok, {:stop, _focused}} ->
         stop_runtime(state)
@@ -718,29 +722,34 @@ defmodule Breeze.Server do
     end
   end
 
-  def handle_info({reader, {:signal, :winch}}, %{reader: reader, crash: crash} = state)
+  def handle_info(
+        {reader, {:signal, :winch}},
+        %{terminal_state: %{reader: reader}, crash: crash} = state
+      )
       when not is_nil(crash) do
     terminal = resize_terminal(state)
-    {:noreply, render_crash(%{state | terminal: terminal}, force_full_redraw?: true)}
+
+    {:noreply,
+     render_crash(put_in(state.terminal_state.terminal, terminal), force_full_redraw?: true)}
   end
 
   def handle_info(
         {reader, {:signal, :winch}},
-        %{reader: reader, frame: %{display: display}} = state
+        %{terminal_state: %{reader: reader}, frame: %{display: display}} = state
       )
       when not is_nil(display) do
     state =
       state
-      |> Map.put(:terminal, resize_terminal(state))
+      |> put_in([Access.key(:terminal_state), Access.key(:terminal)], resize_terminal(state))
       |> update_frame(last_payload: nil, last_lines: nil, last_overlays: [])
       |> render_frame()
 
     {:noreply, state}
   end
 
-  def handle_info({reader, {:signal, :winch}}, %{reader: reader} = state) do
+  def handle_info({reader, {:signal, :winch}}, %{terminal_state: %{reader: reader}} = state) do
     terminal = resize_terminal(state)
-    state = %{state | terminal: terminal}
+    state = put_in(state.terminal_state.terminal, terminal)
 
     case safe_call(fn ->
            Breeze.ChildServer.dispatch_info(state.view_pid, :resize, terminal, invalidate: false)
@@ -754,6 +763,22 @@ defmodule Breeze.Server do
       {:crash, crash} ->
         {:noreply, enter_crash_state(state, crash)}
     end
+  end
+
+  def handle_info(
+        {:breeze_clipboard, reader, clipboard},
+        %{terminal_state: %{reader: reader}} = state
+      ) do
+    state = put_in(state.terminal_state.clipboard.capabilities, clipboard)
+
+    for pid <- [state.view_pid | Enum.map(state.children, fn {_, child} -> child.pid end)],
+        is_pid(pid),
+        Process.alive?(pid) do
+      safe_call(fn -> Breeze.ChildServer.put_clipboard(pid, clipboard) end)
+    end
+
+    state = if state.crash, do: render_crash(state), else: maybe_render_base(state, :clipboard)
+    {:noreply, state}
   end
 
   def handle_info({:ensure_runtime_palette, :system}, %{input_router: pid} = state)
@@ -1619,7 +1644,7 @@ defmodule Breeze.Server do
   defp safe_render_snapshot(state, tracking_ref, profile_scope) do
     Breeze.ChildServer.render_snapshot(state.view_pid,
       implicit_state: %{},
-      terminal: state.terminal,
+      terminal: state.terminal_state.terminal,
       theme: state.theme,
       render_tree?: Breeze.Inspector.enabled?(state),
       render_tracking_ref: tracking_ref,
@@ -1828,9 +1853,9 @@ defmodule Breeze.Server do
   end
 
   defp resize_terminal(state) do
-    state.terminal
+    state.terminal_state.terminal
     |> Termite.Terminal.resize()
-    |> apply_terminal_size_override(state.terminal_size_override)
+    |> apply_terminal_size_override(state.terminal_state.terminal_size_override)
   end
 
   defp apply_terminal_size_override(%Termite.Terminal{} = terminal, fun)
@@ -1868,7 +1893,7 @@ defmodule Breeze.Server do
       expected_start_opts:
         child_start_opts(fetch_live_attr(attrs, :start_opts, []), expected_view, state),
       expected_assigns: fetch_live_attr(attrs, :assigns, %{}) |> Map.new(),
-      terminal: Keyword.get(opts, :live_terminal, state.terminal),
+      terminal: Keyword.get(opts, :live_terminal, state.terminal_state.terminal),
       viewport: viewport,
       decoration_viewport:
         accumulate_live_viewport(
@@ -2082,7 +2107,7 @@ defmodule Breeze.Server do
     with true <- patchable_live_child?(child_id),
          %{view: view} = child <- Map.get(state.children, child_id),
          %Breeze.Viewport{} = viewport <- Map.get(state.rendered.elements, child_id) do
-      terminal = Dimensions.live_child_terminal(state.terminal, viewport)
+      terminal = Dimensions.live_child_terminal(state.terminal_state.terminal, viewport)
       profile_scope = make_ref()
       Breeze.DebugProfiler.reset(profile_scope)
 
@@ -2229,13 +2254,16 @@ defmodule Breeze.Server do
     fragment = invalidated_child_fragment(ctx)
     composed_at = System.monotonic_time(:microsecond)
     payload = Frame.child_patch_payload(fragment, ctx.viewport)
-    terminal = Termite.Terminal.write(ctx.state.terminal, payload)
+    terminal = Termite.Terminal.write(ctx.state.terminal_state.terminal, payload)
     written_at = System.monotonic_time(:microsecond)
-    screen_width = ctx.state.terminal.size.width
+    screen_width = ctx.state.terminal_state.terminal.size.width
 
     last_lines =
       (ctx.state.frame.last_lines ||
-         Frame.normalize_lines(ctx.state.frame.base_output, ctx.state.terminal.size.height))
+         Frame.normalize_lines(
+           ctx.state.frame.base_output,
+           ctx.state.terminal_state.terminal.size.height
+         ))
       |> Frame.patch_lines(fragment, ctx.viewport, screen_width)
 
     base_output =
@@ -2243,7 +2271,7 @@ defmodule Breeze.Server do
 
     state =
       ctx.state
-      |> Map.put(:terminal, terminal)
+      |> put_in([Access.key(:terminal_state), Access.key(:terminal)], terminal)
       |> update_frame(
         base_output: base_output,
         last_payload: nil,
@@ -2278,7 +2306,7 @@ defmodule Breeze.Server do
 
     live_lines =
       output
-      |> Frame.normalize_lines(state.terminal.size.height)
+      |> Frame.normalize_lines(state.terminal_state.terminal.size.height)
 
     {lines, overlays} = FrameDisplay.resolve(state, live_lines, live_overlays)
 
@@ -2288,22 +2316,22 @@ defmodule Breeze.Server do
         lines,
         state.frame.last_overlays || [],
         overlays,
-        state.terminal.size.width
+        state.terminal_state.terminal.size.width
       )
 
     composed_at = System.monotonic_time(:microsecond)
 
     {terminal, write_duration} =
       if frame_payload == state.frame.last_payload do
-        {state.terminal, 0}
+        {state.terminal_state.terminal, 0}
       else
-        terminal = Termite.Terminal.write(state.terminal, frame_payload)
+        terminal = Termite.Terminal.write(state.terminal_state.terminal, frame_payload)
         written_at = System.monotonic_time(:microsecond)
         {terminal, written_at - composed_at}
       end
 
     state
-    |> Map.put(:terminal, terminal)
+    |> put_in([Access.key(:terminal_state), Access.key(:terminal)], terminal)
     |> update_frame(
       decorations: decorations,
       last_payload: frame_payload,
@@ -2418,7 +2446,7 @@ defmodule Breeze.Server do
   end
 
   defp rendered_fragment(box, state, layout) do
-    terminal = render_fragment_terminal(state.terminal, layout)
+    terminal = render_fragment_terminal(state.terminal_state.terminal, layout)
 
     box
     |> BackBreeze.Box.render(terminal: terminal)
@@ -2654,15 +2682,24 @@ defmodule Breeze.Server do
     shutdown_root_view(state.child_view_supervisor, state.view_pid)
 
     terminal =
-      state.terminal
+      state.terminal_state.terminal
       |> Termite.Screen.disable_mouse()
-      |> Termite.Screen.clear_screen()
+      |> clear_screen_on_stop(state.terminal_state.crash_scrollback?)
       |> Termite.Screen.show_cursor()
-      |> maybe_exit_alt_screen(state.alt_screen_active?)
+      |> maybe_exit_alt_screen(state.terminal_state.alt_screen_active?)
 
     terminal = Termite.Terminal.write(terminal, "\r")
-    {:stop, :normal, %{state | terminal: terminal}}
+
+    Breeze.InputRouter.TerminalCleanup.preserve_screen(
+      state.terminal_state.terminal_cleanup,
+      true
+    )
+
+    {:stop, :normal, put_in(state.terminal_state.terminal, terminal)}
   end
+
+  defp clear_screen_on_stop(terminal, true), do: terminal
+  defp clear_screen_on_stop(terminal, _), do: Termite.Screen.clear_screen(terminal)
 
   @impl true
   def terminate(_reason, state) do
@@ -2769,11 +2806,11 @@ defmodule Breeze.Server do
   defp enter_crash_state(state, crash) do
     state = state |> cancel_input_render_timer() |> FrameDisplay.clear()
     cancel_timer(state.frame.animation_timer)
-    terminal = apply_mouse_mode(state.terminal, false)
+    terminal = apply_mouse_mode(state.terminal_state.terminal, false)
     crash = Error.prepare_crash(state.render_errors, state.view, crash, terminal.size)
 
     state
-    |> Map.put(:terminal, terminal)
+    |> put_in([Access.key(:terminal_state), Access.key(:terminal)], terminal)
     |> Map.put(:crash, crash)
     |> Input.reset_pipeline()
     |> update_frame(
@@ -2789,14 +2826,36 @@ defmodule Breeze.Server do
   defp cancel_timer(nil), do: :ok
   defp cancel_timer(timer), do: Process.cancel_timer(timer)
 
-  defp render_crash(state, opts \\ []) do
-    crash = Error.prepare_crash(state.render_errors, state.view, state.crash, state.terminal.size)
+  defp render_crash(state, opts \\ [])
+
+  defp render_crash(%{terminal_state: %{crash_scrollback?: true}} = state, _opts), do: state
+
+  defp render_crash(state, opts) do
+    crash =
+      Error.prepare_crash(
+        state.render_errors,
+        state.view,
+        state.crash,
+        state.terminal_state.terminal.size
+      )
 
     content =
-      Error.render_assigns(state.render_errors, state.view, crash, state.terminal.size)
+      Error.render_assigns(
+        state.render_errors,
+        state.view,
+        crash,
+        state.terminal_state.terminal.size
+      )
+      |> Map.update(
+        :breeze,
+        %{clipboard: state.terminal_state.clipboard.capabilities},
+        fn breeze ->
+          Map.put(breeze, :clipboard, state.terminal_state.clipboard.capabilities)
+        end
+      )
       |> then(
         &Breeze.Renderer.render_to_string(Error.view(state.render_errors), &1,
-          terminal: state.terminal,
+          terminal: state.terminal_state.terminal,
           focused: crash.focused,
           implicit_state: crash.implicit_state
         )
@@ -2817,7 +2876,13 @@ defmodule Breeze.Server do
   end
 
   defp handle_crash_input(input, %{crash: crash} = state) do
-    case Error.handle_input(state.render_errors, state.view, crash, input, state.terminal.size) do
+    case Error.handle_input(
+           state.render_errors,
+           state.view,
+           crash,
+           input,
+           state.terminal_state.terminal.size
+         ) do
       :ignore ->
         {:noreply, state}
 
@@ -2833,6 +2898,10 @@ defmodule Breeze.Server do
       {:copy_details, crash} ->
         copy_or_print_crash_details(state, crash)
 
+      {:print_details, crash} ->
+        details = Error.details_text(state.render_errors, state.view, crash)
+        print_crash_details_to_scrollback(state, details)
+
       {:update, updated_crash} ->
         {:noreply, state |> Map.put(:crash, updated_crash) |> render_crash()}
     end
@@ -2841,7 +2910,17 @@ defmodule Breeze.Server do
   defp copy_or_print_crash_details(state, crash) do
     details = Error.details_text(state.render_errors, state.view, crash)
 
-    case Breeze.ErrorView.Clipboard.copy(details, state.clipboard_opts || []) do
+    case Breeze.ErrorView.Clipboard.copy(details, state.terminal_state.clipboard.opts) do
+      {:ok, {:osc52, sequence}} ->
+        terminal = Termite.Terminal.write(state.terminal_state.terminal, sequence)
+
+        {:noreply,
+         show_temporary_crash_notice(
+           put_in(state.terminal_state.terminal, terminal),
+           crash,
+           :clipboard_sent
+         )}
+
       {:ok, command} ->
         {:noreply,
          show_temporary_crash_notice(state, crash, "Copied crash details to #{command}.")}
@@ -2870,28 +2949,54 @@ defmodule Breeze.Server do
   end
 
   defp print_crash_details_to_scrollback(state, details) do
+    Breeze.InputRouter.TerminalCleanup.preserve_screen(
+      state.terminal_state.terminal_cleanup,
+      true
+    )
+
     terminal =
-      state.terminal
+      state.terminal_state.terminal
       |> Termite.Screen.disable_mouse()
       |> Termite.Screen.show_cursor()
-      |> maybe_exit_alt_screen(state.alt_screen_active?)
+      |> maybe_exit_alt_screen(state.terminal_state.alt_screen_active?)
       |> Termite.Terminal.write(
         "\r\n" <> details <> "\r\n\nPress q to quit, r to resume, R to hard restart.\r\n"
       )
 
-    {:noreply, %{state | terminal: terminal, alt_screen_active?: false, crash_scrollback?: true}}
+    terminal_state = %{
+      state.terminal_state
+      | terminal: terminal,
+        alt_screen_active?: false,
+        crash_scrollback?: true
+    }
+
+    {:noreply, %{state | terminal_state: terminal_state}}
   end
 
-  defp restore_terminal_after_crash_scrollback(%{crash_scrollback?: true} = state) do
+  defp restore_terminal_after_crash_scrollback(
+         %{terminal_state: %{crash_scrollback?: true}} = state
+       ) do
+    Breeze.InputRouter.TerminalCleanup.preserve_screen(
+      state.terminal_state.terminal_cleanup,
+      false
+    )
+
     terminal =
-      state.terminal
-      |> maybe_enter_alt_screen(state.alt_screen?, state.alt_screen_active?)
-      |> maybe_hide_cursor(state.hide_cursor?)
+      state.terminal_state.terminal
+      |> maybe_enter_alt_screen(
+        state.terminal_state.alt_screen?,
+        state.terminal_state.alt_screen_active?
+      )
+      |> maybe_hide_cursor(state.terminal_state.hide_cursor?)
       |> Termite.Screen.clear_screen()
 
     state
-    |> Map.put(:terminal, terminal)
-    |> Map.put(:alt_screen_active?, state.alt_screen?)
+    |> put_in([Access.key(:terminal_state), Access.key(:terminal)], terminal)
+    |> put_in(
+      [Access.key(:terminal_state), Access.key(:alt_screen_active?)],
+      state.terminal_state.alt_screen?
+    )
+    |> put_in([Access.key(:terminal_state), Access.key(:crash_scrollback?)], false)
     |> update_frame(last_payload: nil, last_lines: nil, last_overlays: [])
   end
 
@@ -2945,7 +3050,12 @@ defmodule Breeze.Server do
     state
     |> FrameDisplay.clear()
     |> restore_terminal_after_crash_scrollback()
-    |> then(&%{&1 | terminal: apply_mouse_mode(&1.terminal, &1.mouse_mode)})
+    |> then(fn state ->
+      put_in(
+        state.terminal_state.terminal,
+        apply_mouse_mode(state.terminal_state.terminal, state.terminal_state.mouse_mode)
+      )
+    end)
   end
 
   defp capture_restart_state(state) do
@@ -2965,7 +3075,7 @@ defmodule Breeze.Server do
         |> Map.put(:focused, focused)
         |> Map.put(:theme, theme)
         |> Map.put(:crash, nil)
-        |> Map.put(:crash_scrollback?, false)
+        |> put_in([Access.key(:terminal_state), Access.key(:crash_scrollback?)], false)
         |> Map.put(:children, %{})
         |> update_frame(
           decorations: [],
@@ -2996,7 +3106,8 @@ defmodule Breeze.Server do
       [
         view: state.view,
         start_opts: state.start_opts || [],
-        terminal: state.terminal,
+        terminal: state.terminal_state.terminal,
+        clipboard: state.terminal_state.clipboard.capabilities,
         theme: state.theme,
         process_flags: state.child_process_flags || [],
         server: self(),
@@ -3118,7 +3229,10 @@ defmodule Breeze.Server do
        state
        |> Map.put(:view, refreshed_view)
        |> Map.put(:start_opts, refreshed_start_opts)
-       |> Map.put(:mouse_mode, Keyword.get(refreshed_opts, :mouse, state.mouse_mode))
+       |> put_in(
+         [Access.key(:terminal_state), Access.key(:mouse_mode)],
+         Keyword.get(refreshed_opts, :mouse, state.terminal_state.mouse_mode)
+       )
        |> update_input(
          global_keybindings:
            Keyword.get(refreshed_opts, :global_keybindings, current_global_keybindings)
@@ -3127,20 +3241,20 @@ defmodule Breeze.Server do
       global_keybindings =
         Keyword.get(refreshed_opts, :global_keybindings, current_global_keybindings)
 
-      mouse_mode = Keyword.get(refreshed_opts, :mouse, state.mouse_mode)
+      mouse_mode = Keyword.get(refreshed_opts, :mouse, state.terminal_state.mouse_mode)
 
       terminal =
-        if mouse_mode == state.mouse_mode,
-          do: state.terminal,
-          else: apply_mouse_mode(state.terminal, mouse_mode)
+        if mouse_mode == state.terminal_state.mouse_mode,
+          do: state.terminal_state.terminal,
+          else: apply_mouse_mode(state.terminal_state.terminal, mouse_mode)
 
       case update_live_global_keybindings(state, global_keybindings) do
         :ok ->
           {:ok,
            state
            |> update_input(global_keybindings: global_keybindings)
-           |> Map.put(:mouse_mode, mouse_mode)
-           |> Map.put(:terminal, terminal)}
+           |> put_in([Access.key(:terminal_state), Access.key(:mouse_mode)], mouse_mode)
+           |> put_in([Access.key(:terminal_state), Access.key(:terminal)], terminal)}
 
         {:error, crash} ->
           {:error, crash}
@@ -3260,18 +3374,18 @@ defmodule Breeze.Server do
             ref = Map.get(child, :ref)
             if is_reference(ref), do: Process.demonitor(ref, [:flush])
 
-            child = start_child!(attrs, state.terminal, state.theme, state)
+            child = start_child!(attrs, state.terminal_state.terminal, state.theme, state)
             {%{state | children: Map.put(state.children, id, child)}, true}
           end
 
         %{pid: _pid, ref: _ref} = child ->
           shutdown_tracked_child(state.child_view_supervisor, child)
 
-          child = start_child!(attrs, state.terminal, state.theme, state)
+          child = start_child!(attrs, state.terminal_state.terminal, state.theme, state)
           {%{state | children: Map.put(state.children, id, child)}, true}
 
         nil ->
-          child = start_child!(attrs, state.terminal, state.theme, state)
+          child = start_child!(attrs, state.terminal_state.terminal, state.theme, state)
           {%{state | children: Map.put(state.children, id, child)}, true}
       end
     end)
@@ -3347,6 +3461,7 @@ defmodule Breeze.Server do
         assigns: assigns,
         server: self(),
         terminal: terminal,
+        clipboard: state.terminal_state.clipboard.capabilities,
         theme: theme,
         apply_theme_defaults?: state.apply_theme_defaults?,
         process_flags: state.child_process_flags || [],

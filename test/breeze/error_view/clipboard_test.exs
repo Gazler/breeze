@@ -3,22 +3,21 @@ defmodule Breeze.ErrorView.ClipboardTest do
 
   alias Breeze.ErrorView.Clipboard
 
-  test "returns timeout when clipboard command does not finish" do
-    assert {:error, :timeout} =
-             Clipboard.copy("details",
-               os_type: {:unix, :linux},
-               timeout: 10,
-               run_fun: fn _name, _path, _text ->
-                 Process.sleep(1_000)
-                 {:ok, "slow-copy"}
-               end,
-               find_executable: fn "wl-copy" -> "/usr/bin/wl-copy" end
-             )
+  test "encodes crash details as an OSC 52 clipboard write" do
+    text = "Crash details\nλ\e[31m"
+    assert {:ok, {:osc52, sequence}} = Clipboard.copy(text)
+    assert sequence == "\e]52;c;" <> Base.encode64(text) <> "\e\\"
   end
 
-  test "returns unavailable when no clipboard command exists" do
-    assert {:error, :unavailable} =
-             Clipboard.copy("details", find_executable: fn _name -> nil end)
+  test "returns timeout when an injected clipboard function does not finish" do
+    assert {:error, :timeout} =
+             Clipboard.copy("details",
+               timeout: 10,
+               copy_fun: fn _text ->
+                 Process.sleep(1_000)
+                 {:ok, "slow-copy"}
+               end
+             )
   end
 
   test "normalizes unexpected clipboard function results" do
