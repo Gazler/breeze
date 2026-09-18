@@ -15,6 +15,7 @@ defmodule Breeze.Storybook.RegistryTest do
     modal: "modal",
     panel: "panel",
     scroll: "scroll",
+    sparkline: "sparkline",
     spinner: "spinner",
     table: "table",
     tabs: "tabs",
