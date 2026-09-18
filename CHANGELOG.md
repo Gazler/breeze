@@ -1,3 +1,18 @@
+## [0.5.2] - 2026-09-18
+
+### Features
+
+- *(Breeze.Implicit)* Support br-delegate-events for scrolling ([5999839](https://github.com/gazler/breeze/commit/5999839d0d665b876b1ff993d7da5e3fbb14b5bd))
+- *(Breeze.Clipboard)* Use OSC52 instead of shelling out for copy ([a9f040f](https://github.com/gazler/breeze/commit/a9f040f3c2f4f8a94f710b0495682e4dbbc58cc9))
+
+### Bug Fixes
+
+- Stabilize clipboard timeout tests ([2c3cd54](https://github.com/gazler/breeze/commit/2c3cd54c7f26fb4bbb9cef36a3f1b8b28e4b0bfb))
+
+### Documentation
+
+- Update README ([1c8fbad](https://github.com/gazler/breeze/commit/1c8fbad4241757c7bc48b413a37ce60dce4ebb1e))
+- *(guides)* Update application supervisor spec for simple app ([140c196](https://github.com/gazler/breeze/commit/140c19624f60d267b5c101356c50e49311d557f6))
 ## [0.5.1] - 2026-08-27
 
 ### Features
