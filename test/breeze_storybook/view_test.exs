@@ -49,6 +49,69 @@ defmodule Breeze.Storybook.RenderingTest do
     assert Breeze.Test.render_text!(session) =~ "Latest press: Cancel"
   end
 
+  test "line chart story redraws both series when its bounds change" do
+    session = Breeze.Test.start!(Breeze.Storybook.Stories.Blocks.LineChartStory, size: {50, 16})
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    automatic = Breeze.Test.render_text!(session)
+    assert automatic =~ "Baseline"
+    assert automatic =~ "Candidate"
+    assert automatic =~ ~r/240\s*│/u
+
+    assert {:noreply, "storybook-line-chart-scale", true} = Breeze.Test.input(session, "Enter")
+
+    fixed = Breeze.Test.render_text!(session)
+    assert fixed =~ ~r/300\s*│/u
+    assert fixed =~ "Baseline"
+    assert fixed =~ "Candidate"
+    refute fixed =~ ~r/240\s*│/u
+  end
+
+  test "bar chart story switches the same series between grouped and stacked layouts" do
+    session =
+      Breeze.Test.start!(Breeze.Storybook,
+        size: {80, 40},
+        start_opts: [directory: "storybook", file: "bar_chart.story.exs"]
+      )
+
+    on_exit(fn -> Breeze.Test.stop(session) end)
+    grouped = Breeze.Test.render_text!(session)
+    assert grouped =~ "Preview: Chart (Bar) / Grouped"
+    assert grouped =~ "Run C"
+    assert grouped =~ "Input"
+    assert grouped =~ "Output"
+    assert grouped =~ "610"
+    refute grouped =~ "850"
+
+    assert {:noreply, "storybook-nav", true} =
+             Breeze.Test.event(session, "select_variant", %{value: "stacked"})
+
+    stacked = Breeze.Test.render_text!(session)
+    assert stacked =~ "Preview: Chart (Bar) / Stacked"
+    assert stacked =~ "Run C"
+    assert stacked =~ "Input"
+    assert stacked =~ "Output"
+    assert stacked =~ "850"
+  end
+
+  test "bar chart story transposes the same series to horizontal rows" do
+    session = Breeze.Test.start!(Breeze.Storybook.Stories.Blocks.BarChartStory, size: {50, 18})
+    on_exit(fn -> Breeze.Test.stop(session) end)
+
+    vertical = Breeze.Test.render_text!(session)
+    assert vertical =~ "└"
+    assert vertical =~ ~r/Run A\s+Run B\s+Run C/u
+
+    assert {:noreply, "storybook-bar-chart-orientation", true} =
+             Breeze.Test.input(session, "Enter")
+
+    horizontal = Breeze.Test.render_text!(session)
+    refute horizontal =~ "└"
+    assert horizontal =~ ~r/Run A[^\n]+420/u
+    assert horizontal =~ ~r/Run B[^\n]+610/u
+    assert horizontal =~ ~r/Run C[^\n]+350/u
+  end
+
   test "button story switches between default and bordered variants" do
     session =
       Breeze.Test.start!(Breeze.Storybook,
@@ -660,7 +723,12 @@ defmodule Breeze.Storybook.LayoutTest do
   test "d toggles story details while focus is inside the preview" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
 
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
+    {:ok, pid} =
+      start_child_server(
+        view: Breeze.Storybook,
+        terminal: terminal,
+        start_opts: [directory: "storybook", file: "button.story.exs"]
+      )
 
     assert {:ok, initial_acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
     initial_preview_height = :sys.get_state(pid).assigns.preview_panel_height
@@ -686,7 +754,12 @@ defmodule Breeze.Storybook.LayoutTest do
   test "preview panel highlights when a focused element lives inside the preview child" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
 
-    {:ok, pid} = start_child_server(view: Breeze.Storybook, terminal: terminal)
+    {:ok, pid} =
+      start_child_server(
+        view: Breeze.Storybook,
+        terminal: terminal,
+        start_opts: [directory: "storybook", file: "button.story.exs"]
+      )
 
     assert {:ok, _acc, _box} = Breeze.ChildServer.render(pid, terminal: terminal)
 
@@ -703,7 +776,12 @@ defmodule Breeze.Storybook.LayoutTest do
   end
 
   test "storybook nav renders the selected marker and label without overlap" do
-    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    session =
+      Breeze.Test.start!(Breeze.Storybook,
+        size: {80, 24},
+        start_opts: [directory: "storybook", file: "button.story.exs"]
+      )
+
     on_exit(fn -> Breeze.Test.stop(session) end)
 
     plain_content = Breeze.Test.render_text!(session)
@@ -712,7 +790,12 @@ defmodule Breeze.Storybook.LayoutTest do
   end
 
   test "panel focus moves from the story nav to the button preview" do
-    session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
+    session =
+      Breeze.Test.start!(Breeze.Storybook,
+        size: {80, 24},
+        start_opts: [directory: "storybook", file: "button.story.exs"]
+      )
+
     on_exit(fn -> Breeze.Test.stop(session) end)
 
     nav_header =
@@ -780,7 +863,8 @@ defmodule Breeze.Storybook.LayoutTest do
     session =
       Breeze.Test.start!(Breeze.Storybook,
         size: {80, 24},
-        theme: Breeze.Theme.builtin(:gruvbox)
+        theme: Breeze.Theme.builtin(:gruvbox),
+        start_opts: [directory: "storybook", file: "button.story.exs"]
       )
 
     on_exit(fn -> Breeze.Test.stop(session) end)
@@ -873,7 +957,8 @@ defmodule Breeze.Storybook.InteractionLayoutTest do
       start_app_server(
         view: Breeze.Storybook,
         terminal: terminal,
-        theme: Breeze.Theme.builtin(:gruvbox)
+        theme: Breeze.Theme.builtin(:gruvbox),
+        start_opts: [directory: "storybook", file: "button.story.exs"]
       )
 
     on_exit(fn -> stop_server(pid) end)
@@ -1076,13 +1161,16 @@ defmodule Breeze.Storybook.NavigationTest do
     session = Breeze.Test.start!(Breeze.Storybook, size: {80, 24})
     on_exit(fn -> Breeze.Test.stop(session) end)
 
+    _ = Breeze.Test.render!(session)
+    select_story!(session.pid, "button")
+
     assert {:noreply, "storybook-preview::storybook-button-primary", true} =
              Breeze.Test.focus(session, "storybook-preview::storybook-button-primary")
 
     assert {:noreply, "storybook-nav", true} =
              Breeze.Test.input(session, %{"ctrlKey" => true, "key" => "ArrowDown"})
 
-    assert Breeze.Test.render_text!(session) =~ "Preview: Checkbox"
+    assert Breeze.Test.render_text!(session) =~ "Preview: Chart (Bar) / Grouped"
 
     assert {:noreply, "storybook-nav", true} =
              Breeze.Test.input(session, %{"ctrlKey" => true, "key" => "ArrowUp"})
@@ -1140,31 +1228,15 @@ defmodule Breeze.Storybook.PreviewNavigationTest do
     on_exit(fn -> stop_server(pid) end)
 
     wait_until(fn ->
-      :sys.get_state(view_pid).assigns.current_story_id == "button"
+      Map.has_key?(:sys.get_state(pid).children, "storybook-preview")
     end)
 
-    send(pid, {reader, {:data, "\e[B"}})
+    select_story!(view_pid, "input")
+    send(pid, :child_invalidated)
 
     wait_until(fn ->
-      :sys.get_state(view_pid).assigns.current_story_id == "checkbox"
-    end)
-
-    send(pid, {reader, {:data, "\e[B"}})
-
-    wait_until(fn ->
-      :sys.get_state(view_pid).assigns.current_story_id == "dropdown"
-    end)
-
-    send(pid, {reader, {:data, "\e[B"}})
-
-    wait_until(fn ->
-      :sys.get_state(view_pid).assigns.current_story_id == "flash"
-    end)
-
-    send(pid, {reader, {:data, "\e[B"}})
-
-    wait_until(fn ->
-      :sys.get_state(view_pid).assigns.current_story_id == "input"
+      :sys.get_state(pid).children["storybook-preview"].view ==
+        Breeze.Storybook.Stories.Blocks.InputStory
     end)
 
     send(pid, {reader, {:data, "\t"}})
