@@ -1,6 +1,8 @@
 defmodule Breeze.SSHIExTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   import Breeze.TestSupport.WaitUntil
+
+  @moduletag capture_log: true
 
   defmodule Counter do
     use Breeze.View
@@ -155,7 +157,6 @@ defmodule Breeze.SSHIExTest do
     read_until(connection, channel, "iex(2)>")
   end
 
-  @tag capture_log: true
   test "failed startup restores the SSH I/O options", context do
     {connection, channel} = connect(context)
     command(connection, channel, "match?({:error, _}, Breeze.Server.run([]))")
