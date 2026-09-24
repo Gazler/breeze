@@ -1,3 +1,8 @@
+## [0.5.3] - 2026-09-24
+
+### Features
+
+- *(Breeze.InputRouter.IExShellProxy)* Use IODevice for existing ([9b03ecd](https://github.com/gazler/breeze/commit/9b03ecd3cd930a608690dc54787aa9e84205089a))
 ## [0.5.2] - 2026-09-18
 
 ### Features
