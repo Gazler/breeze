@@ -21,6 +21,28 @@ defmodule Breeze.InputRouter.IExShellProxyTest do
     refute IExShellProxy.io_device?(self())
   end
 
+  test "detects older groups with pending reads without mistaking the local terminal for SSH" do
+    groups =
+      for driver <- [Process.whereis(:user_drv), self()] do
+        spawn_link(fn ->
+          Process.put(:user_drv, driver)
+
+          receive do
+            :stop -> :ok
+          end
+        end)
+      end
+
+    [terminal_group, ssh_group] = groups
+
+    try do
+      refute IExShellProxy.io_device?(terminal_group)
+      assert IExShellProxy.io_device?(ssh_group)
+    after
+      Enum.each(groups, &send(&1, :stop))
+    end
+  end
+
   defp fake_group(driver) do
     spawn_link(fn ->
       receive do

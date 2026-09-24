@@ -17,7 +17,7 @@ defmodule Breeze.InputRouter.IExShellProxy do
             {^group_leader, :driver_id, driver} when is_pid(driver) ->
               driver != user_drv_on_node(node(group_leader))
           after
-            250 -> false
+            250 -> legacy_io_device?(group_leader)
           end
 
         send(caller, {ref, result})
@@ -31,6 +31,26 @@ defmodule Breeze.InputRouter.IExShellProxy do
       {:DOWN, ^monitor, :process, ^pid, _} ->
         false
     end
+  end
+
+  # OTP 26/27 do not answer driver_id while a character read is pending.
+  # Those group implementations keep the driver in their process dictionary.
+  defp legacy_io_device?(group_leader) do
+    with {:dictionary, dictionary} <-
+           :erpc.call(
+             node(group_leader),
+             :erlang,
+             :process_info,
+             [group_leader, :dictionary],
+             250
+           ),
+         driver when is_pid(driver) <- Keyword.get(dictionary, :user_drv) do
+      driver != user_drv_on_node(node(group_leader))
+    else
+      _ -> false
+    end
+  catch
+    _, _ -> false
   end
 
   def start_link(target, opts \\ []) do
