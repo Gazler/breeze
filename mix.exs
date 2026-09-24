@@ -26,7 +26,7 @@ defmodule Breeze.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger] ++ if(Mix.env() == :test, do: [:ssh, :iex], else: [])
     ]
   end
 
@@ -41,7 +41,7 @@ defmodule Breeze.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:termite, "~> 0.4 or ~> 0.5"},
+      {:termite, "~> 0.4.5 or ~> 0.5"},
       {:back_breeze, "~> 0.4.2"},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
       {:telemetry, "~> 1.0"},

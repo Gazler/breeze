@@ -3,6 +3,36 @@ defmodule Breeze.InputRouter.IExShellProxyTest do
 
   alias Breeze.InputRouter.IExShellProxy
 
+  test "distinguishes a session driver from the node's terminal driver" do
+    user_drv = Process.whereis(:user_drv)
+    assert is_pid(user_drv)
+
+    terminal_group = fake_group(user_drv)
+    ssh_group = fake_group(self())
+
+    refute IExShellProxy.io_device?(terminal_group)
+    assert IExShellProxy.io_device?(ssh_group)
+
+    send(terminal_group, :stop)
+    send(ssh_group, :stop)
+  end
+
+  test "unknown I/O devices retain the existing terminal path" do
+    refute IExShellProxy.io_device?(self())
+  end
+
+  defp fake_group(driver) do
+    spawn_link(fn ->
+      receive do
+        {:driver_id, caller} -> send(caller, {self(), :driver_id, driver})
+      end
+
+      receive do
+        :stop -> :ok
+      end
+    end)
+  end
+
   defmodule FakeUserDrv do
     use GenServer
 

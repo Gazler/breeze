@@ -4,6 +4,8 @@ defmodule Breeze.InputRouter do
   use GenServer
 
   alias Breeze.InputRouter.{IExShellProxy, SilentGroupLeader, TerminalCleanup, TerminalStart}
+
+  alias Termite.Terminal.IODevice
   alias Breeze.InputCapture
   alias Breeze.Theme.Probe, as: ThemeProbe
   alias Breeze.Clipboard.Probe, as: ClipboardProbe
@@ -508,10 +510,21 @@ defmodule Breeze.InputRouter do
   end
 
   defp start_terminal(opts) do
-    if pause_iex?(opts) and iex_started?() do
-      start_terminal_with_silent_group_leader(Keyword.get(opts, :terminal_opts, []))
-    else
-      %TerminalStart{terminal: Termite.Terminal.start(Keyword.get(opts, :terminal_opts, []))}
+    terminal_opts = Keyword.get(opts, :terminal_opts, [])
+
+    cond do
+      pause_iex?(opts) and not Keyword.has_key?(terminal_opts, :adapter) and
+          IExShellProxy.io_device?() ->
+        terminal_opts =
+          Keyword.merge(terminal_opts, adapter: IODevice, device: Process.group_leader())
+
+        %TerminalStart{terminal: Termite.Terminal.start(terminal_opts)}
+
+      pause_iex?(opts) and iex_started?() ->
+        start_terminal_with_silent_group_leader(terminal_opts)
+
+      true ->
+        %TerminalStart{terminal: Termite.Terminal.start(terminal_opts)}
     end
   end
 
@@ -569,6 +582,12 @@ defmodule Breeze.InputRouter do
   catch
     _kind, _reason -> :ok
   end
+
+  defp maybe_replace_iex_shell_reader(
+         %Termite.Terminal{adapter: {IODevice, _}} = terminal,
+         _opts
+       ),
+       do: %{io_device: terminal}
 
   defp maybe_replace_iex_shell_reader(
          %Termite.Terminal{

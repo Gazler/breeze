@@ -10,5 +10,5 @@
   "makeup_html": {:hex, :makeup_html, "0.2.0", "9f810da8d43d625ccd3f7ea25997e588fa541d80e0a8c6b895157ad5c7e9ca13", [:mix], [{:makeup, "~> 1.2", [hex: :makeup, repo: "hexpm", optional: false]}], "hexpm", "0856f7beb9a6a642ab1307e06d990fe39f0ba58690d0b8e662aa2e027ba331b2"},
   "nimble_parsec": {:hex, :nimble_parsec, "1.4.2", "8efba0122db06df95bfaa78f791344a89352ba04baedd3849593bfce4d0dc1c6", [:mix], [], "hexpm", "4b21398942dda052b403bbe1da991ccd03a053668d147d53fb8c4e0efe09c973"},
   "telemetry": {:hex, :telemetry, "1.4.2", "a0cb522801dffb1c49fe6e30561badffc7b6d0e180db1300df759faa22062855", [:rebar3], [], "hexpm", "928f6495066506077862c0d1646609eed891a4326bee3126ba54b60af61febb1"},
-  "termite": {:hex, :termite, "0.4.4", "ffd81e3c8ad27e09d08b7dd722548743567fcf15dd75260edec6d301597ffb9c", [:mix], [], "hexpm", "8d5b4b9368cae7c2a3ff9cc755c64ee34ea3652b0fa5e35872bd492933aec10a"},
+  "termite": {:hex, :termite, "0.4.5", "27256cfd7fd505328a79c0a4584f28b405a917e3911ed38872a079231ff8087a", [:mix], [], "hexpm", "e37d6de16a7843eadea2454e33554cb1b1a3a1e733fe7dd89a809b91823640e2"},
 }

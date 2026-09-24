@@ -153,6 +153,10 @@ defmodule Breeze.Server do
   This is intended for interactive sessions such as IEx. It starts the terminal
   input router without linking it to the caller, waits for the app to stop, and
   returns `:ok` instead of halting the VM.
+
+  In SSH-backed IEx sessions (including NervesSSH), input and output use that
+  session's I/O device. Local and distributed remote IEx retain the terminal
+  driver proxy. Explicit `:terminal` or `:terminal_opts` adapters take precedence.
   """
   @spec run(keyword()) :: :ok | {:error, term()}
   def run(opts) do

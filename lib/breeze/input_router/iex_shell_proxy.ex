@@ -1,6 +1,38 @@
 defmodule Breeze.InputRouter.IExShellProxy do
   @moduledoc false
 
+  # A distributed IEx shell still uses user_drv on the group leader's node.
+  # SSH shells use a separate group driver on that same node instead. Query the
+  # group itself: merely finding a registered user_drv can select the wrong TTY.
+  def io_device?(group_leader \\ Process.group_leader()) do
+    caller = self()
+    ref = make_ref()
+
+    {pid, monitor} =
+      spawn_monitor(fn ->
+        send(group_leader, {:driver_id, self()})
+
+        result =
+          receive do
+            {^group_leader, :driver_id, driver} when is_pid(driver) ->
+              driver != user_drv_on_node(node(group_leader))
+          after
+            250 -> false
+          end
+
+        send(caller, {ref, result})
+      end)
+
+    receive do
+      {^ref, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^pid, _} ->
+        false
+    end
+  end
+
   def start_link(target, opts \\ []) do
     previous_group_leader = Keyword.get(opts, :group_leader, Process.group_leader())
     input_mode_fun = Keyword.get(opts, :input_mode_fun, &set_input_mode/2)
@@ -19,6 +51,8 @@ defmodule Breeze.InputRouter.IExShellProxy do
   end
 
   def stop(nil), do: :ok
+
+  def stop(%{io_device: terminal}), do: Termite.Terminal.stop(terminal)
 
   def stop(%{} = proxy) do
     %{
