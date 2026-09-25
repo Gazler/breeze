@@ -45,15 +45,6 @@ defmodule Breeze.Docs.BlockPreviews do
 
   defp sections do
     [
-      {"Bar Chart",
-       [
-         {"Grouped", preview(__MODULE__.GroupedBarChartPreview, size: {44, 10})},
-         {"Stacked", preview(__MODULE__.StackedBarChartPreview, size: {44, 10})},
-         {"Horizontal grouped",
-          preview(__MODULE__.HorizontalGroupedBarChartPreview, size: {44, 10})},
-         {"Horizontal stacked",
-          preview(__MODULE__.HorizontalStackedBarChartPreview, size: {44, 10})}
-       ]},
       {"Button",
        [
          {"Default", preview(__MODULE__.ButtonPreview, size: {24, 3})},
@@ -88,10 +79,6 @@ defmodule Breeze.Docs.BlockPreviews do
       {"Keybinding Bar",
        [
          {"Default", preview(__MODULE__.KeybindingBarPreview, size: {50, 3})}
-       ]},
-      {"Line Chart",
-       [
-         {"Default", preview(__MODULE__.LineChartPreview, size: {44, 10})}
        ]},
       {"List",
        [
@@ -128,10 +115,6 @@ defmodule Breeze.Docs.BlockPreviews do
               "preview-scroll" => {Breeze.Implicit.Scroll, %{offset_y: 3}}
             }
           )}
-       ]},
-      {"Sparkline",
-       [
-         {"Shared scale", preview(__MODULE__.SparklinePreview, size: {32, 3})}
        ]},
       {"Spinner",
        [
@@ -298,8 +281,6 @@ defmodule Breeze.Docs.BlockPreviews do
     """
   end
 
-  defp component_ref("Bar Chart"), do: "Breeze.Blocks.bar_chart/1"
-  defp component_ref("Line Chart"), do: "Breeze.Blocks.line_chart/1"
   defp component_ref("Button"), do: "Breeze.Blocks.button/1"
   defp component_ref("Checkbox"), do: "Breeze.Blocks.checkbox/1"
   defp component_ref("Flash Group"), do: "Breeze.Blocks.flash_group/1"
@@ -312,14 +293,11 @@ defmodule Breeze.Docs.BlockPreviews do
   defp component_ref("Markdown"), do: "Breeze.Blocks.markdown/1"
   defp component_ref("Scroll"), do: "Breeze.Blocks.scroll/1"
   defp component_ref("Spinner"), do: "Breeze.Blocks.spinner/1"
-  defp component_ref("Sparkline"), do: "Breeze.Blocks.sparkline/1"
   defp component_ref("Panel"), do: "Breeze.Blocks.panel/1"
   defp component_ref("Modal"), do: "Breeze.Blocks.modal/1"
   defp component_ref("Textarea"), do: "Breeze.Blocks.textarea/1"
   defp component_ref("Tree"), do: "Breeze.Blocks.tree/1"
 
-  defp component_code("Bar Chart"), do: render_template_source(__MODULE__.GroupedBarChartPreview)
-  defp component_code("Line Chart"), do: render_template_source(__MODULE__.LineChartPreview)
   defp component_code("Button"), do: render_template_source(__MODULE__.ButtonPreview)
   defp component_code("Checkbox"), do: render_template_source(__MODULE__.CheckboxPreview)
   defp component_code("Flash Group"), do: render_template_source(__MODULE__.FlashGroupPreview)
@@ -335,7 +313,6 @@ defmodule Breeze.Docs.BlockPreviews do
   defp component_code("Markdown"), do: render_template_source(__MODULE__.MarkdownPreview)
   defp component_code("Scroll"), do: render_template_source(__MODULE__.ScrollPreview)
   defp component_code("Spinner"), do: render_template_source(__MODULE__.SpinnerDotsPreview)
-  defp component_code("Sparkline"), do: render_template_source(__MODULE__.SparklinePreview)
   defp component_code("Panel"), do: render_template_source(__MODULE__.PanelPreview)
   defp component_code("Modal"), do: render_template_source(__MODULE__.ModalPreview)
   defp component_code("Textarea"), do: render_template_source(__MODULE__.TextareaPreview)
@@ -394,28 +371,6 @@ defmodule Breeze.Docs.BlockPreviews do
       %{id: "tokyo", rank: "1", city: "Tokyo", country: "Japan", population: "37.2m"},
       %{id: "delhi", rank: "2", city: "Delhi", country: "India", population: "32.0m"},
       %{id: "shanghai", rank: "3", city: "Shanghai", country: "China", population: "28.5m"}
-    ]
-  end
-
-  def chart_series do
-    [%{key: :input, name: "Input"}, %{key: :output, name: "Output"}]
-  end
-
-  def line_chart_data do
-    [
-      %{x: 0, values: %{input: 180, output: 120}},
-      %{x: 1, values: %{input: 260, output: 180}},
-      %{x: 2, values: %{input: 220, output: 150}},
-      %{x: 3, values: %{input: 420, output: 280}},
-      %{x: 4, values: %{input: 300, output: 220}}
-    ]
-  end
-
-  def bar_chart_data do
-    [
-      %{x: "Run A", values: %{input: 420, output: 180}},
-      %{x: "Run B", values: %{input: 610, output: 240}},
-      %{x: "Run C", values: %{input: 350, output: 210}}
     ]
   end
 
@@ -767,106 +722,6 @@ defmodule Breeze.Docs.BlockPreviews do
     end
   end
 
-  defmodule LineChartPreview do
-    use Breeze.View
-    import Breeze.Blocks
-
-    def mount(_opts, term), do: {:ok, term}
-    def handle_event(_, _, term), do: {:noreply, term}
-
-    def render(assigns) do
-      assigns =
-        assign(assigns,
-          data: Breeze.Docs.BlockPreviews.line_chart_data(),
-          series: Breeze.Docs.BlockPreviews.chart_series()
-        )
-
-      ~H"""
-      <.line_chart data={@data} series={@series} width={44} height={10} min={0} max={500}/>
-      """
-    end
-  end
-
-  defmodule GroupedBarChartPreview do
-    use Breeze.View
-    import Breeze.Blocks
-
-    def mount(_opts, term), do: {:ok, term}
-    def handle_event(_, _, term), do: {:noreply, term}
-
-    def render(assigns) do
-      assigns =
-        assign(assigns,
-          data: Breeze.Docs.BlockPreviews.bar_chart_data(),
-          series: Breeze.Docs.BlockPreviews.chart_series()
-        )
-
-      ~H"""
-      <.bar_chart data={@data} series={@series} width={44} height={10} mode={:grouped}/>
-      """
-    end
-  end
-
-  defmodule StackedBarChartPreview do
-    use Breeze.View
-    import Breeze.Blocks
-
-    def mount(_opts, term), do: {:ok, term}
-    def handle_event(_, _, term), do: {:noreply, term}
-
-    def render(assigns) do
-      assigns =
-        assign(assigns,
-          data: Breeze.Docs.BlockPreviews.bar_chart_data(),
-          series: Breeze.Docs.BlockPreviews.chart_series()
-        )
-
-      ~H"""
-      <.bar_chart data={@data} series={@series} width={44} height={10} mode={:stacked}/>
-      """
-    end
-  end
-
-  defmodule HorizontalGroupedBarChartPreview do
-    use Breeze.View
-    import Breeze.Blocks
-
-    def mount(_opts, term), do: {:ok, term}
-    def handle_event(_, _, term), do: {:noreply, term}
-
-    def render(assigns) do
-      assigns =
-        assign(assigns,
-          data: Breeze.Docs.BlockPreviews.bar_chart_data(),
-          series: Breeze.Docs.BlockPreviews.chart_series()
-        )
-
-      ~H"""
-      <.bar_chart data={@data} series={@series} width={44} mode={:grouped} orientation={:horizontal}/>
-      """
-    end
-  end
-
-  defmodule HorizontalStackedBarChartPreview do
-    use Breeze.View
-    import Breeze.Blocks
-
-    def mount(_opts, term), do: {:ok, term}
-    def handle_event(_, _, term), do: {:noreply, term}
-
-    def render(assigns) do
-      assigns =
-        assign(assigns,
-          data: Breeze.Docs.BlockPreviews.bar_chart_data(),
-          series: Breeze.Docs.BlockPreviews.chart_series()
-        )
-
-      ~H"""
-      <.bar_chart data={@data} series={@series} width={44} mode={:stacked} orientation={:horizontal}/>
-      """
-    end
-  end
-
   defmodule TablePreview do
     use Breeze.View
     import Breeze.Blocks
@@ -997,23 +852,6 @@ defmodule Breeze.Docs.BlockPreviews do
       <.scroll id="preview-scroll" class="w-26 h-8 border">
         <box :for={row <- @rows}>{row}</box>
       </.scroll>
-      """
-    end
-  end
-
-  defmodule SparklinePreview do
-    use Breeze.View
-    import Breeze.Blocks
-
-    def mount(_opts, term), do: {:ok, term}
-    def handle_event(_, _, term), do: {:noreply, term}
-
-    def render(assigns) do
-      ~H"""
-      <box class="inline">
-        <box class="w-8">CPU</box>
-        <.sparkline values={[10, 20, 15, 40, 70, 90, 60, 30]} min={0} max={100}/>
-      </box>
       """
     end
   end

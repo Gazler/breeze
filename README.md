@@ -249,3 +249,10 @@ end
 `render_text!/2` removes styling for ordinary content assertions. Tests can
 also target rendered IDs with `focus/2`, `click/3`, `wheel/4`, and `element/2`,
 or rebind a session returned by `resize/2` to exercise responsive layouts.
+
+## Ecosystem
+
+- **breeze_charts** — Sparklines, line charts, and grouped or stacked bar charts.
+  [GitHub](https://github.com/Gazler/breeze_charts) · [Hex](https://hex.pm/packages/breeze_charts) · [HexDocs](https://hexdocs.pm/breeze_charts)
+- **breeze_timeline** — An opt-in runtime timeline for inspecting and restoring view state.
+  [GitHub](https://github.com/Gazler/breeze_timeline) · [Hex](https://hex.pm/packages/breeze_timeline) · [HexDocs](https://hexdocs.pm/breeze_timeline)

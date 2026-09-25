@@ -4,20 +4,17 @@ defmodule Breeze.Storybook.RegistryTest do
   alias Breeze.Storybook.Registry
 
   @block_story_ids %{
-    bar_chart: "bar-chart",
     button: "button",
     checkbox: "checkbox",
     dropdown: "dropdown",
     flash_group: "flash",
     input: "input",
     keybinding_bar: "keybinding-bar",
-    line_chart: "line-chart",
     list: "list",
     markdown: "markdown",
     modal: "modal",
     panel: "panel",
     scroll: "scroll",
-    sparkline: "sparkline",
     spinner: "spinner",
     table: "table",
     tabs: "tabs",
