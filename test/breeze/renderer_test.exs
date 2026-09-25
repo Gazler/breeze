@@ -4,6 +4,8 @@ defmodule Breeze.RendererTest do
   import Breeze.TestSupport.ProcessHelpers,
     only: [start_child_server: 1, stop_gen_server: 1]
 
+  import Breeze.TestSupport.RenderedAssertions
+
   alias BackBreeze.VirtualText.Source
   alias Breeze.Renderer
 
@@ -512,12 +514,14 @@ defmodule Breeze.RendererTest do
 
   describe "render_to_string/2" do
     test "converts the boxes to terminal output" do
-      assert Renderer.render_to_string(Example, %{name: "world"}) ==
-               """
-               ┌\e[38;5;3mTitle\e[0m──────┐
-               │\e[1mHello world\e[0m│
-               └───────────┘\
-               """
+      expected =
+        """
+        ┌\e[38;5;3mTitle\e[0m──────┐
+        │\e[1mHello world\e[0m│
+        └───────────┘\
+        """
+
+      assert_rendered Renderer.render_to_string(Example, %{name: "world"}) == expected
     end
 
     test "supports token classes" do
@@ -777,13 +781,15 @@ defmodule Breeze.RendererTest do
           }
         )
 
-      assert box.content ==
-               """
-               ┌──────┐
-               │BBBB  │
-               │CCCC  │
-               └──────┘\
-               """
+      expected =
+        """
+        ┌──────┐
+        │BBBB  │
+        │CCCC  │
+        └──────┘\
+        """
+
+      assert_rendered box.content == expected
     end
 
     test "selected-with-owner lets descendants react to implicit child selection" do
@@ -852,14 +858,16 @@ defmodule Breeze.RendererTest do
 
       plain_content = Regex.replace(~r/\e\[[0-9;]*m/u, box.content, "")
 
-      assert plain_content =~
-               """
-               ┌──────────┐
-               │          │
-               │          │
-               │         X│
-               └──────────┘\
-               """
+      expected =
+        """
+        ┌──────────┐
+        │          │
+        │          │
+        │         X│
+        └──────────┘\
+        """
+
+      assert_rendered plain_content =~ expected
     end
 
     test "supports fixed positioning with right and bottom offsets" do
@@ -868,12 +876,14 @@ defmodule Breeze.RendererTest do
           terminal: %Termite.Terminal{size: %{width: 5, height: 3}}
         )
 
-      assert box.content ==
-               """
-                    
-                    
-                   X\
-               """
+      expected =
+        """
+             
+             
+            X\
+        """
+
+      assert_rendered box.content == expected
     end
 
     test "supports centered fixed positioning" do
@@ -909,13 +919,15 @@ defmodule Breeze.RendererTest do
           terminal: %Termite.Terminal{size: %{width: 6, height: 4}}
         )
 
-      assert box.content ==
-               """
-                     
-                OK   
-                     
-                     \
-               """
+      expected =
+        """
+              
+         OK   
+              
+              \
+        """
+
+      assert_rendered box.content == expected
     end
 
     test "supports inset-constrained fixed screen boxes" do
@@ -924,15 +936,17 @@ defmodule Breeze.RendererTest do
           terminal: %Termite.Terminal{size: %{width: 10, height: 6}}
         )
 
-      assert box.content ==
-               """
-                         
-                ┌──────┐ 
-                │      │ 
-                │      │ 
-                └──────┘ 
-                         \
-               """
+      expected =
+        """
+                  
+         ┌──────┐ 
+         │      │ 
+         │      │ 
+         └──────┘ 
+                  \
+        """
+
+      assert_rendered box.content == expected
     end
 
     test "supports centered fixed positioning on the x axis only" do
@@ -941,13 +955,15 @@ defmodule Breeze.RendererTest do
           terminal: %Termite.Terminal{size: %{width: 10, height: 4}}
         )
 
-      assert box.content ==
-               """
-                   OK    
-                         
-                         
-                         \
-               """
+      expected =
+        """
+            OK    
+                  
+                  
+                  \
+        """
+
+      assert_rendered box.content == expected
     end
 
     test "supports centered fixed positioning on the y axis only" do
@@ -956,24 +972,28 @@ defmodule Breeze.RendererTest do
           terminal: %Termite.Terminal{size: %{width: 10, height: 4}}
         )
 
-      assert box.content ==
-               """
-                         
-               OK        
-                         
-                         \
-               """
+      expected =
+        """
+                  
+        OK        
+                  
+                  \
+        """
+
+      assert_rendered box.content == expected
     end
 
     test "supports centered text alignment classes" do
       {_, box} = Renderer.render(TextAlignmentExample, %{})
 
-      assert box.content ==
-               """
-               ┌─────┐
-               │ Hey │
-               └─────┘\
-               """
+      expected =
+        """
+        ┌─────┐
+        │ Hey │
+        └─────┘\
+        """
+
+      assert_rendered box.content == expected
     end
 
     test "renders a complete edge border within the declared dimensions" do
@@ -982,23 +1002,27 @@ defmodule Breeze.RendererTest do
       assert box.width == 10
       assert box.height == 4
 
-      assert box.content ==
-               """
-               ▗▄▄▄▄▄▄▄▄▖
-               ▐Hello   ▌
-               ▐        ▌
-               ▝▀▀▀▀▀▀▀▀▘\
-               """
+      expected =
+        """
+        ▗▄▄▄▄▄▄▄▄▖
+        ▐Hello   ▌
+        ▐        ▌
+        ▝▀▀▀▀▀▀▀▀▘\
+        """
+
+      assert_rendered box.content == expected
     end
 
     test "supports bottom padding classes" do
       {_, box} = Renderer.render(PaddingBottomExample, %{})
 
-      assert box.content ==
-               """
-               Top
-                  \
-               """
+      expected =
+        """
+        Top
+           \
+        """
+
+      assert_rendered box.content == expected
     end
   end
 

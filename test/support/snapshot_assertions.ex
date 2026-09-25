@@ -81,6 +81,7 @@ defmodule Breeze.SnapshotAssertions do
 
     normalized =
       content
+      |> String.replace("\r\n", "\n")
       |> String.split("\n", trim: false)
       |> Enum.map(&String.trim_trailing(&1, " "))
       |> Enum.join("\n")
