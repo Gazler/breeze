@@ -956,8 +956,10 @@ defmodule Breeze.InputRouterTest do
         terminal_opts: [adapter: FakeAdapter, owner: parent]
       )
 
-    server_pid = :sys.get_state(session_pid).server_pid
     session_ref = Process.monitor(session_pid)
+    # This round trip also ensures the session has processed the monitor signal
+    # before an exit from a different process can overtake it.
+    server_pid = :sys.get_state(session_pid).server_pid
 
     Process.exit(server_pid, :unexpected_failure)
 

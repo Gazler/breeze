@@ -73,12 +73,23 @@ defmodule Breeze.Clipboard.SessionTest do
   end
 
   defp start_session do
+    owner = self()
+
     {:ok, router} =
-      start_input_router(view: Root, terminal_opts: [adapter: Adapter, owner: self()])
+      start_input_router(
+        view: Root,
+        terminal_opts: [adapter: Adapter, owner: owner],
+        internal: [
+          clipboard_probe_timer: fn pid, message, delay ->
+            send(owner, {:probe_timer, pid, message, delay})
+          end
+        ]
+      )
 
     runtime = Breeze.Server.runtime_pid(router)
     reader = :sys.get_state(router).reader
-    assert_receive {:terminal_write, ^reader, "\e[c"}
+    assert_receive {:probe_timer, ^router, :clipboard_probe_timeout, 250}, 1_000
+    assert_receive {:terminal_write, ^reader, "\e[c"}, 1_000
     {router, runtime, reader}
   end
 
@@ -125,7 +136,7 @@ defmodule Breeze.Clipboard.SessionTest do
   test "fallback probe completes and timeout stays unknown without swallowing normal input" do
     {router, runtime, reader} = start_session()
     send(router, {reader, {:data, "\e[?62;22c"}})
-    assert_receive {:terminal_write, ^reader, "\eP+q4d73\e\\"}
+    assert_receive {:terminal_write, ^reader, "\eP+q4d73\e\\"}, 1_000
     encoded = Base.encode16("\e]52;%p1%s;%p2%s\a")
     send(router, {reader, {:data, "\eP1+r4d73=" <> encoded <> "\e\\"}})
 
@@ -134,7 +145,8 @@ defmodule Breeze.Clipboard.SessionTest do
     end)
 
     {other, other_runtime, other_reader} = start_session()
-    wait_until(fn -> :sys.get_state(other).clipboard_probe.phase == :done end, 200)
+    send(other, :clipboard_probe_timeout)
+    assert :sys.get_state(other).clipboard_probe.phase == :done
     send(other, {other_reader, {:data, "\e[?62;52cx"}})
     wait_until(fn -> metadata(other_runtime).assigns.keys == ["x"] end)
 

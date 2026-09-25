@@ -660,7 +660,7 @@ defmodule Breeze.LiveView.CrashTest do
             Breeze.Server.stop(router)
         end
 
-        assert_receive {:DOWN, ^monitor, :process, ^router, :normal}
+        assert_receive {:DOWN, ^monitor, :process, ^router, :normal}, 1_000
         assert :ok = callback.(0)
 
         writes = IO.iodata_to_binary(drain_terminal_writes())

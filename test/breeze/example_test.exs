@@ -9,6 +9,12 @@ defmodule Breeze.ExampleTest do
       ref = make_ref()
       send(owner, {:terminal_started, self(), ref})
 
+      if Keyword.get(opts, :gate_start?, false) do
+        receive do
+          :finish_start -> :ok
+        end
+      end
+
       {:ok,
        %{
          ref: ref,
@@ -136,5 +142,58 @@ defmodule Breeze.ExampleTest do
 
     assert_receive {:terminal_started, session, _reader}
     refute Process.alive?(session)
+  end
+
+  for reason <- [:normal, :unexpected_failure],
+      keep_alive <- [:infinity, 0],
+      trapping? <- [false, true] do
+    @tag capture_log: true
+    test "preserves an early #{reason} exit with keep_alive=#{keep_alive}, trap_exit=#{trapping?}" do
+      parent = self()
+
+      task =
+        Task.async(fn ->
+          Process.flag(:trap_exit, unquote(trapping?))
+
+          result =
+            try do
+              Breeze.Example.run(
+                [
+                  view: View,
+                  reload: false,
+                  logger: false,
+                  terminal_opts: [adapter: FakeAdapter, owner: parent, gate_start?: true],
+                  internal: [at_exit_register: fn _callback -> :ok end]
+                ],
+                keep_alive: unquote(keep_alive)
+              )
+            catch
+              :exit, reason -> {:exit, reason}
+            end
+
+          {result, Process.info(self(), :trap_exit)}
+        end)
+
+      assert_receive {:terminal_started, session, _reader}, 1_000
+      # Keep the caller inside start_link until the session has already exited.
+      :erlang.suspend_process(task.pid)
+
+      try do
+        monitor = Process.monitor(session)
+        send(session, :finish_start)
+        :sys.get_state(session)
+
+        if unquote(reason) == :normal,
+          do: Breeze.Server.stop(session),
+          else: Process.exit(session, unquote(reason))
+
+        assert_receive {:DOWN, ^monitor, :process, ^session, unquote(reason)}, 1_000
+      after
+        :erlang.resume_process(task.pid)
+      end
+
+      expected = if unquote(reason) == :normal, do: :ok, else: {:exit, unquote(reason)}
+      assert {^expected, {:trap_exit, unquote(trapping?)}} = Task.await(task)
+    end
   end
 end

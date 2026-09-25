@@ -111,7 +111,11 @@ defmodule Breeze.InputRouter do
 
       Enum.each(Enum.reverse(deferred_messages), &send(self(), &1))
 
-      {:ok, state, {:continue, {:maybe_start_theme_probe, Keyword.get(opts, :theme)}}}
+      schedule_probe_timeout =
+        internal_get(opts, :clipboard_probe_timer, &Process.send_after/3)
+
+      {:ok, state,
+       {:continue, {:maybe_start_theme_probe, Keyword.get(opts, :theme), schedule_probe_timeout}}}
     catch
       kind, reason ->
         stacktrace = __STACKTRACE__
@@ -132,9 +136,9 @@ defmodule Breeze.InputRouter do
   end
 
   @impl true
-  def handle_continue({:maybe_start_theme_probe, theme}, state) do
+  def handle_continue({:maybe_start_theme_probe, theme, schedule_probe_timeout}, state) do
     state = maybe_start_theme_probe(state, theme)
-    Process.send_after(self(), :clipboard_probe_timeout, ClipboardProbe.timeout_ms())
+    schedule_probe_timeout.(self(), :clipboard_probe_timeout, ClipboardProbe.timeout_ms())
     terminal = Termite.Terminal.write(state.terminal, ClipboardProbe.query())
     {:noreply, %{state | terminal: terminal, clipboard_probe: ClipboardProbe.new()}}
   end
