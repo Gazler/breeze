@@ -1,6 +1,8 @@
 defmodule Breeze.RichTextTest do
   use ExUnit.Case, async: true
 
+  import Breeze.TestSupport.RenderedAssertions
+
   alias BackBreeze.TextSpan
 
   defmodule InlineSpanExample do
@@ -25,7 +27,7 @@ defmodule Breeze.RichTextTest do
 
     output = BackBreeze.Style.render(style, content)
 
-    assert output ==
+    assert_rendered output ==
              """
              ┌───────────┐
              │\e[38;5;2mHello \e[0m\e[1;38;5;4mWorld\e[0m│
@@ -48,7 +50,7 @@ defmodule Breeze.RichTextTest do
 
     output = BackBreeze.Style.render(style, content)
 
-    assert output ==
+    assert_rendered output ==
              """
              ┌──────┐
              │\e[38;5;2mHello \e[0m│
@@ -77,7 +79,7 @@ defmodule Breeze.RichTextTest do
 
     output = BackBreeze.Style.render(style, content, offset_top: 197)
 
-    assert output ==
+    assert_rendered output ==
              """
              ┌────────┐
              │\e[38;5;2mLine \e[0m\e[1m198\e[0m│

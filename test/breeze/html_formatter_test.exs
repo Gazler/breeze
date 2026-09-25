@@ -1,12 +1,14 @@
 defmodule Breeze.HTMLFormatterTest do
   use ExUnit.Case, async: true
 
+  import Breeze.TestSupport.RenderedAssertions
+
   alias Breeze.HTMLFormatter
 
   test "formats nested elements and interpolation" do
     source = "<box><box style=\"bold\">Hello {@name}</box></box>"
 
-    assert HTMLFormatter.format(source, sigil: :H, opening_delimiter: "\"\"\"") ==
+    assert_rendered HTMLFormatter.format(source, sigil: :H, opening_delimiter: "\"\"\"") ==
              """
              <box>
                <box style="bold">Hello {@name}</box>
@@ -17,7 +19,7 @@ defmodule Breeze.HTMLFormatterTest do
   test "wraps attributes when a line is too long" do
     source = "<.panel id={@id} class=\"foo bar baz\" br-change=\"change\" />"
 
-    assert HTMLFormatter.format(source,
+    assert_rendered HTMLFormatter.format(source,
              sigil: :H,
              opening_delimiter: "\"\"\"",
              line_length: 30
@@ -35,7 +37,7 @@ defmodule Breeze.HTMLFormatterTest do
     source =
       "<.table><:col :for={item <- @items} :let={row} :if={@enabled}>{row.value}</:col></.table>"
 
-    assert HTMLFormatter.format(source, sigil: :H, opening_delimiter: "\"\"\"") ==
+    assert_rendered HTMLFormatter.format(source, sigil: :H, opening_delimiter: "\"\"\"") ==
              """
              <.table>
                <:col :for={item <- @items} :let={row} :if={@enabled}>{row.value}</:col>
@@ -46,7 +48,7 @@ defmodule Breeze.HTMLFormatterTest do
   test "formats slot blocks with directives" do
     source = "<.list><:item :for={x <- @items} value={x}><box>{x}</box></:item></.list>"
 
-    assert HTMLFormatter.format(source,
+    assert_rendered HTMLFormatter.format(source,
              sigil: :H,
              opening_delimiter: "\"\"\"",
              line_length: 40
@@ -63,7 +65,7 @@ defmodule Breeze.HTMLFormatterTest do
   test "keeps eex expressions and assign syntax" do
     source = "<box><%= String.upcase(@name) %></box>"
 
-    assert HTMLFormatter.format(source, sigil: :H, opening_delimiter: "\"\"\"") ==
+    assert_rendered HTMLFormatter.format(source, sigil: :H, opening_delimiter: "\"\"\"") ==
              """
              <box><%= String.upcase(@name) %></box>
              """
@@ -92,7 +94,7 @@ defmodule Breeze.HTMLFormatterTest do
   test "formats boolean and spread attributes" do
     source = "<box focusable id={@id} {@rest}>x</box>"
 
-    assert HTMLFormatter.format(source,
+    assert_rendered HTMLFormatter.format(source,
              sigil: :H,
              opening_delimiter: "\"\"\"",
              line_length: 20
@@ -117,7 +119,7 @@ defmodule Breeze.HTMLFormatterTest do
         opening_delimiter: "\"\"\""
       )
 
-    assert formatted ==
+    assert_rendered formatted ==
              """
              <box>
                <box>a</box>
