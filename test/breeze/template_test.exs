@@ -1,6 +1,17 @@
 defmodule Breeze.TemplateTest do
   use ExUnit.Case, async: true
 
+  test "normalizes Windows line endings before parsing template expressions" do
+    source =
+      "<box>{if true do\r\n" <>
+        "  \"yes\"\r\n" <>
+        "else\r\n" <>
+        "  \"no\"\r\n" <>
+        "end}</box>"
+
+    assert %Breeze.Template{} = Breeze.Template.compile!(source, __ENV__)
+  end
+
   defmodule ExpressionHelpers do
     def decorate(value), do: "*#{value}*"
   end

@@ -1123,7 +1123,7 @@ defmodule Breeze.Template do
     leading_newline? = Regex.match?(~r/^\s*\n/, text)
     trailing_newline? = Regex.match?(~r/\n\s*$/, text)
 
-    text = String.replace(text, ~r/\n[ \t]*/, " ")
+    text = String.replace(text, ~r/\r?\n[ \t]*/, " ")
     text = if leading_newline?, do: String.trim_leading(text), else: text
     text = if trailing_newline?, do: String.trim_trailing(text), else: text
 
