@@ -1,6 +1,8 @@
 defmodule Breeze.VirtualTextTest do
   use ExUnit.Case, async: true
 
+  import Breeze.TestSupport.RenderedAssertions
+
   test "renders virtual text near the end of a fixed-height viewport" do
     content =
       1..2_000
@@ -17,7 +19,7 @@ defmodule Breeze.VirtualTextTest do
 
     output = BackBreeze.Style.render(style, content, offset_top: 1_996)
 
-    assert output ==
+    assert_rendered output ==
              """
              ┌────────────┐
              │Line 1997...│
@@ -48,7 +50,7 @@ defmodule Breeze.VirtualTextTest do
 
     output = BackBreeze.Style.render(style, content, offset_top: 1_996)
 
-    assert output ==
+    assert_rendered output ==
              """
              ┌────────────┐
              │Line 1997...│
