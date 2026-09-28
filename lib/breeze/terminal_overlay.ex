@@ -13,8 +13,13 @@ defmodule Breeze.TerminalOverlay do
     end
   end
 
-  def render_overlays(overlays) when is_list(overlays) do
-    Enum.map_join(overlays, "", &render_overlay/1)
+  def render_overlays(overlays, row_offset \\ 0) when is_list(overlays) do
+    Enum.map_join(overlays, "", fn overlay ->
+      overlay =
+        if row_offset == 0, do: overlay, else: Map.update!(overlay, :y, &(&1 + row_offset))
+
+      render_overlay(overlay)
+    end)
   end
 
   def render_overlay(nil), do: ""

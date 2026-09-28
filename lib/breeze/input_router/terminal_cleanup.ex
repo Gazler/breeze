@@ -1,16 +1,17 @@
 defmodule Breeze.InputRouter.TerminalCleanup do
   @moduledoc false
 
-  defstruct [:guard, :terminal, alt_screen?: true, enhanced_keyboard?: true]
+  defstruct [:guard, :terminal, alt_screen?: true, enhanced_keyboard?: true, inline?: false]
 
   def register(terminal, opts) do
-    guard = :atomics.new(2, signed: false)
+    guard = :atomics.new(3, signed: false)
     :ok = :atomics.put(guard, 1, 1)
 
     cleanup = %__MODULE__{
       guard: guard,
       terminal: terminal,
       alt_screen?: Keyword.get(opts, :alt_screen?, true),
+      inline?: Keyword.get(opts, :inline?, false),
       enhanced_keyboard?: Keyword.get(opts, :enhanced_keyboard?, true)
     }
 
@@ -36,6 +37,13 @@ defmodule Breeze.InputRouter.TerminalCleanup do
     :atomics.put(guard, 2, if(preserve?, do: 1, else: 0))
   end
 
+  def track_inline(nil, _inline), do: :ok
+  def track_inline(_cleanup, nil), do: :ok
+
+  def track_inline(%__MODULE__{guard: guard}, inline) do
+    :atomics.put(guard, 3, inline.top + max(inline.height, 1))
+  end
+
   defp claim(guard), do: :atomics.compare_exchange(guard, 1, 1, 0) == :ok
 
   defp restore_at_exit(cleanup) do
@@ -53,10 +61,18 @@ defmodule Breeze.InputRouter.TerminalCleanup do
     terminal
     |> maybe_disable_enhanced_keyboard(cleanup.enhanced_keyboard?)
     |> Termite.Screen.disable_mouse()
-    |> maybe_clear_screen(preserve?)
+    |> maybe_clear_screen(preserve? or cleanup.inline?)
     |> Termite.Screen.show_cursor()
-    |> maybe_exit_alt_screen(cleanup.alt_screen? and not preserve?)
-    |> Termite.Terminal.write("\r")
+    |> maybe_exit_alt_screen(cleanup.alt_screen? and not preserve? and not cleanup.inline?)
+    |> Termite.Terminal.write(prompt_position(cleanup))
+  end
+
+  defp prompt_position(%{inline?: false}), do: "\r"
+
+  defp prompt_position(cleanup) do
+    bottom = :atomics.get(cleanup.guard, 3)
+    position = if bottom > 0, do: "\e[#{bottom};1H", else: ""
+    "\e[?2026l" <> position <> Breeze.Server.Inline.history_region() <> "\e[0m\r\n"
   end
 
   defp maybe_clear_screen(terminal, true), do: terminal

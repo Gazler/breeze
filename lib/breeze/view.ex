@@ -536,6 +536,27 @@ defmodule Breeze.View do
     update_flash(term_or_assigns, &Breeze.Flash.expire(&1, id, token))
   end
 
+  @doc """
+  Appends text to an inline session's terminal history and returns the term.
+
+  The live region is redrawn below the completed output. This helper queues the
+  write without blocking the view callback. It has no effect in fullscreen mode.
+  Text is wrapped to the terminal width. ANSI colors, text styles and OSC 8
+  hyperlinks are preserved. Other terminal controls are removed. Styles are reset
+  and hyperlinks are closed before redrawing the live region.
+
+      term
+      |> append_scrollback("Finished processing the request.")
+      |> assign(status: :ready)
+
+  Use `Breeze.Server.append_scrollback/2` when writing from outside a view.
+  """
+  @spec append_scrollback(Breeze.Term.t(), IO.chardata()) :: Breeze.Term.t()
+  def append_scrollback(%Breeze.Term{server: server} = term, content) when is_pid(server) do
+    send(server, {:breeze_scrollback, IO.chardata_to_string(content)})
+    term
+  end
+
   @doc "Sets the focused element ID, or clears focus when `value` is `nil`."
   @spec focus(Breeze.Term.t(), String.t() | nil) :: Breeze.Term.t()
   def focus(term, value) do

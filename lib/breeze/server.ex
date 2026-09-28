@@ -41,13 +41,23 @@ defmodule Breeze.Server do
       `notify_animation?: true`.
     * `:alt_screen` - enters the terminal alternate screen. Defaults
       to `true`.
+    * `:screen` - `:fullscreen` (default) or `:inline`. Inline mode draws below
+      existing output on the normal screen and leaves its final frame visible.
+      It overrides `:alt_screen` to `false`.
+    * `:inline_height` - `:auto` (default) grows the inline region with its
+      content, up to the terminal height. A positive integer reserves that many
+      rows, capped at the terminal height, and becomes the view's screen height.
     * `:hide_cursor` - hides the terminal cursor while the app runs.
       Defaults to `true`.
     * `:enhanced_keyboard` - enables enhanced keyboard reporting.
       Defaults to `true`.
     * `:mouse` - enables mouse tracking. Defaults to `false`. Pass
       `true` for click mode or keyword options for
-      `Termite.Screen.enable_mouse/2`.
+      `Termite.Screen.enable_mouse/2`. Mouse tracking also captures wheel
+      events, so normal mouse-wheel scrollback is generally unavailable while
+      enabled, including in inline mode. History is retained. Use the terminal's
+      scrollback shortcuts or mouse-capture bypass, if supported. Keep `false`
+      for normal terminal scrolling and text selection.
     * `:terminal_opts` - options passed to `Termite.Terminal.start/1`
       when Breeze starts the terminal.
     * `:terminal` - an existing `%Termite.Terminal{}` to use instead
@@ -80,6 +90,7 @@ defmodule Breeze.Server do
     Error,
     Frame,
     FrameDisplay,
+    Inline,
     Input,
     Inspector,
     RenderTracking
@@ -124,6 +135,8 @@ defmodule Breeze.Server do
           {:view, module()}
           | {:start_opts, keyword()}
           | {:alt_screen, boolean()}
+          | {:screen, :fullscreen | :inline}
+          | {:inline_height, :auto | pos_integer()}
           | {:hide_cursor, boolean()}
           | {:enhanced_keyboard, boolean()}
           | {:mouse, boolean() | keyword()}
@@ -190,6 +203,24 @@ defmodule Breeze.Server do
   catch
     :exit, :noproc -> :ok
     :exit, {:noproc, {GenServer, :stop, _args}} -> :ok
+  end
+
+  @doc """
+  Appends text above an inline session's live region, then redraws it.
+
+  Text is wrapped to the terminal width and terminated with a newline. ANSI
+  colors, text styles and OSC 8 hyperlinks are preserved. Other terminal controls
+  are removed. Styles are reset and hyperlinks are closed before redrawing the
+  live region. Completed output becomes
+  normal terminal scrollback as the screen fills. Returns `{:error, :not_inline}`
+  for fullscreen sessions.
+
+  From a view callback, use `Breeze.View.append_scrollback/2` instead.
+  """
+  @spec append_scrollback(pid(), IO.chardata()) :: :ok | {:error, :not_inline}
+  def append_scrollback(session, content) when is_pid(session) do
+    server = runtime_pid(session)
+    GenServer.call(server, {:append_scrollback, IO.chardata_to_string(content)})
   end
 
   @doc false
@@ -343,6 +374,7 @@ defmodule Breeze.Server do
 
   @impl true
   def init(opts) do
+    opts = Inline.validate_options!(opts)
     view = Keyword.fetch!(opts, :view)
     start_opts = Keyword.get(opts, :start_opts, [])
     internal_opts = internal_opts(opts)
@@ -356,8 +388,11 @@ defmodule Breeze.Server do
 
     render_errors = Error.normalize(render_errors_opts(opts))
 
-    terminal =
-      opts |> Keyword.fetch!(:terminal) |> apply_terminal_size_override(terminal_size_override)
+    terminal = Keyword.fetch!(opts, :terminal)
+    {terminal, inline} = init_inline(terminal, opts, internal_opts)
+
+    {terminal, inline} = apply_terminal_layout(terminal, inline, terminal_size_override)
+    alt_screen? = is_nil(inline) and Keyword.get(opts, :alt_screen, true)
 
     theme = Breeze.Theme.new(Keyword.get(opts, :theme), terminal: terminal)
     theme_source = Keyword.get(opts, :theme)
@@ -449,8 +484,9 @@ defmodule Breeze.Server do
           terminal: terminal,
           reader: terminal.reader,
           terminal_cleanup: Keyword.get(internal_opts, :terminal_cleanup),
-          alt_screen?: Keyword.get(opts, :alt_screen, true),
-          alt_screen_active?: Keyword.get(opts, :alt_screen, true),
+          inline: inline,
+          alt_screen?: alt_screen?,
+          alt_screen_active?: alt_screen?,
           hide_cursor?: Keyword.get(opts, :hide_cursor, true),
           mouse_mode: Keyword.get(opts, :mouse, false),
           terminal_size_override: terminal_size_override,
@@ -515,6 +551,18 @@ defmodule Breeze.Server do
   defp unwrap_start_result({:error, reason}), do: exit(reason)
 
   @impl true
+  def handle_call(
+        {:append_scrollback, _content},
+        _from,
+        %{terminal_state: %{inline: nil}} = state
+      ) do
+    {:reply, {:error, :not_inline}, state}
+  end
+
+  def handle_call({:append_scrollback, content}, _from, state) do
+    {:reply, :ok, state |> append_inline_history(content) |> render_frame()}
+  end
+
   def handle_call(:stats, _from, state) do
     {:reply, Debug.snapshot(state), state}
   end
@@ -692,6 +740,15 @@ defmodule Breeze.Server do
   end
 
   @impl true
+  def handle_info({:breeze_scrollback, content}, state) do
+    state = append_inline_history(state, content)
+
+    # An asynchronous callback can still be producing the assigns for this
+    # frame. Its reply will render the history and the new live content together.
+    render? = state.terminal_state.inline && is_nil(state.input.pending_ref)
+    {:noreply, if(render?, do: render_frame(state), else: state)}
+  end
+
   def handle_info(
         {reader, {:data, data}},
         %{terminal_state: %{reader: reader}, frame: %{resume_on_input?: true}} = state
@@ -731,10 +788,7 @@ defmodule Breeze.Server do
         %{terminal_state: %{reader: reader}, crash: crash} = state
       )
       when not is_nil(crash) do
-    terminal = resize_terminal(state)
-
-    {:noreply,
-     render_crash(put_in(state.terminal_state.terminal, terminal), force_full_redraw?: true)}
+    {:noreply, state |> resize_terminal() |> render_crash(force_full_redraw?: true)}
   end
 
   def handle_info(
@@ -744,7 +798,7 @@ defmodule Breeze.Server do
       when not is_nil(display) do
     state =
       state
-      |> put_in([Access.key(:terminal_state), Access.key(:terminal)], resize_terminal(state))
+      |> resize_terminal()
       |> update_frame(last_payload: nil, last_lines: nil, last_overlays: [])
       |> render_frame()
 
@@ -752,8 +806,8 @@ defmodule Breeze.Server do
   end
 
   def handle_info({reader, {:signal, :winch}}, %{terminal_state: %{reader: reader}} = state) do
-    terminal = resize_terminal(state)
-    state = put_in(state.terminal_state.terminal, terminal)
+    state = resize_terminal(state)
+    terminal = state.terminal_state.terminal
 
     case safe_call(fn ->
            Breeze.ChildServer.dispatch_info(state.view_pid, :resize, terminal, invalidate: false)
@@ -1079,8 +1133,20 @@ defmodule Breeze.Server do
   defp enqueue_reader_data(state, data) do
     started_at = System.monotonic_time(:microsecond)
 
+    decoded =
+      case Breeze.Input.decode(data) do
+        {:mouse, event} ->
+          case Inline.translate_mouse(state.terminal_state.inline, event) do
+            nil -> :ignore
+            event -> {:mouse, event}
+          end
+
+        decoded ->
+          decoded
+      end
+
     state
-    |> Input.enqueue(Breeze.Input.decode(data))
+    |> Input.enqueue(decoded)
     |> Debug.put_stat(:last_input_us, System.monotonic_time(:microsecond) - started_at)
     |> schedule_input_flush()
   end
@@ -1296,7 +1362,11 @@ defmodule Breeze.Server do
   end
 
   defp finish_event_reply(state, focused, _render?) do
-    finish_event_reply_state(state, focused)
+    state = finish_event_reply_state(state, focused)
+
+    if Inline.pending_output?(state.terminal_state.inline),
+      do: mark_input_render_after_flush(state, true, :scrollback),
+      else: state
   end
 
   defp finish_event_reply_state(state, focused) do
@@ -1857,9 +1927,82 @@ defmodule Breeze.Server do
   end
 
   defp resize_terminal(state) do
-    state.terminal_state.terminal
-    |> Termite.Terminal.resize()
-    |> apply_terminal_size_override(state.terminal_state.terminal_size_override)
+    # Queued history has already advanced the logical origin. Commit it and
+    # park the cursor at the live frame before using CPR to reanchor that frame.
+    state = flush_inline_history(state)
+
+    terminal = Termite.Terminal.resize(state.terminal_state.terminal)
+
+    {terminal, inline} =
+      case state.terminal_state.inline do
+        nil ->
+          {terminal, nil}
+
+        inline ->
+          {terminal, position} =
+            Breeze.InputRouter.CursorProbe.query(terminal, state.input_router)
+
+          inline =
+            Inline.resize(
+              inline,
+              terminal.size,
+              position,
+              state.terminal_state.terminal_size_override
+            )
+
+          {terminal, inline}
+      end
+
+    {terminal, inline} =
+      apply_terminal_layout(terminal, inline, state.terminal_state.terminal_size_override)
+
+    state
+    |> put_in([Access.key(:terminal_state), Access.key(:inline)], inline)
+    |> put_in([Access.key(:terminal_state), Access.key(:terminal)], terminal)
+  end
+
+  defp init_inline(terminal, opts, internal_opts) do
+    if Keyword.get(opts, :screen) == :inline do
+      case Keyword.get(internal_opts, :inline) do
+        nil ->
+          {terminal, position} = Breeze.InputRouter.CursorProbe.query(terminal)
+
+          {inline, payload} =
+            Inline.open(
+              terminal.size,
+              position,
+              Keyword.get(opts, :inline_height, :auto),
+              Keyword.get(internal_opts, :terminal_size_override)
+            )
+
+          {Termite.Terminal.write(terminal, payload), inline}
+
+        inline ->
+          {terminal, inline}
+      end
+    else
+      {terminal, nil}
+    end
+  end
+
+  defp apply_terminal_layout(terminal, nil, override),
+    do: {apply_terminal_size_override(terminal, override), nil}
+
+  defp apply_terminal_layout(terminal, inline, _override),
+    do: {%{terminal | size: Inline.layout_size(inline)}, inline}
+
+  defp flush_inline_history(state) do
+    if Inline.pending_output?(state.terminal_state.inline), do: render_frame(state), else: state
+  end
+
+  defp append_inline_history(%{terminal_state: %{inline: nil}} = state, _content), do: state
+
+  defp append_inline_history(state, content) do
+    inline = Inline.append(state.terminal_state.inline, content)
+
+    state
+    |> put_in([Access.key(:terminal_state), Access.key(:inline)], inline)
+    |> update_frame(last_payload: nil, last_lines: nil, last_overlays: [])
   end
 
   defp apply_terminal_size_override(%Termite.Terminal{} = terminal, fun)
@@ -2184,6 +2327,14 @@ defmodule Breeze.Server do
     {:error, :screen_dim_active}
   end
 
+  defp validate_child_patch_render(%{
+         state: %{terminal_state: %{inline: inline}},
+         viewport: viewport
+       })
+       when not is_nil(inline) and viewport.top + viewport.height > inline.height do
+    {:error, :outside_inline_region}
+  end
+
   defp validate_child_patch_render(%{child_acc: child_acc} = ctx) do
     if screen_dim_in_acc?(child_acc) do
       {:error, :screen_dim_added}
@@ -2257,7 +2408,15 @@ defmodule Breeze.Server do
   defp write_invalidated_child_patch(ctx) do
     fragment = invalidated_child_fragment(ctx)
     composed_at = System.monotonic_time(:microsecond)
-    payload = Frame.child_patch_payload(fragment, ctx.viewport)
+    inline = ctx.state.terminal_state.inline
+    row_offset = if inline, do: inline.top, else: 0
+    payload = Frame.child_patch_payload(fragment, ctx.viewport, row_offset)
+
+    payload =
+      if inline,
+        do: Inline.synchronize(payload <> "\e[0m" <> Inline.position(inline.top)),
+        else: payload
+
     terminal = Termite.Terminal.write(ctx.state.terminal_state.terminal, payload)
     written_at = System.monotonic_time(:microsecond)
     screen_width = ctx.state.terminal_state.terminal.size.width
@@ -2309,24 +2468,47 @@ defmodule Breeze.Server do
     live_overlays = terminal_overlays(decorations, state)
 
     live_lines =
-      output
-      |> Frame.normalize_lines(state.terminal_state.terminal.size.height)
+      if state.terminal_state.inline do
+        Inline.lines(state.terminal_state.inline, output)
+      else
+        Frame.normalize_lines(output, state.terminal_state.terminal.size.height)
+      end
 
     {lines, overlays} = FrameDisplay.resolve(state, live_lines, live_overlays)
 
-    frame_payload =
-      Frame.build_payload(
-        state.frame.last_lines,
-        lines,
-        state.frame.last_overlays || [],
-        overlays,
-        state.terminal_state.terminal.size.width
-      )
+    {inline, frame_payload, lines, overlays} =
+      case state.terminal_state.inline do
+        nil ->
+          payload =
+            Frame.build_payload(
+              state.frame.last_lines,
+              lines,
+              state.frame.last_overlays || [],
+              overlays,
+              state.terminal_state.terminal.size.width
+            )
+
+          {nil, payload, lines, overlays}
+
+        inline ->
+          Inline.render(
+            inline,
+            state.frame.last_lines,
+            lines,
+            state.frame.last_overlays || [],
+            overlays
+          )
+      end
 
     composed_at = System.monotonic_time(:microsecond)
 
+    Breeze.InputRouter.TerminalCleanup.track_inline(
+      state.terminal_state.terminal_cleanup,
+      inline
+    )
+
     {terminal, write_duration} =
-      if frame_payload == state.frame.last_payload do
+      if frame_payload == "" or (is_nil(inline) and frame_payload == state.frame.last_payload) do
         {state.terminal_state.terminal, 0}
       else
         terminal = Termite.Terminal.write(state.terminal_state.terminal, frame_payload)
@@ -2335,6 +2517,7 @@ defmodule Breeze.Server do
       end
 
     state
+    |> put_in([Access.key(:terminal_state), Access.key(:inline)], inline)
     |> put_in([Access.key(:terminal_state), Access.key(:terminal)], terminal)
     |> update_frame(
       decorations: decorations,
@@ -2681,6 +2864,11 @@ defmodule Breeze.Server do
 
   defp live_placeholder_style(_child, _state, _terminal), do: %{}
 
+  defp stop_runtime(%{terminal_state: %{inline: inline}} = state) when not is_nil(inline) do
+    state = state |> drain_inline_history() |> flush_inline_history()
+    {:stop, :normal, state}
+  end
+
   defp stop_runtime(state) do
     state = FrameDisplay.clear(state)
     shutdown_root_view(state.child_view_supervisor, state.view_pid)
@@ -2705,8 +2893,30 @@ defmodule Breeze.Server do
   defp clear_screen_on_stop(terminal, true), do: terminal
   defp clear_screen_on_stop(terminal, _), do: Termite.Screen.clear_screen(terminal)
 
+  # A callback may append history and return {:stop, term} in the same call.
+  # Those messages arrive before the callback reply, while the server is still
+  # inside the synchronous dispatch, so drain them before shutting down.
+  defp drain_inline_history(state) do
+    receive do
+      {:breeze_scrollback, content} ->
+        state |> append_inline_history(content) |> render_frame() |> drain_inline_history()
+    after
+      0 -> state
+    end
+  end
+
   @impl true
   def terminate(_reason, state) do
+    if state.terminal_state.inline && is_nil(state.terminal_state.terminal_cleanup) do
+      inline = state.terminal_state.inline
+      bottom = inline.top + max(inline.height - 1, 0)
+
+      Termite.Terminal.write(
+        state.terminal_state.terminal,
+        Inline.position(bottom) <> Inline.history_region() <> "\e[0m\r\n"
+      )
+    end
+
     Breeze.DebugProfiler.discard_owner(self())
     state = FrameDisplay.clear(state)
     shutdown_view_processes(state)
@@ -2952,6 +3162,26 @@ defmodule Breeze.Server do
     |> render_crash()
   end
 
+  defp print_crash_details_to_scrollback(%{terminal_state: %{inline: inline}} = state, details)
+       when not is_nil(inline) do
+    state =
+      append_inline_history(
+        state,
+        details <> "\nPress q to quit, r to resume, R to hard restart."
+      )
+
+    {inline, payload} = Inline.take_pending_output(state.terminal_state.inline)
+    terminal = Termite.Terminal.write(state.terminal_state.terminal, Inline.synchronize(payload))
+    Breeze.InputRouter.TerminalCleanup.track_inline(state.terminal_state.terminal_cleanup, inline)
+
+    state =
+      state
+      |> put_in([Access.key(:terminal_state), Access.key(:terminal)], terminal)
+      |> put_in([Access.key(:terminal_state), Access.key(:inline)], inline)
+
+    {:noreply, put_in(state.terminal_state.crash_scrollback?, true)}
+  end
+
   defp print_crash_details_to_scrollback(state, details) do
     Breeze.InputRouter.TerminalCleanup.preserve_screen(
       state.terminal_state.terminal_cleanup,
@@ -2975,6 +3205,15 @@ defmodule Breeze.Server do
     }
 
     {:noreply, %{state | terminal_state: terminal_state}}
+  end
+
+  defp restore_terminal_after_crash_scrollback(
+         %{terminal_state: %{crash_scrollback?: true, inline: inline}} = state
+       )
+       when not is_nil(inline) do
+    state
+    |> put_in([Access.key(:terminal_state), Access.key(:crash_scrollback?)], false)
+    |> update_frame(last_payload: nil, last_lines: nil, last_overlays: [])
   end
 
   defp restore_terminal_after_crash_scrollback(

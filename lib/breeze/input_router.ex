@@ -4,6 +4,8 @@ defmodule Breeze.InputRouter do
   use GenServer
 
   alias Breeze.InputRouter.{IExShellProxy, SilentGroupLeader, TerminalCleanup, TerminalStart}
+  alias Breeze.InputRouter.CursorProbe
+  alias Breeze.Server.Inline
 
   alias Termite.Terminal.IODevice
   alias Breeze.InputCapture
@@ -22,6 +24,8 @@ defmodule Breeze.InputRouter do
     :iex_shell_proxy,
     :silent_group_leader,
     :terminal_cleanup,
+    :cursor_probe,
+    inline?: false,
     alt_screen?: true,
     enhanced_keyboard?: true,
     terminal_restored?: false,
@@ -38,8 +42,11 @@ defmodule Breeze.InputRouter do
 
   @impl true
   def init(opts) do
+    opts = Inline.validate_options!(opts)
     opts = maybe_put_iex_terminal_size_override(opts)
-    alt_screen? = Keyword.get(opts, :alt_screen, true)
+    inline? = Keyword.get(opts, :screen) == :inline
+    alt_screen? = not inline? and Keyword.get(opts, :alt_screen, true)
+    opts = Keyword.put(opts, :alt_screen, alt_screen?)
     hide_cursor? = Keyword.get(opts, :hide_cursor, true)
     enhanced_keyboard? = Keyword.get(opts, :enhanced_keyboard, true)
     mouse = Keyword.get(opts, :mouse, false)
@@ -53,6 +60,7 @@ defmodule Breeze.InputRouter do
     terminal_cleanup =
       TerminalCleanup.register(terminal,
         alt_screen?: alt_screen?,
+        inline?: inline?,
         enhanced_keyboard?: enhanced_keyboard?,
         register: internal_get(opts, :at_exit_register, &System.at_exit/1)
       )
@@ -65,10 +73,28 @@ defmodule Breeze.InputRouter do
       terminal = if enhanced_keyboard?, do: enable_enhanced_keyboard(terminal), else: terminal
       terminal = if hide_cursor?, do: Termite.Screen.hide_cursor(terminal), else: terminal
       terminal = enable_mouse(terminal, mouse)
-      terminal = Termite.Screen.clear_screen(terminal)
+      terminal = if inline?, do: terminal, else: Termite.Screen.clear_screen(terminal)
 
       {terminal, deferred_messages} =
         maybe_complete_initial_theme_probe(terminal, Keyword.get(opts, :theme))
+
+      {terminal, inline, cursor_probe} =
+        if inline? do
+          {terminal, position} = CursorProbe.query(terminal)
+
+          {inline, payload} =
+            Inline.open(
+              terminal.size,
+              position,
+              Keyword.get(opts, :inline_height, :auto),
+              internal_get(opts, :terminal_size_override, nil)
+            )
+
+          probe = if is_nil(position), do: schedule_cursor_probe(CursorProbe.draining())
+          {Termite.Terminal.write(terminal, payload), inline, probe}
+        else
+          {terminal, nil, nil}
+        end
 
       {:ok, child_view_supervisor} = Breeze.ChildViewSupervisor.start_link()
       remote_inspector_supervisor = maybe_start_remote_inspector_supervisor(opts)
@@ -79,6 +105,7 @@ defmodule Breeze.InputRouter do
         |> Keyword.put(:input_router, self())
         |> put_internal(:child_view_supervisor, child_view_supervisor)
         |> put_internal(:terminal_cleanup, terminal_cleanup)
+        |> put_internal(:inline, inline)
         |> put_internal(:remote_inspector_supervisor, remote_inspector_supervisor)
 
       server_pid =
@@ -106,6 +133,8 @@ defmodule Breeze.InputRouter do
         iex_shell_proxy: iex_shell_proxy,
         silent_group_leader: silent_group_leader,
         terminal_cleanup: terminal_cleanup,
+        inline?: inline?,
+        cursor_probe: cursor_probe,
         global_keybindings: Keyword.get(opts, :global_keybindings, [])
       }
 
@@ -145,9 +174,22 @@ defmodule Breeze.InputRouter do
 
   @impl true
   def handle_info({reader, {:data, data}}, %{reader: reader} = state) do
-    {state, data} = consume_clipboard_reply(state, data)
+    {state, chunks} = consume_cursor_reply(state, data)
+    route_data_chunks(reader, chunks, state)
+  end
 
-    route_terminal_data(reader, data, state)
+  def handle_info({:inline_cursor_query, ref, recipient}, state) do
+    probe =
+      state.cursor_probe
+      |> CursorProbe.start(ref, recipient)
+      |> schedule_cursor_probe()
+
+    {:noreply, %{state | cursor_probe: probe}}
+  end
+
+  def handle_info({:inline_cursor_timeout, ref}, state) do
+    {probe, chunks} = CursorProbe.expire(state.cursor_probe, ref)
+    route_data_chunks(state.reader, chunks, %{state | cursor_probe: probe})
   end
 
   def handle_info(:clipboard_probe_timeout, %{clipboard_probe: probe} = state)
@@ -169,6 +211,13 @@ defmodule Breeze.InputRouter do
 
   def handle_info({reader, {:signal, :winch}} = message, %{reader: reader} = state) do
     send(state.server_pid, message)
+    # Input routing can synchronously ask the server about focused key capture.
+    # Buffer input until the resize's CPR completes to avoid a circular wait.
+    state =
+      if state.inline? and is_nil(state.cursor_probe),
+        do: %{state | cursor_probe: schedule_cursor_probe(CursorProbe.waiting())},
+        else: state
+
     {:noreply, state}
   end
 
@@ -277,6 +326,28 @@ defmodule Breeze.InputRouter do
     else
       route_reader_data(reader, data, state)
     end
+  end
+
+  defp schedule_cursor_probe(probe) do
+    Process.send_after(self(), {:inline_cursor_timeout, probe.ref}, CursorProbe.expiry_ms())
+    probe
+  end
+
+  defp route_data_chunks(reader, chunks, state) do
+    Enum.reduce_while(chunks, {:noreply, state}, fn data, {:noreply, state} ->
+      {state, data} = consume_clipboard_reply(state, data)
+
+      case route_terminal_data(reader, data, state) do
+        {:noreply, state} -> {:cont, {:noreply, state}}
+        stopped -> {:halt, stopped}
+      end
+    end)
+  end
+
+  defp consume_cursor_reply(state, data) do
+    {probe, chunks, reply} = CursorProbe.consume(state.cursor_probe, data)
+    if reply, do: send(elem(reply, 0), elem(reply, 1))
+    {%{state | cursor_probe: probe}, chunks}
   end
 
   defp consume_clipboard_reply(%{clipboard_probe: nil} = state, data), do: {state, data}

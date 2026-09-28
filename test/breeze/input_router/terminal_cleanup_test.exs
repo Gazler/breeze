@@ -4,6 +4,18 @@ defmodule Breeze.InputRouter.TerminalCleanupTest do
   alias Breeze.InputRouter.TerminalCleanup
   alias Breeze.LiveViewTest.RecordingAdapter
 
+  test "inline cleanup leaves the final frame and moves to the next prompt line once" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+    cleanup = TerminalCleanup.register(terminal, inline?: true, register: fn _ -> :ok end)
+    TerminalCleanup.preserve_screen(cleanup, false)
+    assert {:restored, _} = TerminalCleanup.restore(cleanup)
+    refute_received {:terminal_write, "\e[2J"}
+    refute_received {:terminal_write, "\e[?1049l"}
+    assert_received {:terminal_write, "\e[?2026l\e]133;C\e\\\e[0m\r\n"}
+    assert :already_restored = TerminalCleanup.restore(cleanup)
+    refute_received {:terminal_write, "\e[?2026l\e]133;C\e\\\e[0m\r\n"}
+  end
+
   test "screen preservation and restoration guards are independent per terminal" do
     terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
     first = TerminalCleanup.register(terminal, [])
@@ -19,6 +31,27 @@ defmodule Breeze.InputRouter.TerminalCleanupTest do
     assert {:restored, _} = TerminalCleanup.restore(second)
     assert_received {:terminal_write, "\e[2J"}
     assert_received {:terminal_write, "\e[?1049l"}
+  end
+
+  test "inline exit hook uses the latest frame bottom while the cursor rests at its origin" do
+    terminal = Termite.Terminal.start(adapter: RecordingAdapter, owner: self())
+    parent = self()
+
+    cleanup =
+      TerminalCleanup.register(terminal,
+        inline?: true,
+        register: fn callback ->
+          send(parent, {:exit_callback, callback})
+          :ok
+        end
+      )
+
+    assert_receive {:exit_callback, callback}
+    TerminalCleanup.track_inline(cleanup, %{top: 2, height: 4})
+    TerminalCleanup.track_inline(cleanup, %{top: 3, height: 2})
+    assert :ok = callback.(0)
+    assert_received {:terminal_write, "\e[?2026l\e[5;1H\e]133;C\e\\\e[0m\r\n"}
+    assert :already_restored = TerminalCleanup.restore(cleanup)
   end
 
   test "explicit exit hook shares only its own terminal's latest cleanup state" do
