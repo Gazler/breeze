@@ -104,6 +104,29 @@ defmodule Breeze.SSHIExTest do
     read_until(connection, channel, "iex(5)>")
   end
 
+  test "opting into job suspension never suspends the SSH IEx host", context do
+    {connection, channel} = connect(context)
+
+    command(
+      connection,
+      channel,
+      "Breeze.Server.run(view: #{inspect(Counter)}, suspend_on_ctrl_z: true)"
+    )
+
+    assert_receive {:mounted, view, _group}, 5_000
+    assert_receive {:terminal, ^view, terminal}
+    {Termite.Terminal.IODevice, adapter} = terminal.adapter
+    assert is_nil(:sys.get_state(adapter.owner).job_control)
+    read_until(connection, channel, "SSH count: 0")
+
+    :ok = :ssh_connection.send(connection, channel, "\e[122;5u")
+    :ok = :ssh_connection.send(connection, channel, "\e[A")
+    assert read_until(connection, channel, "SSH count: 1") =~ "SSH count: 1"
+
+    :ok = :ssh_connection.send(connection, channel, "q")
+    assert read_until(connection, channel, "iex(2)>") =~ ":ok"
+  end
+
   test "SSH sessions are independent and disconnect stops only its app", context do
     {first, first_channel} = connect(context)
     {second, second_channel} = connect(context)

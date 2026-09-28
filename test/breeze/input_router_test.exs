@@ -1532,6 +1532,120 @@ defmodule Breeze.InputRouterTest do
     assert :sys.get_state(pid).focused == "button"
   end
 
+  test "ctrl-z suspends centrally for legacy and enhanced inputs and preserves the runtime" do
+    parent = self()
+
+    job = %Breeze.InputRouter.JobControl{
+      executable: "test-kill",
+      signal_ref: make_ref(),
+      input_mode: fn _mode -> :ok end,
+      command: fn "test-kill", ["-s", "STOP", _pid], _opts ->
+        send(parent, {:suspending, self()})
+        receive do: (:continue_job -> {"", 0})
+      end
+    }
+
+    {:ok, pid} =
+      start_input_router(
+        view: CountingInputView,
+        start_opts: [parent: parent],
+        terminal_opts: [adapter: FakeAdapter, owner: parent],
+        suspend_on_ctrl_z: true,
+        internal: [job_control_start: fn _, _ -> job end]
+      )
+
+    state = :sys.get_state(pid)
+    reader = state.reader
+    runtime = state.server_pid
+    view = :sys.get_state(runtime).view_pid
+    assert %Breeze.InputRouter.JobControl{} = state.job_control
+
+    send(pid, {reader, {:data, "\e[A"}})
+    assert_receive {:handled_input, 1}
+
+    for message <- [
+          {:data, "\x1a"},
+          {:data, "\e[122;5u"},
+          {:data, "\e[27;5;122~"},
+          {:data, "\e[27;5;122u"}
+        ] do
+      send(pid, {reader, message})
+      assert_receive {:suspending, ^runtime}
+      send(runtime, :continue_job)
+      _ = :sys.get_state(pid)
+      assert :sys.get_state(runtime).view_pid == view
+      assert Process.alive?(pid)
+    end
+
+    # Only our signal subscription is handled, even if Termite forwards it too.
+    send(pid, {job.signal_ref, {:signal, :tstp}})
+    send(pid, {reader, {:signal, :tstp}})
+    assert_receive {:suspending, ^runtime}
+    send(runtime, :continue_job)
+    _ = :sys.get_state(pid)
+    refute_received {:suspending, _}
+
+    send(pid, {reader, {:data, "\e[A"}})
+    assert_receive {:handled_input, 2}
+
+    for input <- ["z", "\e[122;6u", "\e[122;7u"] do
+      send(pid, {reader, {:data, input}})
+    end
+
+    _ = :sys.get_state(pid)
+    refute_received {:suspending, _}
+
+    # Suspension must not consume the one-shot terminal cleanup guard.
+    assert :atomics.get(state.terminal_cleanup.guard, 1) == 1
+    stop_gen_server(pid)
+    assert :atomics.get(state.terminal_cleanup.guard, 1) == 0
+  end
+
+  test "ctrl-z remains available to a focused component capturing control keys" do
+    parent = self()
+
+    job = %Breeze.InputRouter.JobControl{
+      command: fn _, _, _ -> flunk("unexpected suspension") end
+    }
+
+    {:ok, pid} =
+      start_input_router(
+        view: FocusedCaptureView,
+        start_opts: [parent: parent],
+        terminal_opts: [adapter: FakeAdapter],
+        suspend_on_ctrl_z: true,
+        internal: [job_control_start: fn _, _ -> job end]
+      )
+
+    state = :sys.get_state(pid)
+    send(pid, {state.reader, {:data, "\e[122;5u"}})
+    assert_receive {:captured, %{"ctrlKey" => true, "key" => "z"}}
+    stop_gen_server(pid)
+  end
+
+  test "job suspension is disabled by default and when explicitly disabled" do
+    for opts <- [[], [suspend_on_ctrl_z: false]] do
+      {:ok, pid} =
+        start_input_router(
+          opts ++
+            [
+              view: FocusedCaptureView,
+              start_opts: [parent: self()],
+              terminal_opts: [adapter: FakeAdapter],
+              internal: [
+                job_control_start: fn _, _ -> flunk("unexpected job control startup") end
+              ]
+            ]
+        )
+
+      state = :sys.get_state(pid)
+      assert is_nil(state.job_control)
+      send(pid, {state.reader, {:data, "\e[122;5u"}})
+      assert_receive {:captured, %{"ctrlKey" => true, "key" => "z"}}
+      stop_gen_server(pid)
+    end
+  end
+
   test "ctrl-c always stops the session regardless of global keybindings" do
     assert_ctrl_c_stops("\x03")
     assert_ctrl_c_stops("\e[99;5u")

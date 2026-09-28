@@ -45,6 +45,14 @@ defmodule Breeze.Server do
       Defaults to `true`.
     * `:enhanced_keyboard` - enables enhanced keyboard reporting.
       Defaults to `true`.
+    * `:suspend_on_ctrl_z` - enables experimental Unix job suspension with Ctrl+Z.
+      Defaults to `false`. Supported for local terminals (OTP 28+), including
+      local IEx via `run/1`, when the `kill` executable is available. Restores the
+      terminal before stopping the entire VM and redraws after `fg`. In IEx this
+      suspends the whole IEx VM; quitting the resumed app returns to its prompt.
+      Not enabled in remote IEx, SSH, or on native Windows.
+      A focused component capturing control keys receives Ctrl+Z instead.
+      The enhanced key binding does not follow changes to `stty susp`.
     * `:mouse` - enables mouse tracking. Defaults to `false`. Pass
       `true` for click mode or keyword options for
       `Termite.Screen.enable_mouse/2`.
@@ -126,6 +134,7 @@ defmodule Breeze.Server do
           | {:alt_screen, boolean()}
           | {:hide_cursor, boolean()}
           | {:enhanced_keyboard, boolean()}
+          | {:suspend_on_ctrl_z, boolean()}
           | {:mouse, boolean() | keyword()}
           | {:terminal_opts, keyword()}
           | {:terminal, %Termite.Terminal{}}
@@ -517,6 +526,19 @@ defmodule Breeze.Server do
   @impl true
   def handle_call(:stats, _from, state) do
     {:reply, Debug.snapshot(state), state}
+  end
+
+  def handle_call({:suspend_terminal, job}, _from, state) do
+    {result, terminal} = Breeze.InputRouter.JobControl.suspend(job, state.terminal_state)
+
+    state =
+      state
+      |> put_in([Access.key(:terminal_state), Access.key(:terminal)], terminal)
+      |> update_frame(last_payload: nil, last_lines: nil, last_overlays: [])
+
+    # Reuse resize handling for live views, crash screens, and displayed frames.
+    send(self(), {state.terminal_state.reader, {:signal, :winch}})
+    {:reply, result, state}
   end
 
   def handle_call({:display_frame, :live, _opts}, _from, state) do

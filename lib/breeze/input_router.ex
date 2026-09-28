@@ -3,7 +3,15 @@ defmodule Breeze.InputRouter do
 
   use GenServer
 
-  alias Breeze.InputRouter.{IExShellProxy, SilentGroupLeader, TerminalCleanup, TerminalStart}
+  require Logger
+
+  alias Breeze.InputRouter.{
+    IExShellProxy,
+    JobControl,
+    SilentGroupLeader,
+    TerminalCleanup,
+    TerminalStart
+  }
 
   alias Termite.Terminal.IODevice
   alias Breeze.InputCapture
@@ -22,6 +30,7 @@ defmodule Breeze.InputRouter do
     :iex_shell_proxy,
     :silent_group_leader,
     :terminal_cleanup,
+    :job_control,
     alt_screen?: true,
     enhanced_keyboard?: true,
     terminal_restored?: false,
@@ -95,6 +104,13 @@ defmodule Breeze.InputRouter do
       Process.unlink(server_pid)
       Process.monitor(server_pid)
 
+      job_control =
+        if Keyword.get(opts, :suspend_on_ctrl_z, false) do
+          internal_get(opts, :job_control_start, fn terminal, opts ->
+            JobControl.start(terminal, opts, iex_shell_proxy)
+          end).(terminal, opts)
+        end
+
       state = %__MODULE__{
         terminal: terminal,
         reader: reader,
@@ -106,6 +122,7 @@ defmodule Breeze.InputRouter do
         iex_shell_proxy: iex_shell_proxy,
         silent_group_leader: silent_group_leader,
         terminal_cleanup: terminal_cleanup,
+        job_control: job_control,
         global_keybindings: Keyword.get(opts, :global_keybindings, [])
       }
 
@@ -181,6 +198,13 @@ defmodule Breeze.InputRouter do
     stop(state)
   end
 
+  def handle_info(
+        {ref, {:signal, :tstp}},
+        %{job_control: %JobControl{signal_ref: ref}} = state
+      ) do
+    suspend(state)
+  end
+
   def handle_info({:ensure_runtime_palette, :system}, state) do
     {:noreply, maybe_start_theme_probe(state, :system)}
   end
@@ -220,6 +244,7 @@ defmodule Breeze.InputRouter do
 
   @impl true
   def terminate(_reason, state) do
+    JobControl.stop(state.job_control)
     stop_server(state.server_pid)
     restore_terminal(state)
     Breeze.RemoteInspector.Supervisor.stop(state.remote_inspector_supervisor)
@@ -247,6 +272,10 @@ defmodule Breeze.InputRouter do
     decoded = decode_input(data)
 
     cond do
+      not is_nil(state.job_control) and suspend_input?(decoded) and
+          not focused_implicit_captures_decoded_input?(decoded, state) ->
+        suspend(state)
+
       forced_stop_input?(data, decoded) and
           not focused_implicit_captures_decoded_input?(decoded, state) ->
         stop(state)
@@ -320,6 +349,25 @@ defmodule Breeze.InputRouter do
     do: key in ["c", "C"]
 
   defp forced_stop_input?(_data, _decoded), do: false
+
+  defp suspend_input?({:key, %{"ctrlKey" => ctrl, "key" => key} = event})
+       when ctrl in [true, "true"] and key in ["z", "Z"] do
+    not Enum.any?(["shiftKey", "altKey", "metaKey"], &(Map.get(event, &1) in [true, "true"]))
+  end
+
+  defp suspend_input?(_decoded), do: false
+
+  defp suspend(state) do
+    case GenServer.call(state.server_pid, {:suspend_terminal, state.job_control}, :infinity) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Could not suspend Breeze: #{inspect(reason)}")
+    end
+
+    {:noreply, state}
+  end
 
   defp focused_implicit_captures_decoded_input?({:key, key}, state),
     do: focused_implicit_captures_key?(key, state)
