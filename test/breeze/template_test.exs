@@ -111,6 +111,15 @@ defmodule Breeze.TemplateTest do
     end
   end
 
+  defmodule LazilyImportedComponentDefaultView do
+    use Breeze.View
+    import Breeze.TestImportedComponentDefaults
+
+    def render(assigns) do
+      ~H|<.badge/>|
+    end
+  end
+
   defmodule PrivateHelperView do
     use Breeze.View
 
@@ -268,6 +277,17 @@ defmodule Breeze.TemplateTest do
 
     test "applies attr and slot defaults for imported components" do
       assert render(ImportedComponentDefaultView, %{}) == ~s(<box enabled>default label:</box>)
+    end
+
+    test "loads imported component modules before applying defaults" do
+      :code.purge(Breeze.TestImportedComponentDefaults)
+      :code.delete(Breeze.TestImportedComponentDefaults)
+      refute Code.loaded?(Breeze.TestImportedComponentDefaults)
+
+      assert render(LazilyImportedComponentDefaultView, %{}) ==
+               ~s(<box enabled>default label:</box>)
+
+      assert Code.loaded?(Breeze.TestImportedComponentDefaults)
     end
 
     test "supports private helper calls inside templates" do
