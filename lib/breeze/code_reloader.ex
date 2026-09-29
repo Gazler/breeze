@@ -1,9 +1,56 @@
 defmodule Breeze.CodeReloader do
-  @moduledoc false
+  @moduledoc """
+  Supports file-watching reloads and synchronization with external code reloaders.
+
+  For standalone development, pass `reload: true` to `Breeze.Server.start_link/1`.
+  Breeze watches Elixir files in `lib`, `examples`, and `storybook`, recompiles
+  changed files, and requests a redraw. Reloading is disabled by default; the
+  application setting `config :breeze, reload: true` supplies a session default.
+
+  ## Phoenix
+
+  For modules managed by Phoenix, prefer an MFA tuple to synchronize renders
+  with Phoenix's reloader instead of starting Breeze's watcher:
+
+  Multiple reloaders can coexist when they cover separate modules. Avoid having
+  Breeze and Phoenix independently compile the same modules: their compilation
+  paths do not coordinate, so overlapping reloads can race.
+
+      reload =
+        if MyAppWeb.Endpoint.config(:code_reloader) do
+          {Phoenix.CodeReloader, :sync, []}
+        else
+          false
+        end
+
+      Breeze.Server.start_link(
+        view: MyAppWeb.TUI.OrgView,
+        reload: reload
+      )
+  """
 
   use GenServer
 
   @default_paths ["lib", "examples", "storybook"]
+
+  @doc """
+  Runs a render callback, synchronizing with an external reloader and retrying
+  once on an undefined function when `reload` is an MFA tuple. This does not
+  start a watcher or compile code; persistent errors propagate normally.
+  """
+  def call(fun, reload) when is_function(fun, 0) do
+    fun.()
+  rescue
+    exception in UndefinedFunctionError ->
+      case reload do
+        {module, function, args} ->
+          apply(module, function, args)
+          fun.()
+
+        _ ->
+          reraise exception, __STACKTRACE__
+      end
+  end
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)

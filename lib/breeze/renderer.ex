@@ -24,7 +24,7 @@ defmodule Breeze.Renderer do
         )
       )
 
-    rendered = mod.render(assigns)
+    rendered = Breeze.CodeReloader.call(fn -> mod.render(assigns) end, Keyword.get(opts, :reload))
 
     [{root_tag, _, root_children}] =
       rendered
@@ -37,7 +37,7 @@ defmodule Breeze.Renderer do
 
   def input_routing_signature(mod, assigns, opts \\ []) do
     assigns = put_breeze_render_context(assigns, opts)
-    rendered = mod.render(assigns)
+    rendered = Breeze.CodeReloader.call(fn -> mod.render(assigns) end, Keyword.get(opts, :reload))
 
     [root = {_root_tag, _, root_children}] = Breeze.Template.render_to_tree(rendered, assigns)
 
@@ -62,7 +62,7 @@ defmodule Breeze.Renderer do
 
     rendered =
       profile(profile_scope, profile_label, :view_render_us, fn ->
-        mod.render(assigns)
+        Breeze.CodeReloader.call(fn -> mod.render(assigns) end, Keyword.get(opts, :reload))
       end)
 
     [root = {root_tag, _, root_children}] =

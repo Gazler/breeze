@@ -24,6 +24,8 @@ defmodule Breeze.Server do
     * `:reload` - enables live code reload. Defaults to
       `Application.get_env(:breeze, :reload, false)`. Pass `true`
       to enable reload in dev, or a keyword list for reload options.
+      Pass `{module, function, args}` to synchronize with an external reloader
+      and retry an undefined render call once, without starting a file watcher.
     * `:inspector` - enables inspector support. Defaults to `false`.
       Pass `true` or keyword options such as `:toggle_key`, `:move_key`,
       and `remote: false` to keep inspection local without starting
@@ -129,7 +131,7 @@ defmodule Breeze.Server do
           | {:mouse, boolean() | keyword()}
           | {:terminal_opts, keyword()}
           | {:terminal, %Termite.Terminal{}}
-          | {:reload, boolean() | keyword()}
+          | {:reload, boolean() | keyword() | {module(), atom(), list()}}
           | {:theme, Breeze.Theme.t() | map() | keyword() | atom()}
           | {:global_keybindings, list()}
           | {:inspector, boolean() | keyword()}
@@ -1647,6 +1649,7 @@ defmodule Breeze.Server do
 
   defp safe_render_snapshot(state, tracking_ref, profile_scope) do
     Breeze.ChildServer.render_snapshot(state.view_pid,
+      reload: Keyword.get(state.reload_opts || [], :sync),
       implicit_state: %{},
       terminal: state.terminal_state.terminal,
       theme: state.theme,
@@ -1824,6 +1827,7 @@ defmodule Breeze.Server do
   defp input_routing_changed?(state) do
     case safe_call(fn ->
            Breeze.ChildServer.input_routing_changed?(state.view_pid,
+             reload: Keyword.get(state.reload_opts || [], :sync),
              live_children: state.children
            )
          end) do
@@ -1937,6 +1941,7 @@ defmodule Breeze.Server do
 
     case safe_call(fn ->
            Breeze.ChildServer.render_snapshot(child.pid,
+             reload: Keyword.get(state.reload_opts || [], :sync),
              focused: strip_live_prefix(state.focused, ctx.full_id),
              implicit_state: %{},
              terminal: ctx.terminal,
@@ -2137,6 +2142,7 @@ defmodule Breeze.Server do
   defp render_invalidated_child_snapshot(ctx) do
     case safe_call(fn ->
            Breeze.ChildServer.render_snapshot(ctx.child.pid,
+             reload: Keyword.get(ctx.state.reload_opts || [], :sync),
              focused: strip_live_prefix(ctx.state.focused, ctx.child_id),
              implicit_state: %{},
              terminal: ctx.terminal,
@@ -3328,6 +3334,7 @@ defmodule Breeze.Server do
   end
 
   defp maybe_start_reloader(%{reload_opts: nil} = state), do: state
+  defp maybe_start_reloader(%{reload_opts: [sync: _]} = state), do: state
 
   defp maybe_start_reloader(state) do
     {:ok, pid} =
@@ -3338,6 +3345,9 @@ defmodule Breeze.Server do
 
   defp normalize_reload_opts(false), do: nil
   defp normalize_reload_opts(nil), do: nil
+
+  defp normalize_reload_opts({module, function, args} = sync)
+       when is_atom(module) and is_atom(function) and is_list(args), do: [sync: sync]
 
   defp normalize_reload_opts(true) do
     if reload_supported?(), do: [enabled?: true], else: nil

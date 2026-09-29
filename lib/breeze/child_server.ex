@@ -187,7 +187,7 @@ defmodule Breeze.ChildServer do
 
   def handle_call({:input_routing_changed?, opts}, _from, term) do
     probe_term = input_routing_probe_term(term, opts)
-    desired_signature = input_routing_signature(probe_term)
+    desired_signature = input_routing_signature(probe_term, opts)
     focused_implicit_id = focused_implicit_id(probe_term, probe_term.focused)
 
     implicit_state = probe_term.retained_implicit_state |> Map.merge(probe_term.implicit_state)
@@ -957,12 +957,13 @@ defmodule Breeze.ChildServer do
     {term, acc, box}
   end
 
-  defp input_routing_signature(term) do
+  defp input_routing_signature(term, opts) do
     implicit_state = term.retained_implicit_state |> Map.merge(term.implicit_state)
 
     Breeze.Renderer.input_routing_signature(
       term.view,
       term.assigns,
+      reload: Keyword.get(opts, :reload),
       terminal: term.terminal,
       theme: term.theme,
       theme_source: term.theme_source,
@@ -1311,7 +1312,10 @@ defmodule Breeze.ChildServer do
 
   defp preload_and_attach_live_view(term, opts) do
     discovered =
-      term.view.render(term.assigns)
+      Breeze.CodeReloader.call(
+        fn -> term.view.render(term.assigns) end,
+        Keyword.get(opts, :reload)
+      )
       |> Breeze.Template.render_to_tree(term.assigns)
       |> collect_live_nodes([])
       |> Enum.reverse()
@@ -1576,6 +1580,7 @@ defmodule Breeze.ChildServer do
       %{pid: pid} when is_pid(pid) ->
         if Process.alive?(pid) do
           case Breeze.ChildServer.render_snapshot(pid,
+                 reload: Keyword.get(child_opts, :reload),
                  focused: strip_live_prefix(term.focused, id),
                  implicit_state: %{},
                  terminal: terminal,
