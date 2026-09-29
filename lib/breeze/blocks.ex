@@ -68,10 +68,24 @@ defmodule Breeze.Blocks do
   attr :virtual_overscan, :integer, default: 4
   attr :offset, :integer, default: nil
   attr :virtual_window, :integer, default: nil
-  attr :"selected-indicator", :string, default: ">"
+
+  attr :selected_indicator, :string,
+    default: nil,
+    doc: "Selected row marker; defaults to >. Takes precedence over selected-indicator."
+
+  attr :"selected-indicator", :string,
+    default: ">",
+    doc: "Compatibility alias for selected_indicator."
+
+  attr :indicator_class, :string,
+    default: nil,
+    doc:
+      "Visual classes for the selected indicator, overriding inherited item colors and text styles."
+
   attr :class, :string, default: nil
   attr :style, :any, default: nil
-  attr :item_class, :string, default: nil
+  attr :item_class, :string, default: nil, doc: "Classes applied to list items."
+
   attr :item_style, :any, default: nil
   attr :rest, :global
 
@@ -81,7 +95,7 @@ defmodule Breeze.Blocks do
 
   def list(assigns) do
     items = Map.get(assigns, :item, [])
-    selected_indicator = Map.get(assigns, :"selected-indicator", ">") || ">"
+    selected_indicator = assigns[:selected_indicator] || assigns[:"selected-indicator"] || ">"
     selected_indicator_width = max(Ucwidth.width(selected_indicator), 1)
 
     root_defaults =
@@ -144,7 +158,14 @@ defmodule Breeze.Blocks do
       |> assign(
         marker_class:
           merge_class(
-            item_visual_defaults,
+            merge_class(
+              item_visual_defaults,
+              merge_class(
+                list_indicator_visual_class(class_override(assigns, :item_class, :item_style)) ||
+                  "",
+                list_indicator_visual_class(assigns[:indicator_class])
+              )
+            ),
             "hidden selected:width-#{selected_indicator_width} overflow-hidden"
           )
       )
@@ -192,8 +213,36 @@ defmodule Breeze.Blocks do
     """
   end
 
+  # Share row colors and text decoration, but retain the marker's own geometry.
+  defp list_indicator_visual_class(nil), do: nil
+
+  defp list_indicator_visual_class(class) do
+    class
+    |> String.split(" ", trim: true)
+    |> Enum.filter(fn token ->
+      key = token |> style_key() |> String.split(":") |> List.last()
+
+      key in [
+        "bg",
+        "text",
+        "mute-bg",
+        "mute-text",
+        "font-weight",
+        "font-style",
+        "underline",
+        "strikethrough",
+        "reverse",
+        "dim",
+        "blink",
+        "hidden-text"
+      ]
+    end)
+    |> Enum.join(" ")
+  end
+
   defp virtual_text_list?(items, assigns, windowed?) do
     windowed? and is_nil(Map.get(assigns, :variant)) and
+      assigns[:indicator_class] in [nil, ""] and
       virtual_text_item_class?(Map.get(assigns, :item_class)) and
       is_nil(Map.get(assigns, :item_style)) and Enum.all?(items, &plain_text_slot?/1)
   end
@@ -575,7 +624,7 @@ defmodule Breeze.Blocks do
   defp build_dropdown_trigger(label, _width), do: " " <> to_string(label)
 
   defp list_variant_item_class("muted") do
-    "mute-text-20 selected:mute-bg-20 focus:selected:mute-bg-0 focus:mute-text-0 selected:text-bg focus:selected:bg-primary focus:selected:mute-text-0"
+    "mute-text-20 selected:mute-bg-20 focus:selected:mute-bg-0 focus:mute-text-0 selected:text-bg focus:selected:mute-text-0"
   end
 
   defp list_variant_item_class("accent") do

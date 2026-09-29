@@ -399,6 +399,24 @@ defmodule Breeze.BlocksTest do
     end
   end
 
+  defmodule StyledIndicatorListExample do
+    use Breeze.View
+    import Breeze.Blocks
+
+    def mount(opts, term), do: {:ok, assign(term, Map.new(opts))}
+
+    def render(assigns) do
+      ~H"""
+      <.list id="items" list-selected="two" class="width-20 height-4" variant={assigns[:variant]}
+        item_class={@item_class} selected_indicator={@indicator}
+        indicator_class={assigns[:indicator_class]}>
+        <:item value="one">One</:item>
+        <:item value="two">Two</:item>
+      </.list>
+      """
+    end
+  end
+
   defmodule MutedListExample do
     use Breeze.View
     import Breeze.Blocks
@@ -1357,6 +1375,103 @@ defmodule Breeze.BlocksTest do
     assert flash_box.style.border.top == "─"
     assert flash_box.style.border.top_left == "╭"
     assert flash_box.style.border.bottom_right == "╯"
+  end
+
+  test "selected_indicator supports legacy spelling, precedence, and defaults" do
+    for {attrs, expected} <- [
+          {%{}, ">"},
+          {%{selected_indicator: "🏡"}, "🏡"},
+          {%{"selected-indicator": "*"}, "*"},
+          {%{selected_indicator: "!", "selected-indicator": "*"}, "!"},
+          {%{selected_indicator: nil, "selected-indicator": "*"}, "*"},
+          {%{selected_indicator: nil, "selected-indicator": nil}, ">"},
+          {%{selected_indicator: "", "selected-indicator": "*"}, ""}
+        ] do
+      {_, assigns} =
+        Breeze.Blocks.__breeze_component__(:list, Map.merge(%{id: "items", item: []}, attrs))
+
+      assert assigns.selected_indicator == expected
+    end
+  end
+
+  test "indicator text color can be overridden without changing the label" do
+    Code.ensure_loaded!(Breeze.Blocks)
+
+    pid =
+      start_supervised!(
+        {Breeze.ChildServer,
+         view: StyledIndicatorListExample,
+         start_opts: [
+           item_class: "selected:bg-surface",
+           indicator: ">",
+           variant: "muted",
+           indicator_class: "selected:text-accent"
+         ],
+         terminal: %Termite.Terminal{size: %{width: 30, height: 8}},
+         theme: Breeze.Theme.builtin(:gruvbox)}
+      )
+
+    {:ok, _, box} = Breeze.ChildServer.render(pid, focused: "items")
+    theme = Breeze.ChildServer.metadata(pid).theme
+    {r, g, b} = Breeze.Theme.color(theme, :accent)
+    assert box.content =~ "48;2;60;56;54;38;2;#{r};#{g};#{b}m>"
+    assert box.content =~ "48;2;60;56;54;38;2;40;40;40mTwo"
+  end
+
+  test "muted selection keeps the custom background on focus and mutes it on blur" do
+    Code.ensure_loaded!(Breeze.Blocks)
+
+    pid =
+      start_supervised!(
+        {Breeze.ChildServer,
+         view: StyledIndicatorListExample,
+         start_opts: [item_class: "selected:bg-surface", indicator: ">", variant: "muted"],
+         terminal: %Termite.Terminal{size: %{width: 30, height: 8}},
+         theme: Breeze.Theme.builtin(:gruvbox)}
+      )
+
+    {:ok, _, focused} = Breeze.ChildServer.render(pid, focused: "items")
+    assert focused.content =~ "48;2;60;56;54;38;2;40;40;40m>Two"
+
+    {:ok, _, blurred} = Breeze.ChildServer.render(pid, focused: nil, allow_unfocused: true)
+    assert blurred.content =~ ">Two"
+    refute blurred.content =~ "48;2;60;56;54;38;2;40;40;40m>Two"
+
+    {:ok, _, refocused} = Breeze.ChildServer.render(pid, focused: "items")
+    assert refocused.content == focused.content
+  end
+
+  test "selected visuals cover the indicator without copying row layout" do
+    Code.ensure_loaded!(Breeze.Blocks)
+
+    for indicator <- [">", "🏡"],
+        item_class <- [
+          "width-full overflow-hidden selected:bg-surface",
+          "width-full overflow-hidden selected:bg-surface selected:text-accent selected:bold"
+        ] do
+      pid =
+        start_supervised!(%{
+          id: make_ref(),
+          start:
+            {Breeze.ChildServer, :start_link,
+             [
+               [
+                 view: StyledIndicatorListExample,
+                 start_opts: [item_class: item_class, indicator: indicator],
+                 terminal: %Termite.Terminal{size: %{width: 30, height: 8}},
+                 theme: Breeze.Theme.builtin(:gruvbox)
+               ]
+             ]}
+        })
+
+      {:ok, _, box} = Breeze.ChildServer.render(pid, focused: "items")
+      output = box.content
+
+      # Identical visual styles render contiguously; a reset between the marker
+      # and label would reveal that the marker still uses the default colors.
+      assert output =~ indicator <> "Two"
+      assert output =~ "One"
+    end
   end
 
   test "list can render muted while unfocused and restore active colors on focus" do
