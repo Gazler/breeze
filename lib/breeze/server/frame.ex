@@ -258,6 +258,7 @@ defmodule Breeze.Server.Frame do
     line_count = tuple_size(lines)
 
     changed_rows
+    |> Enum.filter(&(&1 >= 0 and &1 < line_count))
     |> Enum.sort()
     |> Enum.map(fn row ->
       line = line_at(lines, row, line_count)
@@ -350,6 +351,8 @@ defmodule Breeze.Server.Frame do
   defp overlay_intersects_rows?(overlay, rows) do
     Enum.any?(overlay_rows(overlay), &MapSet.member?(rows, &1))
   end
+
+  defp overlay_rows(%{visible?: false}), do: []
 
   defp overlay_rows(overlay) do
     y = Map.get(overlay, :y, 0)

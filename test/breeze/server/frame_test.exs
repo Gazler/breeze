@@ -1,6 +1,22 @@
 defmodule Breeze.Server.FrameTest do
   use ExUnit.Case, async: true
 
+  test "hidden offscreen cursor repairs its old row without clearing beyond the screen" do
+    lines = List.duplicate("content", 23) ++ ["KEYBINDINGS"]
+    previous = [%{x: 35, y: 21, char: " ", visible?: true}]
+    hidden = [%{x: 35, y: 40, char: " ", visible?: false}]
+    payload = Breeze.Server.Frame.build_payload(lines, lines, previous, hidden, 80)
+    assert payload =~ "\e[22;1Hcontent"
+    refute payload =~ "\e[41;"
+    assert Breeze.Server.Frame.build_payload(lines, lines, hidden, [], 80) == ""
+  end
+
+  test "overlay row repairs are bounded to the screen" do
+    lines = ["HEADER", "FOOTER"]
+    previous = [%{x: 0, y: 50, char: "x"}, %{x: 0, y: -1, char: "x"}]
+    assert Breeze.Server.Frame.build_payload(lines, lines, previous, [], 80) == ""
+  end
+
   alias Breeze.Server.Frame
 
   test "row patches prepaint styled backgrounds for wide glyph rows" do
@@ -39,11 +55,10 @@ defmodule Breeze.Server.FrameTest do
     assert Frame.build_payload(["same", "stale"], ["same"], [], [], 10) == ""
   end
 
-  test "overlay repairs outside the current frame use an empty row" do
+  test "overlay repairs outside the current frame are skipped" do
     previous_overlay = %{x: 0, y: 3, height: 1, content: "old"}
 
-    assert Frame.build_payload(["only"], ["only"], [previous_overlay], [], 10) ==
-             "\e[4;1H\e[4;1H\e[K"
+    assert Frame.build_payload(["only"], ["only"], [previous_overlay], [], 10) == ""
   end
 
   test "child patches materialize complete rows without losing neighboring content" do
