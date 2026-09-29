@@ -135,7 +135,8 @@ defmodule Breeze.Component do
               def __breeze_component__(unquote(component), assigns) do
                 _ = &(unquote(imported_fun) / 1)
 
-                if function_exported?(unquote(module), :__breeze_components__, 0) and
+                if Code.ensure_loaded?(unquote(module)) and
+                     function_exported?(unquote(module), :__breeze_components__, 0) and
                      unquote(component) in unquote(module).__breeze_components__() do
                   unquote(module).__breeze_component__(unquote(component), assigns)
                 else
