@@ -284,7 +284,9 @@ defmodule Breeze.Runtime.StateTest do
         }
     }
 
-    assert {:error, {:state_replacement_failed, :render, :runtime_stopped_during_staging}} =
+    assert {:error,
+            {:state_replacement_failed, :render,
+             %{kind: :error, reason: %RuntimeError{message: "replacement render failed"}}}} =
              Breeze.Runtime.replace_state(pid, %{runtime_state | root: failing_root})
 
     unchanged = :sys.get_state(pid)

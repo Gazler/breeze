@@ -1,3 +1,17 @@
+
+## [0.5.4] - 2026-09-29
+
+### Features
+
+- *(Breeze.CodeReloader)* Support external reloaders ([ff47809](https://github.com/gazler/breeze/commit/ff478098791d04459e2d6e4cb8d91d347058a194))
+- *(Breeze.Blocks)* Allow styling list indicator ([58aa87f](https://github.com/gazler/breeze/commit/58aa87fde284e3e0fb967113c1fe8436bcb273b6))
+
+### Bug Fixes
+
+- *(Breeze.InputRouter.IExShellProxy)* Fallback fix for otp 26 and 27 ([cf5a376](https://github.com/gazler/breeze/commit/cf5a3769b5e40be5b90a15bb6878fe70c1bcf83b))
+- *(templates)* Handle CRLF when normalizing whitespace ([2e2991d](https://github.com/gazler/breeze/commit/2e2991d949ab720111a3060a35fdf7516fe00dda))
+- *(Breeze.Server.Frame)* Ensure cursor repaints don't overclear ([549e136](https://github.com/gazler/breeze/commit/549e136200ce953cb4e68a2281140f65b4c11303))
+- *(Breeze.ChildServer)* Prevent the crash screen from crashing ([c3e9549](https://github.com/gazler/breeze/commit/c3e95499ece7b4dfe21645cb1cee68bbfbcd2253))
 ## [0.5.3] - 2026-09-24
 
 ### Features
@@ -50,10 +64,6 @@
 - Document os_mon ([aba4c7e](https://github.com/gazler/breeze/commit/aba4c7e7deee182b5448ef307aac47b574894086))
 - Update to remove halt_fun ([f656b44](https://github.com/gazler/breeze/commit/f656b4477bd5a0b5d3214be6502aefe61241a672))
 - *(components)* Add ex_doc components for checkbox and spinner ([ecdd6f1](https://github.com/gazler/breeze/commit/ecdd6f19a66dd2957cdc0155d712e41c3647aff9))
-
-### Testing
-
-- *(Breeze.InputRouter)* Use refute_received to speed up tests ([b585e28](https://github.com/gazler/breeze/commit/b585e2873b92770519a2b12785f9fbe87c4b6571))
 ## [0.5.0] - 2026-07-30
 
 ### Breaking Changes
@@ -131,15 +141,6 @@ shiftKey, altKey, and ctrlKey boolean fields. ([b1b948d](https://github.com/gazl
 - *(Breeze.Server)* Benchmark input CPU across all examples ([015d007](https://github.com/gazler/breeze/commit/015d007c053e898432fc3e1d875d0caccaba436d))
 - *(Breeze.ChildServer)* Detect deferred input routing changes ([fe7232c](https://github.com/gazler/breeze/commit/fe7232c4c0df6574e5afcd7a0d5158d6c9b31d89))
 - *(Breeze.Server)* Pace input renders at 60 fps ([68b1bb0](https://github.com/gazler/breeze/commit/68b1bb0048a8218e2d1518a759c193c9845b800e))
-
-### Testing
-
-- *(Breeze.InputRouterThemeSyncTest)* Fix aliases ([6ef0714](https://github.com/gazler/breeze/commit/6ef0714deb7d12c6c792876b44865a1840f86a69))
-- Improve test suite robustness on slower machines ([69856d2](https://github.com/gazler/breeze/commit/69856d223d500b1ddd67feaf104322cacfcbb3ac))
-- *(Breeze.LiveView.CrashTest)* Increase assert timeout ([1679d33](https://github.com/gazler/breeze/commit/1679d33bc699cc7771152477d2a52c5e1051a348))
-- Fix flaky tests on process shutdown ([66d58d7](https://github.com/gazler/breeze/commit/66d58d73fe996778f70a9baa51917686f1df1747))
-- *(ExampleSnapshotTest)* Add animated progress snapshot tests ([0a1418b](https://github.com/gazler/breeze/commit/0a1418b6cb83fd032fe5e081402379cf141434f7))
-- *(Breeze.ChildServer)* Supervise processes and speed up test runs ([ccae31f](https://github.com/gazler/breeze/commit/ccae31f9afd291e473987a19f66ad978e4856d6d))
 ## [0.4.0] - 2026-07-10
 
 ### Breaking Changes
@@ -226,15 +227,6 @@ the previous Breeze.Storybook registry delegate functions are removed. ([2d3ad9c
 ### Performance
 
 - *(Breeze.Template)* Streamline slot evaluation ([d4a284d](https://github.com/gazler/breeze/commit/d4a284d11b34928a5abc79fcca50ddb926b56236))
-
-### Testing
-
-- Fix intermittent test failures in CI ([9a59ebd](https://github.com/gazler/breeze/commit/9a59ebd2a32d8607277ea77c18b8a014211d2043))
-- *(Breeze.Storybook)* Fix race condition in tests ([b6bd4e1](https://github.com/gazler/breeze/commit/b6bd4e1ac39361688941aba5699869240b8bd8e0))
-- *(Breeze.Storybook)* Explicitly start each story under test ([939c420](https://github.com/gazler/breeze/commit/939c4200b019705b7f5553632bdb27a1e33493a0))
-- *(RemoteInspector)* Fix remove inspector and debug test races ([b82383f](https://github.com/gazler/breeze/commit/b82383f3e9cd5d4c63f60a01d968613c2a91595b))
-- *(posting)* Update test for CI ([6e62577](https://github.com/gazler/breeze/commit/6e6257779b4b3179ffaed3a631bf43cc268d5b91))
-- *(examples/docs)* Hide __functions__ ([2277473](https://github.com/gazler/breeze/commit/227747307deb4e9cad2d4daa6ddef6b7964700a9))
 ## [0.3.0] - 2026-04-17
 
 ### Features
@@ -330,13 +322,6 @@ the previous Breeze.Storybook registry delegate functions are removed. ([2d3ad9c
 - *(Breeze.Server)* Patch fixed live child invalidations ([c905b40](https://github.com/gazler/breeze/commit/c905b40bf8e3447eacad46acc1af11f72e7cc83e))
 - *(Breeze.Server)* Patch frame rows and resync on sigwinch ([e9f83cc](https://github.com/gazler/breeze/commit/e9f83cc24f8c374a46addedb68d7dd57a1b188af))
 - *(Breeze.ChildServer)* Retain hidden implicit state across remounts ([5497de4](https://github.com/gazler/breeze/commit/5497de44e3e528d78c1c15e7e7b9e587822eb1fa))
-
-### Testing
-
-- *(Breeze.Template)* Expand template and formatter coverage ([81e0a41](https://github.com/gazler/breeze/commit/81e0a41a500a4fae42fbabd019a61d625420bc0d))
-- *(docs)* Update snapshots for the docs test ([ba21f6d](https://github.com/gazler/breeze/commit/ba21f6d02b1241cd36e53d03c5c5909470e4c945))
-- *(Breeze.Server)* Fix snake example ([7a9eda0](https://github.com/gazler/breeze/commit/7a9eda001b51ddfe18d86d833554c7e6aa0afee6))
-- *(posting)* Add a snapshot test for the open modal ([95e16b9](https://github.com/gazler/breeze/commit/95e16b95720b7d47401f60e97a97dbffe6c0d220))
 ## [0.2.0] - 2024-08-09
 
 ### Features
@@ -345,3 +330,4 @@ the previous Breeze.Storybook registry delegate functions are removed. ([2d3ad9c
 - *(Breeze.Server)* Allow passing change events from implicit ([a9b7ad0](https://github.com/gazler/breeze/commit/a9b7ad00c544ec4c4d9ec586f6dee20785095bd8))
 - *(Breeze.Server)* Add handle_modfiers for implicits ([cc00bba](https://github.com/gazler/breeze/commit/cc00bbad61ca096a00544e8b054735a1d89ec3a2))
 ## [0.1.0] - 2024-06-13
+
