@@ -227,6 +227,9 @@ defmodule Breeze.ChildServer do
     {term, acc, box, _decorations} = render_term(term, opts)
     box = maybe_compact_snapshot_box(box, opts)
     {:reply, {:ok, acc, box}, term}
+  rescue
+    exception ->
+      {:reply, {:crash, Breeze.Server.Error.crash_info(:error, exception, __STACKTRACE__)}, term}
   catch
     {:breeze_render_crash, crash} -> {:reply, {:crash, crash}, term}
   end
@@ -236,6 +239,9 @@ defmodule Breeze.ChildServer do
     box = maybe_compact_snapshot_box(box, opts)
 
     {:reply, {:ok, acc, box, decorations}, term}
+  rescue
+    exception ->
+      {:reply, {:crash, Breeze.Server.Error.crash_info(:error, exception, __STACKTRACE__)}, term}
   catch
     {:breeze_render_crash, crash} -> {:reply, {:crash, crash}, term}
   end

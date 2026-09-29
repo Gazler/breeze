@@ -416,7 +416,7 @@ defmodule Breeze.ErrorView do
       "Breeze Error",
       "View #{inspect(view)}",
       "",
-      Exception.format_banner(crash.kind, crash.reason, crash.stacktrace)
+      format_exception(crash, :banner)
     ]
     |> Enum.flat_map(&split_lines/1)
     |> Enum.reject(&(&1 == ""))
@@ -515,7 +515,7 @@ defmodule Breeze.ErrorView do
       module: module,
       module_name: inspect(module),
       function: function,
-      arity: arity,
+      arity: if(is_list(arity), do: length(arity), else: arity),
       file: normalize_file(location[:file]),
       line: location[:line] || 0
     }
@@ -565,9 +565,22 @@ defmodule Breeze.ErrorView do
   defp normalize_file(file), do: file |> to_string() |> Path.relative_to_cwd()
 
   defp formatted_exception_lines(crash) do
-    crash.kind
-    |> Exception.format(crash.reason, crash.stacktrace)
+    crash
+    |> format_exception(:full)
     |> String.split("\n", trim: true)
+  end
+
+  # Formatting an exception can invoke application protocols that are temporarily
+  # unavailable during reload. Always leave a usable diagnostic/copy screen.
+  defp format_exception(crash, mode) do
+    case mode do
+      :banner -> Exception.format_banner(crash.kind, crash.reason, crash.stacktrace)
+      :full -> Exception.format(crash.kind, crash.reason, crash.stacktrace)
+    end
+  rescue
+    _ -> "Unable to format exception: " <> inspect(crash.reason, structs: false)
+  catch
+    _, _ -> "Unable to format exception: " <> inspect(crash.reason, structs: false)
   end
 
   defp normalize_index(nil, _length, default), do: default
