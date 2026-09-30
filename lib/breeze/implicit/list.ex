@@ -58,7 +58,13 @@ defmodule Breeze.Implicit.List do
         width: width
       })
 
-    {:ok, state, state_change_requires_rerender: rendered_list_state_changed?(state, root_attrs)}
+    viewport_changed? =
+      Common.bool_option(root_attrs, :"list-virtual", false) and
+        state.viewport_height != Map.get(last_state, :viewport_height)
+
+    {:ok, state,
+     state_change_requires_rerender:
+       viewport_changed? or rendered_list_state_changed?(state, root_attrs)}
   end
 
   defp rendered_list_state_changed?(state, root_attrs) do

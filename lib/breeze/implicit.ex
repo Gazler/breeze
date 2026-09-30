@@ -11,7 +11,7 @@ defmodule Breeze.Implicit do
   `children` is a list of attribute maps for elements owned by the implicit.
   `root_attrs` is the implicit root's attribute map with `:id` included.
   `last_state` is the state from the preceding render; once layout is known it
-  also contains the previous `Breeze.Viewport` under `:__element__`.
+  also contains the latest measured `Breeze.Viewport` under `:__element__`.
 
   Implicit modules must be referenced statically in compiled templates. Initialization may run
   during input-routing reconciliation as well as while a render settles state and layout, so

@@ -23,13 +23,16 @@ defmodule Breeze.RenderState do
     sorted_elements = Enum.sort(acc.elements)
     total = length(sorted_elements)
 
-    {implicits, implicit_meta, events} = init_implicits_and_events(sorted_elements, term, total)
-
     raw_dimensions =
       build_dimensions(sorted_elements, acc.dimensions)
       |> Map.merge(Map.get(acc, :live_dimensions, %{}))
 
     {elements, mouse_targets} = build_layout_maps(raw_dimensions)
+
+    # Layout has completed for this frame. Implicits must learn its dimensions
+    # before deciding whether their state requires another render pass.
+    {implicits, implicit_meta, events} =
+      init_implicits_and_events(sorted_elements, %{term | elements: elements}, total)
 
     %{
       term
