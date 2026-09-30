@@ -1037,7 +1037,12 @@ defmodule Breeze.Server do
   end
 
   defp update_input(state, updates), do: %{state | input: struct!(state.input, updates)}
-  defp update_frame(state, updates), do: %{state | frame: struct!(state.frame, updates)}
+
+  defp update_frame(state, updates) do
+    frame = Map.put_new(state.frame, :last_render_started_at, nil)
+    %{state | frame: struct!(frame, updates)}
+  end
+
   defp update_debug(state, updates), do: %{state | debug: struct!(state.debug, updates)}
 
   defp update_inspector(state, updates),
@@ -1400,15 +1405,17 @@ defmodule Breeze.Server do
   end
 
   defp focused_child_or_root_metadata(state) do
+    opts = [fields: [:focused_implicit_id, :focused_implicit_meta]]
+
     case focused_child_chain(state) do
       [{_child_id, %{pid: pid}} | _] ->
-        case safe_call(fn -> Breeze.ChildServer.metadata(pid) end) do
+        case safe_call(fn -> Breeze.ChildServer.metadata(pid, opts) end) do
           {:ok, metadata} -> metadata
           {:crash, _crash} -> %{}
         end
 
       [] ->
-        case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
+        case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid, opts) end) do
           {:ok, metadata} -> metadata
           {:crash, _crash} -> %{}
         end
@@ -1597,7 +1604,11 @@ defmodule Breeze.Server do
       |> maybe_merge_inspector_render_data(result.acc)
       |> update_frame(decorations: decorations)
       |> Map.put(:focused, result.focused)
-      |> update_frame(last_render_at: System.monotonic_time(:millisecond))
+      |> update_frame(
+        last_render_at: System.monotonic_time(:millisecond),
+        last_render_started_at:
+          System.convert_time_unit(result.started_at, :microsecond, :millisecond)
+      )
       |> Debug.put_stat(:last_render_cause, result.cause)
       |> Debug.put_stat(:last_root_snapshot_us, result.root_snapshot_us)
       |> Debug.put_stat(
@@ -1648,18 +1659,21 @@ defmodule Breeze.Server do
   end
 
   defp safe_render_snapshot(state, tracking_ref, profile_scope) do
+    live_state = live_render_state(state)
+
     Breeze.ChildServer.render_snapshot(state.view_pid,
       reload: Keyword.get(state.reload_opts || [], :sync),
       implicit_state: %{},
       terminal: state.terminal_state.terminal,
       theme: state.theme,
       render_tree?: Breeze.Inspector.enabled?(state),
+      snapshot_boxes: if(Breeze.Inspector.enabled?(state), do: :all, else: :named),
       render_tracking_ref: tracking_ref,
       profile_scope: profile_scope,
       profile_label: inspect(state.view),
       compact_snapshot: true,
       live_view: fn attrs, opts ->
-        render_live_child(attrs, opts, state, profile_scope, tracking_ref)
+        render_live_child(attrs, opts, live_state, profile_scope, tracking_ref)
       end
     )
     |> then(fn
@@ -1671,8 +1685,28 @@ defmodule Breeze.Server do
     :exit, _reason -> :stopped
   end
 
+  # This context crosses a process boundary inside the live-view callback.
+  # Capturing the entire server copies previous frames and all rendered boxes,
+  # even for a root view with no live children.
+  defp live_render_state(state) do
+    %{
+      children: state.children,
+      focused: state.focused,
+      theme: state.theme,
+      reload_opts: state.reload_opts,
+      terminal_state: %{terminal: state.terminal_state.terminal},
+      inspector_state: %{config: state.inspector_state.config},
+      debug: %{stats: state.debug.stats},
+      input: %{pending_ref: state.input.pending_ref}
+    }
+  end
+
   defp safe_focused_metadata(state) do
-    case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
+    case safe_call(fn ->
+           Breeze.ChildServer.metadata(state.view_pid,
+             fields: [:focused, :theme, :apply_theme_defaults?]
+           )
+         end) do
       {:ok,
        %{
          focused: focused,
@@ -1760,11 +1794,12 @@ defmodule Breeze.Server do
     end
   end
 
-  defp input_render_delay(%{frame: %{last_render_at: nil}}), do: 0
-
   defp input_render_delay(state) do
-    elapsed = System.monotonic_time(:millisecond) - state.frame.last_render_at
-    max(@input_render_interval_ms - elapsed, 0)
+    Frame.input_render_delay(
+      state.frame,
+      System.monotonic_time(:millisecond),
+      @input_render_interval_ms
+    )
   end
 
   defp schedule_input_render(%{input: %{render_timer: timer}} = state, _delay)
@@ -3502,8 +3537,8 @@ defmodule Breeze.Server do
 
   defp child_start_opts(start_opts, _view, _state), do: start_opts
 
-  defp safe_root_metadata(state) do
-    case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid) end) do
+  defp safe_root_metadata(state, fields \\ nil) do
+    case safe_call(fn -> Breeze.ChildServer.metadata(state.view_pid, fields: fields) end) do
       {:ok, metadata} -> metadata
       {:crash, _crash} -> %{}
     end
@@ -3523,7 +3558,7 @@ defmodule Breeze.Server do
 
   defp dispatch_input_hierarchy_with_origin(state, key) do
     state =
-      case safe_root_metadata(state) do
+      case safe_root_metadata(state, [:focused]) do
         %{focused: focused} -> %{state | focused: focused}
         _metadata -> state
       end

@@ -3,6 +3,14 @@ defmodule Breeze.Server.Frame do
 
   alias BackBreeze.Box.LayerMap
 
+  def input_render_delay(frame, now, interval) do
+    # Older runtime frames lack the start timestamp until their next render.
+    case Map.get(frame, :last_render_started_at) || Map.get(frame, :last_render_at) do
+      nil -> 0
+      started_at -> max(interval - (now - started_at), 0)
+    end
+  end
+
   def normalize_lines(output, screen_height) do
     output
     |> :binary.split("\n", [:global])
@@ -32,8 +40,10 @@ defmodule Breeze.Server.Frame do
     else
       IO.iodata_to_binary([
         row_patch_payload(
+          prev_lines,
           lines,
           MapSet.union(changed_base_rows, repaired_overlay_rows),
+          repaired_overlay_rows,
           screen_width
         ),
         overlay_patch_payload(overlays, changed_rows)
@@ -253,7 +263,8 @@ defmodule Breeze.Server.Frame do
     end)
   end
 
-  defp row_patch_payload(lines, changed_rows, screen_width) do
+  defp row_patch_payload(previous_lines, lines, changed_rows, repaired_rows, screen_width) do
+    previous_lines = List.to_tuple(previous_lines)
     lines = List.to_tuple(lines)
     line_count = tuple_size(lines)
 
@@ -262,10 +273,64 @@ defmodule Breeze.Server.Frame do
     |> Enum.sort()
     |> Enum.map(fn row ->
       line = line_at(lines, row, line_count)
-      write_row_payload(row, line, screen_width)
+      previous = line_at(previous_lines, row, tuple_size(previous_lines))
+
+      prefix =
+        if not MapSet.member?(repaired_rows, row),
+          do: changed_prefix(previous, line, screen_width)
+
+      if is_binary(prefix) do
+        position = ["\e[", Integer.to_string(row + 1), ";1H"]
+        [position, row_line_payload(prefix, position)]
+      else
+        write_row_payload(row, line, screen_width)
+      end
     end)
     |> IO.iodata_to_binary()
   end
+
+  # A reset closes the changed prefix's style. Reusing the suffix also requires
+  # equal display widths, otherwise identical bytes would move on the screen.
+  # Overlay repairs must still repaint the full row.
+  defp changed_prefix(previous, line, screen_width) do
+    shared = :binary.longest_common_suffix([previous, line])
+    start = byte_size(line) - shared
+    suffix = binary_part(line, start, shared)
+
+    case :binary.match(suffix, "\e[0m") do
+      {offset, 4} when offset + 4 < shared ->
+        prefix_size = start + offset + 4
+        previous_size = byte_size(previous) - shared + offset + 4
+        prefix = binary_part(line, 0, prefix_size)
+        previous_prefix = binary_part(previous, 0, previous_size)
+        width = visible_width(prefix)
+        retained = binary_part(suffix, offset + 4, shared - offset - 4)
+
+        if String.ends_with?(line, "\e[0m") and independent_suffix?(retained) and
+             not wide_glyph_line?(prefix) and
+             not wide_glyph_line?(previous_prefix) and width <= screen_width and
+             width == visible_width(previous_prefix),
+           do: prefix
+
+      _ ->
+        nil
+    end
+  end
+
+  # Do not split a grapheme across a reset (combining marks, emoji modifiers,
+  # regional indicators, etc.). ASCII and box-drawing starts are safe; other
+  # Unicode starts conservatively use the normal full-row path.
+  defp independent_suffix?("\e[" <> rest), do: suffix_after_sgr?(rest)
+  defp independent_suffix?(<<char, _::binary>>) when char in 32..126, do: true
+  defp independent_suffix?(<<char::utf8, _::binary>>) when char in 0x2500..0x257F, do: true
+  defp independent_suffix?(_), do: false
+
+  defp suffix_after_sgr?("m" <> rest), do: independent_suffix?(rest)
+
+  defp suffix_after_sgr?(<<char, rest::binary>>) when char in ?0..?9 or char == ?;,
+    do: suffix_after_sgr?(rest)
+
+  defp suffix_after_sgr?(_), do: false
 
   defp line_at(lines, row, line_count) when row < 0 do
     tuple_line_at(lines, line_count + row, line_count)
@@ -316,8 +381,25 @@ defmodule Breeze.Server.Frame do
   defp wide_glyph_line?(line) do
     line
     |> BackBreeze.Utils.strip_escape_chars()
-    |> String.graphemes()
-    |> Enum.any?(&(BackBreeze.Ucwidth.width(&1) > 1))
+    |> wide_text?()
+  end
+
+  defp wide_text?(""), do: false
+
+  defp wide_text?(<<ascii, rest::binary>> = text) when ascii < 128 do
+    case rest do
+      <<next, _::binary>> when next < 128 -> wide_text?(rest)
+      "" -> false
+      # Keep the final ASCII character with any following combining marks.
+      _ -> wide_grapheme?(text)
+    end
+  end
+
+  defp wide_text?(text), do: wide_grapheme?(text)
+
+  defp wide_grapheme?(text) do
+    {grapheme, rest} = String.next_grapheme(text)
+    BackBreeze.Ucwidth.width(grapheme) > 1 or wide_text?(rest)
   end
 
   defp wide_background_line(line), do: do_wide_background_line(line, [])

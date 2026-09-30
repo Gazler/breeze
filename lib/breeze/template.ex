@@ -236,6 +236,8 @@ defmodule Breeze.Template do
     Enum.flat_map(nodes, &node_to_tree(&1, ctx))
   end
 
+  defp node_to_tree({:text, [{:expr, expr}]}, ctx), do: node_to_tree({:expr, expr}, ctx)
+
   defp node_to_tree({:text, segments}, ctx) do
     case extract_standalone_content_surface(segments, ctx) do
       {:ok, value} ->

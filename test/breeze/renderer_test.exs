@@ -9,6 +9,141 @@ defmodule Breeze.RendererTest do
   alias BackBreeze.VirtualText.Source
   alias Breeze.Renderer
 
+  defmodule FocusedPanel do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box id="panel" focus-within class="focus:text-red">
+        <box :for={n <- 1..50}>Row {n}</box>
+        <box id="target" focusable>Target</box>
+      </box>
+      """
+    end
+  end
+
+  test "focus-within lookup does not materialize all element flags" do
+    owner = self()
+
+    worker =
+      spawn_link(fn ->
+        receive do
+          :render ->
+            send(owner, {:focus_frame, Renderer.render(FocusedPanel, %{}, focused: "target")})
+        end
+
+        receive do: (:stop -> :ok)
+      end)
+
+    :erlang.trace_pattern({Enum, :map, 2}, [{[:"$1", :_], [{:is_map, :"$1"}], []}], [:local])
+    :erlang.trace(worker, true, [:call])
+
+    try do
+      send(worker, :render)
+      assert_receive {:focus_frame, {acc, box}}, 1000
+      assert box.content =~ "Target"
+      assert "target" in acc.focusables
+      delivered = :erlang.trace_delivered(worker)
+      assert_receive {:trace_delivered, ^worker, ^delivered}
+      refute_receive({:trace, ^worker, :call, {Enum, :map, [%{50 => _}, _]}})
+    after
+      :erlang.trace_pattern({Enum, :map, 2}, false, [:local])
+      send(worker, :stop)
+    end
+  end
+
+  defmodule RepeatedStyles do
+    use Breeze.View
+
+    def render(assigns) do
+      ~H"""
+      <box>
+        <box :for={n <- 1..50} class="text-primary width-20">Row {n}</box>
+      </box>
+      """
+    end
+  end
+
+  test "identical styles are resolved once within a frame" do
+    parent = self()
+
+    worker =
+      spawn_link(fn ->
+        receive do
+          :render -> send(parent, {:rendered_styles, Renderer.render(RepeatedStyles, %{})})
+        end
+
+        receive do: (:stop -> :ok)
+      end)
+
+    Code.ensure_loaded!(Breeze.Style)
+    Code.ensure_loaded!(Renderer)
+    Code.ensure_loaded!(BackBreeze.Box)
+    :erlang.trace_pattern({Breeze.Style, :to_element, 2}, true, [:local])
+    :erlang.trace_pattern({BackBreeze.Box, :new, 1}, true, [:local])
+    :erlang.trace_pattern({Renderer, :hidden_token?, 1}, true, [:local])
+    :erlang.trace(worker, true, [:call])
+
+    try do
+      send(worker, :render)
+      assert_receive {:rendered_styles, {acc, box}}, 1000
+      delivery = :erlang.trace_delivered(worker)
+      assert_receive {:trace_delivered, ^worker, ^delivery}
+      assert style_call_count(worker, 0) <= 3
+      assert box_call_count(worker, 0) in 1..3
+      assert hidden_check_count(worker, 0) in 1..3
+      refute Map.has_key?(acc, :style_elements)
+      assert box.content =~ "Row 50"
+    after
+      :erlang.trace_pattern({Breeze.Style, :to_element, 2}, false, [:local])
+      :erlang.trace_pattern({BackBreeze.Box, :new, 1}, false, [:local])
+      :erlang.trace_pattern({Renderer, :hidden_token?, 1}, false, [:local])
+      send(worker, :stop)
+    end
+  end
+
+  defp hidden_check_count(pid, count) do
+    receive do
+      {:trace, ^pid, :call, {Renderer, :hidden_token?, _}} -> hidden_check_count(pid, count + 1)
+    after
+      0 -> count
+    end
+  end
+
+  defp box_call_count(pid, count) do
+    receive do
+      {:trace, ^pid, :call, {BackBreeze.Box, :new, _}} -> box_call_count(pid, count + 1)
+    after
+      0 -> count
+    end
+  end
+
+  defp style_call_count(pid, count) do
+    receive do
+      {:trace, ^pid, :call, {Breeze.Style, :to_element, _}} -> style_call_count(pid, count + 1)
+    after
+      0 -> count
+    end
+  end
+
+  test "compact snapshots preserve screen dimming" do
+    opts = [
+      theme: Breeze.Theme.builtin(:nebula),
+      terminal: %Termite.Terminal{size: %{width: 12, height: 5}}
+    ]
+
+    {_, regular} = Renderer.render(__MODULE__.ScreenDimBackdropExample, %{}, opts)
+
+    {_, compact} =
+      Renderer.render(
+        __MODULE__.ScreenDimBackdropExample,
+        %{},
+        Keyword.put(opts, :compact_snapshot, true)
+      )
+
+    assert compact.content == regular.content
+  end
+
   defmodule Example do
     use Breeze.View
 

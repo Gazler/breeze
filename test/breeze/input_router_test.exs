@@ -1666,7 +1666,7 @@ defmodule Breeze.InputRouterTest do
 
   defp defer_input_render(pid) do
     :sys.replace_state(pid, fn state ->
-      put_in(state.frame.last_render_at, System.monotonic_time(:millisecond) + 5_000)
+      put_in(state.frame.last_render_started_at, System.monotonic_time(:millisecond) + 5_000)
     end)
   end
 

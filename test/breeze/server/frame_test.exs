@@ -19,6 +19,91 @@ defmodule Breeze.Server.FrameTest do
 
   alias Breeze.Server.Frame
 
+  test "row updates retain an unchanged suffix after a style reset at the same column" do
+    suffix = "\e[0m\e[32m│" <> String.duplicate("shell", 40) <> "\e[0m"
+    previous = "\e[31mold" <> suffix
+    current = "\e[34mnew" <> suffix
+
+    assert Frame.build_payload([previous], [current], [], [], 278) ==
+             "\e[1;1H\e[34mnew\e[0m"
+  end
+
+  test "suffix reuse falls back when the unchanged suffix moves columns" do
+    suffix = "\e[0m\e[32mshell\e[0m"
+    previous = "\e[31mold" <> suffix
+    current = "\e[34mlonger" <> suffix
+    assert Frame.build_payload([previous], [current], [], [], 80) =~ current
+  end
+
+  test "overlay removal repaints the unchanged suffix too" do
+    suffix = "\e[0m\e[32mshell\e[0m"
+    previous = "\e[31mold" <> suffix
+    current = "\e[34mnew" <> suffix
+    overlay = %{x: 5, y: 0, char: "X"}
+    assert Frame.build_payload([previous], [current], [overlay], [], 80) =~ current
+  end
+
+  test "suffix reuse does not split combining marks across a style reset" do
+    suffix = "\e[0m\u0301tail"
+    current = "\e[34me" <> suffix
+    assert Frame.build_payload(["\e[31ma" <> suffix], [current], [], [], 80) =~ current
+  end
+
+  test "wide-glyph prepainting retains the full row" do
+    suffix = "\e[0mshell\e[0m"
+    current = "\e[34m👩‍💻" <> suffix
+    assert Frame.build_payload(["\e[31m👩‍💻" <> suffix], [current], [], [], 80) =~ current
+  end
+
+  test "suffix reuse does not change the terminal's final active style" do
+    suffix = "\e[0m\e[32mshell"
+    current = "\e[34mnew" <> suffix
+    assert Frame.build_payload(["\e[31mold" <> suffix], [current], [], [], 80) =~ current
+  end
+
+  test "input frame pacing includes time already spent rendering" do
+    frame = %{last_render_started_at: 100, last_render_at: 112}
+    assert Frame.input_render_delay(frame, 112, 16) == 4
+    assert Frame.input_render_delay(frame, 116, 16) == 0
+    assert Frame.input_render_delay(frame, 130, 16) == 0
+    assert Frame.input_render_delay(%{last_render_at: nil}, 100, 16) == 0
+    assert Frame.input_render_delay(%{last_render_at: 100}, 110, 16) == 6
+  end
+
+  test "wide checks retain combining marks with their ASCII base" do
+    line = "a\u{1F3FB}"
+    assert Frame.build_payload([""], [line], [], [], 1) == "\e[1;1H" <> line
+  end
+
+  test "wide-glyph checks do not allocate a grapheme list for full-width rows" do
+    line = "│" <> String.duplicate("x", 276) <> "│"
+    owner = self()
+
+    worker =
+      spawn_link(fn ->
+        receive do
+          :render -> send(owner, {:payload, Frame.build_payload(nil, [line], [], [], 278)})
+        end
+
+        receive do: (:stop -> :ok)
+      end)
+
+    :erlang.trace_pattern({String, :graphemes, 1}, true, [:local])
+    :erlang.trace(worker, true, [:call])
+
+    try do
+      send(worker, :render)
+      assert_receive {:payload, payload}, 1000
+      delivery = :erlang.trace_delivered(worker)
+      assert_receive {:trace_delivered, ^worker, ^delivery}
+      assert payload == "\e[2J\e[H\e[1;1H" <> line
+      refute_receive {:trace, ^worker, :call, {String, :graphemes, _}}, 0
+    after
+      :erlang.trace_pattern({String, :graphemes, 1}, false, [:local])
+      send(worker, :stop)
+    end
+  end
+
   test "row patches prepaint styled backgrounds for wide glyph rows" do
     line = "\e[48;5;8mAこんにちはZ\e[0m"
 

@@ -7,6 +7,31 @@ defmodule Breeze.BlocksTest do
   alias Breeze.ChildServer
   alias Breeze.Renderer
 
+  defmodule FullWidthListRow do
+    use Breeze.View
+    import Breeze.Blocks
+    def mount(_, term), do: {:ok, term}
+
+    def render(assigns) do
+      ~H"""
+      <.list id="items" class="width-20 height-5" item_class="width-full" list-selected="one">
+        <:item value="one">
+          <box id="label" class="width-full">Label</box>
+        </:item>
+      </.list>
+      """
+    end
+
+    def handle_event(_, _, term), do: {:noreply, term}
+  end
+
+  test "full-width list items use the list viewport rather than the terminal width" do
+    terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
+    {:ok, pid} = start_child_server(view: FullWidthListRow, terminal: terminal)
+    {:ok, _, _} = ChildServer.render(pid, terminal: terminal, focused: "items")
+    assert :sys.get_state(pid).elements["label"].width == 17
+  end
+
   defmodule UnderlineTabsExample do
     use Breeze.View
     import Breeze.Blocks
@@ -407,9 +432,15 @@ defmodule Breeze.BlocksTest do
 
     def render(assigns) do
       ~H"""
-      <.list id="items" list-selected="two" class="width-20 height-4" variant={assigns[:variant]}
-        item_class={@item_class} selected_indicator={@indicator}
-        indicator_class={assigns[:indicator_class]}>
+      <.list
+        id="items"
+        list-selected="two"
+        class="width-20 height-4"
+        variant={assigns[:variant]}
+        item_class={@item_class}
+        selected_indicator={@indicator}
+        indicator_class={assigns[:indicator_class]}
+      >
         <:item value="one">One</:item>
         <:item value="two">Two</:item>
       </.list>

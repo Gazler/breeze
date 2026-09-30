@@ -198,7 +198,7 @@ defmodule Breeze.Blocks do
         :if={not @virtual_text?}
         value={item.value}
         focus-with-owner
-        class="inline"
+        class="inline width-full"
         style={Breeze.Blocks.inline_style(assigns, :item_class, :item_style)}
       >
         <box selected-with-owner class={@marker_class}>{@selected_indicator}</box>

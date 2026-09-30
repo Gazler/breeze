@@ -81,7 +81,14 @@ defmodule Breeze.Renderer do
 
     %{box: box, dimensions: dimensions} =
       profile(profile_scope, profile_label, :layout_us, fn ->
-        BackBreeze.Box.render_with_dimensions(box, opts)
+        # Compact snapshots only consume ANSI and geometry. Screen dimming
+        # still needs editable cells, so retain the regular path for overlays.
+        if Keyword.get(opts, :compact_snapshot, false) and
+             not Enum.any?(acc.elements, fn {_, flags} -> Keyword.get(flags, :"screen-dim") end) do
+          BackBreeze.Box.render_with_dimensions(box, Keyword.put(opts, :output, :content))
+        else
+          BackBreeze.Box.render_with_dimensions(box, opts)
+        end
       end)
 
     acc = maybe_refresh_live_dimensions(root_tag, root_children, opts, acc)
@@ -151,6 +158,7 @@ defmodule Breeze.Renderer do
           id: 0,
           elements: %{},
           boxes: %{},
+          style_elements: %{},
           ids: [],
           flags: [],
           live_dimensions: %{},
@@ -184,28 +192,49 @@ defmodule Breeze.Renderer do
         ])
       end
 
-    {acc, box}
+    {Map.delete(acc, :style_elements), box}
   end
 
   defp render_tree_enabled?(opts), do: Keyword.get(opts, :render_tree?, false) == true
 
   defp prune_hidden_nodes(nodes, opts) when is_list(nodes) do
-    Enum.flat_map(nodes, fn
-      {tag, metadata, children} when is_atom(tag) and is_list(children) ->
-        if structurally_hidden?(children, opts) do
-          []
-        else
-          [{tag, metadata, prune_hidden_nodes(children, opts)}]
-        end
-
-      node ->
-        [node]
-    end)
+    {nodes, _visibility} = prune_hidden_nodes(nodes, opts, %{})
+    nodes
   end
 
-  defp structurally_hidden?(nodes, opts) do
-    class = attribute_value(nodes, "class")
-    style = attribute_value(nodes, "style")
+  defp prune_hidden_nodes(nodes, opts, visibility) do
+    {nodes, visibility} =
+      Enum.reduce(nodes, {[], visibility}, fn
+        {tag, metadata, children}, {acc, visibility} when is_atom(tag) and is_list(children) ->
+          class = attribute_value(children, "class")
+          style = attribute_value(children, "style")
+          key = {class, style}
+
+          {hidden?, visibility} =
+            case visibility do
+              %{^key => hidden?} ->
+                {hidden?, visibility}
+
+              _ ->
+                hidden? = structurally_hidden?(class, style, opts)
+                {hidden?, Map.put(visibility, key, hidden?)}
+            end
+
+          if hidden? do
+            {acc, visibility}
+          else
+            {children, visibility} = prune_hidden_nodes(children, opts, visibility)
+            {[{tag, metadata, children} | acc], visibility}
+          end
+
+        node, {acc, visibility} ->
+          {[node | acc], visibility}
+      end)
+
+    {Enum.reverse(nodes), visibility}
+  end
+
+  defp structurally_hidden?(class, style, opts) do
     tokens = class_tokens(class) ++ class_style_tokens(style)
 
     hidden_token?(tokens) and not state_dependent_visibility?(tokens) and
@@ -737,16 +766,31 @@ defmodule Breeze.Renderer do
         do: [Keyword.get(flags, :id) | focusables],
         else: focusables
 
-    element =
-      style_state
-      |> RenderStyle.merge_modifiers(style_modifiers)
-      |> RenderStyle.to_element(
-        Keyword.merge(style_flags,
-          theme: Keyword.get(opts, :theme),
-          terminal: Keyword.get(opts, :terminal),
-          apply_theme_defaults: Keyword.get(opts, :apply_theme_defaults, false)
-        )
+    style_state = RenderStyle.merge_modifiers(style_state, style_modifiers)
+
+    style_opts =
+      Keyword.merge(style_flags,
+        theme: Keyword.get(opts, :theme),
+        terminal: Keyword.get(opts, :terminal),
+        apply_theme_defaults: Keyword.get(opts, :apply_theme_defaults, false)
       )
+
+    # Theme, terminal, and defaults are constant within this render. Including
+    # them in every key repeatedly hashes the entire theme for each element.
+    style_key = {style_state, style_flags}
+
+    {element, base_box, acc} =
+      case acc.style_elements do
+        %{^style_key => {element, base_box}} ->
+          {element, base_box, acc}
+
+        _ ->
+          element = RenderStyle.to_element(style_state, style_opts)
+          base_box = Box.new(Map.put(element.attributes, :style, element.style))
+
+          {element, base_box,
+           %{acc | style_elements: Map.put(acc.style_elements, style_key, {element, base_box})}}
+      end
 
     style =
       element.style
@@ -761,15 +805,16 @@ defmodule Breeze.Renderer do
       |> Enum.reverse()
       |> maybe_resolve_inline_child_widths(style, element.attributes)
 
-    opts =
-      element.attributes
-      |> merge_scroll_modifier(scroll_modifier)
-      |> Map.put(:style, style)
-      |> Map.put(:owner_id, id)
+    attributes = merge_scroll_modifier(element.attributes, scroll_modifier)
 
-    content = box.content
+    final_box =
+      if style == element.style and attributes == element.attributes do
+        base_box
+      else
+        Box.new(Map.put(attributes, :style, style))
+      end
 
-    final_box = %{Box.new(opts) | children: children, content: content}
+    final_box = %{final_box | children: children, content: box.content}
 
     final_box =
       if implicit && function_exported?(implicit_mod, :animate, 5) &&
@@ -1819,17 +1864,17 @@ defmodule Breeze.Renderer do
   end
 
   defp focused_element_flags(focused_target, acc) do
-    [Map.get(acc, :flags) | Enum.map(Map.get(acc, :elements, %{}), fn {_idx, flags} -> flags end)]
-    |> Enum.find_value(fn
-      nil ->
-        nil
+    matching_focus_flags(Map.get(acc, :flags), focused_target) ||
+      Enum.find_value(Map.get(acc, :elements, %{}), fn {_idx, flags} ->
+        matching_focus_flags(flags, focused_target)
+      end)
+  end
 
-      {_idx, flags} ->
-        if Keyword.get(flags, :id) == focused_target, do: flags
+  defp matching_focus_flags(nil, _target), do: nil
+  defp matching_focus_flags({_idx, flags}, target), do: matching_focus_flags(flags, target)
 
-      flags ->
-        if Keyword.get(flags, :id) == focused_target, do: flags
-    end)
+  defp matching_focus_flags(flags, target) do
+    if Keyword.get(flags, :id) == target, do: flags
   end
 
   defp animation_ctx(opts, id, focused, previous_layout) do

@@ -52,7 +52,8 @@ defmodule Breeze.Server.State.Frame do
     animation_timer: nil,
     animation_generation: nil,
     next_tick_at: nil,
-    last_render_at: nil
+    last_render_at: nil,
+    last_render_started_at: nil
   ]
 end
 

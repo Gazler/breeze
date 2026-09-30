@@ -169,20 +169,27 @@ defmodule Breeze.ChildServer do
         term
       end
 
-    {:reply,
-     %{
-       focused: metadata_term.focused,
-       view: metadata_term.view,
-       theme: metadata_term.theme,
-       apply_theme_defaults?: metadata_term.apply_theme_defaults?,
-       active_keybindings: active_keybindings(metadata_term),
-       focused_implicit_id: focused_implicit_id(metadata_term, metadata_term.focused),
-       focused_implicit_meta: focused_implicit_meta(metadata_term, metadata_term.focused),
-       focus_meta: metadata_term.focus_meta,
-       assigns: metadata_term.assigns,
-       implicit_state: metadata_term.implicit_state,
-       implicit_meta: metadata_term.implicit_meta
-     }, term}
+    metadata = %{
+      focused: metadata_term.focused,
+      view: metadata_term.view,
+      theme: metadata_term.theme,
+      apply_theme_defaults?: metadata_term.apply_theme_defaults?,
+      active_keybindings: active_keybindings(metadata_term),
+      focused_implicit_id: focused_implicit_id(metadata_term, metadata_term.focused),
+      focused_implicit_meta: focused_implicit_meta(metadata_term, metadata_term.focused),
+      focus_meta: metadata_term.focus_meta,
+      assigns: metadata_term.assigns,
+      implicit_state: metadata_term.implicit_state,
+      implicit_meta: metadata_term.implicit_meta
+    }
+
+    metadata =
+      case Keyword.get(opts, :fields) do
+        fields when is_list(fields) -> Map.take(metadata, fields)
+        _ -> metadata
+      end
+
+    {:reply, metadata, term}
   end
 
   def handle_call({:input_routing_changed?, opts}, _from, term) do
@@ -237,6 +244,17 @@ defmodule Breeze.ChildServer do
   def handle_call({:render_snapshot, opts}, _from, term) do
     {term, acc, box, decorations} = render_term(term, opts)
     box = maybe_compact_snapshot_box(box, opts)
+
+    acc =
+      if Keyword.get(opts, :snapshot_boxes) == :named do
+        # Keep the complete tree in the child. Runtime replies only need named
+        # boxes for focused previews when anonymous-node inspection is disabled.
+        Map.update!(acc, :boxes, fn boxes ->
+          Map.filter(boxes, fn {id, _box} -> is_binary(id) end)
+        end)
+      else
+        acc
+      end
 
     {:reply, {:ok, acc, box, decorations}, term}
   rescue

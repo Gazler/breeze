@@ -1,6 +1,27 @@
 defmodule Breeze.TemplateTest do
   use ExUnit.Case, async: true
 
+  defmodule SingleExpressionView do
+    use Breeze.View
+
+    def render(assigns), do: ~H"<box>{value(@owner)}</box>"
+
+    defp value(owner) do
+      send(owner, :evaluated)
+      "value"
+    end
+  end
+
+  test "a standalone text expression is evaluated once when building the tree" do
+    assigns = %{owner: self()}
+
+    assert [{:box, [], ["value"]}] =
+             Breeze.Template.render_to_tree(SingleExpressionView.render(assigns), assigns)
+
+    assert_receive :evaluated
+    refute_receive :evaluated
+  end
+
   test "normalizes Windows line endings before parsing template expressions" do
     source =
       "<box>{if true do\r\n" <>

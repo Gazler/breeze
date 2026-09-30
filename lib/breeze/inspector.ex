@@ -296,9 +296,11 @@ defmodule Breeze.Inspector do
 
   @doc false
   def overlays(state) do
-    snapshot = snapshot(state)
+    # Building a snapshot renders the selected fragment. Do not pay that cost
+    # on every application frame when none of its overlays will be displayed.
+    if inspector_field(state, :visible?, :inspector_visible?, false) do
+      snapshot = snapshot(state)
 
-    if snapshot.visible? do
       overlays =
         hover_overlays(snapshot.hovered, snapshot.selected_id) ++
           selected_overlays(snapshot.selected)

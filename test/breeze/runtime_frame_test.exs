@@ -1,6 +1,45 @@
 defmodule Breeze.Runtime.FrameTest do
   use Breeze.RuntimeTestCase, async: true
 
+  test "runtime snapshots preserve focused previews with the inspector disabled" do
+    for inspector <- [false, [remote: false]] do
+      terminal = Termite.Terminal.start(adapter: FakeAdapter)
+      {:ok, pid} = start_app_server(view: ForkRoot, terminal: terminal, inspector: inspector)
+      state = :sys.get_state(pid)
+      snapshot = Breeze.Server.Diagnostics.inspector_snapshot(pid)
+      assert snapshot.focused_entry.id == "root"
+      assert snapshot.focused_entry.fragment_size > 0
+      assert Map.has_key?(state.rendered.boxes, "root")
+      assert Enum.any?(Map.keys(state.rendered.boxes), &is_integer/1) == (inspector != false)
+      stop_gen_server(pid)
+    end
+  end
+
+  test "live render callbacks do not copy the server's previous frame and rendered trees" do
+    terminal = Termite.Terminal.start(adapter: FakeAdapter)
+    {:ok, pid} = start_app_server(view: ForkRoot, terminal: terminal)
+    view_pid = :sys.get_state(pid).view_pid
+    mfa = {Breeze.ChildServer, :render_snapshot, 2}
+    :erlang.trace_pattern(mfa, true, [:local])
+    :erlang.trace(pid, true, [:call, :set_on_spawn])
+
+    try do
+      send(pid, {terminal.reader, {:data, "+"}})
+
+      assert_receive {:trace, _sender, :call,
+                      {Breeze.ChildServer, :render_snapshot, [^view_pid, opts]}},
+                     1000
+
+      {:env, env} = :erlang.fun_info(Keyword.fetch!(opts, :live_view), :env)
+      refute Enum.any?(env, &match?(%{frame: _, rendered: _}, &1))
+    after
+      :erlang.trace(pid, false, [:call, :set_on_spawn])
+      :erlang.trace_pattern(mfa, false, [:local])
+    end
+
+    stop_gen_server(pid)
+  end
+
   test "runtime capture stays disabled unless an hook is configured" do
     terminal = Termite.Terminal.start(adapter: FakeAdapter)
     reader = terminal.reader
@@ -125,7 +164,7 @@ defmodule Breeze.Runtime.FrameTest do
     {:ok, pid} = start_app_server(view: DeferredPauseRoot, terminal: terminal)
 
     :sys.replace_state(pid, fn state ->
-      put_in(state.frame.last_render_at, System.monotonic_time(:millisecond) + 5_000)
+      put_in(state.frame.last_render_started_at, System.monotonic_time(:millisecond) + 5_000)
     end)
 
     send(pid, {reader, {:data, "+"}})

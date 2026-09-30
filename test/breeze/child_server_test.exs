@@ -25,6 +25,22 @@ defmodule Breeze.ChildServerTest do
     def handle_event(_, _, term), do: {:noreply, term}
   end
 
+  test "metadata projections omit assigns and preserve focused overrides" do
+    {:ok, pid} = start_child_server(view: MouseView)
+    metadata = Breeze.ChildServer.metadata(pid)
+    assert Map.has_key?(metadata, :assigns)
+
+    assert Breeze.ChildServer.metadata(pid, fields: [:focused, :theme]) ==
+             Map.take(metadata, [:focused, :theme])
+
+    assert Breeze.ChildServer.metadata(pid, fields: [:focused], focused: "temporary") ==
+             %{focused: "temporary"}
+
+    assert Breeze.ChildServer.metadata(pid, fields: []) == %{}
+    assert Breeze.ChildServer.metadata(pid) == metadata
+    stop_gen_server(pid)
+  end
+
   defmodule MouseTargetView do
     use Breeze.View
 
@@ -52,6 +68,20 @@ defmodule Breeze.ChildServerTest do
     end
 
     def handle_event(_, _, term), do: {:noreply, term}
+  end
+
+  test "named-box snapshots retain previews without copying anonymous diagnostic boxes" do
+    {:ok, pid} = start_child_server(view: MouseTargetView)
+    {:ok, full, _, _} = Breeze.ChildServer.render_snapshot(pid, [])
+    {:ok, named, _, _} = Breeze.ChildServer.render_snapshot(pid, snapshot_boxes: :named)
+    assert map_size(full.boxes) > 2
+    assert Enum.sort(Map.keys(named.boxes)) == ["left", "right"]
+    assert named.boxes["left"] == full.boxes["left"]
+    assert named.boxes["right"] == full.boxes["right"]
+    assert :sys.get_state(pid).rendered_boxes == full.boxes
+    {:ok, again, _, _} = Breeze.ChildServer.render_snapshot(pid, [])
+    assert again.boxes == full.boxes
+    stop_gen_server(pid)
   end
 
   defmodule MouseFocusView do

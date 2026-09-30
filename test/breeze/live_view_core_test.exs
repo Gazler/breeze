@@ -602,7 +602,7 @@ defmodule Breeze.LiveView.CoreTest do
     previous_child = :sys.get_state(pid).children["preview"].pid
 
     :sys.replace_state(pid, fn state ->
-      put_in(state.frame.last_render_at, System.monotonic_time(:millisecond) + 5_000)
+      put_in(state.frame.last_render_started_at, System.monotonic_time(:millisecond) + 5_000)
     end)
 
     send(pid, {terminal.reader, {:data, "s"}})

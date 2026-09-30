@@ -489,6 +489,36 @@ defmodule Breeze.InspectorTest do
     assert Enum.any?(marker_rows, &(&1.char == "["))
   end
 
+  test "hidden overlays do not render the selected fragment for a discarded snapshot" do
+    owner = self()
+
+    content =
+      BackBreeze.VirtualText.lazy(
+        cache_key: make_ref(),
+        cache?: false,
+        intrinsic_width: 1,
+        line_count_fn: fn _ -> 1 end,
+        slice_fn: fn _, _, _ ->
+          send(owner, :inspector_fragment_rendered)
+          ["x"]
+        end
+      )
+
+    box = BackBreeze.Box.new(content: content, style: %{width: 1, height: 1})
+
+    for config <- [false, true] do
+      state =
+        base_state(%{
+          inspector: config,
+          inspector_state: %{visible?: false, selected_id: "field"}
+        })
+
+      state = put_in(state.rendered.boxes, %{"field" => box})
+      assert Inspector.overlays(state) == []
+      refute_received :inspector_fragment_rendered
+    end
+  end
+
   defp base_state(overrides) do
     Map.merge(
       %{
