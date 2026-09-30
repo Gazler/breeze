@@ -11,6 +11,14 @@ defmodule Breeze.Theme do
   Set `color_blending: false` on a custom theme when tone modifiers and screen
   dimming must not synthesize additional colors.
 
+  With `theme: :system`, normal startup through `Breeze.Server.start_link/1`
+  automatically probes the terminal palette and handles the replies. Most
+  applications need no additional setup. If the terminal does not respond,
+  Breeze uses a fallback theme.
+
+  Custom transports that bypass `Breeze.InputRouter` and start the application
+  server directly can use `Breeze.Theme.Probe.Session` to handle probing.
+
   ## Theme variables
 
   Color classes such as `text-primary`, `bg-panel`, `border-warning`,

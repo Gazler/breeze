@@ -10,6 +10,8 @@ defmodule Breeze.InputRouter do
   alias Breeze.Theme.Probe, as: ThemeProbe
   alias Breeze.Clipboard.Probe, as: ClipboardProbe
 
+  alias Breeze.Theme.Probe.Session, as: PaletteSession
+
   defstruct [
     :terminal,
     :reader,
@@ -185,27 +187,12 @@ defmodule Breeze.InputRouter do
     {:noreply, maybe_start_theme_probe(state, :system)}
   end
 
-  def handle_info(
-        {:theme_probe_timeout, key, ref},
-        %{theme_probe: %{key: key, ref: ref, status: :active} = probe} = state
-      ) do
-    {:noreply, start_theme_probe_drain(state, probe)}
+  def handle_info({kind, _key, _ref} = message, state)
+      when kind in [:theme_probe_timeout, :theme_probe_drain_timeout] do
+    {probe, input} = PaletteSession.handle_timeout(state.theme_probe, message)
+    state = %{state | theme_probe: probe}
+    if input == "", do: {:noreply, state}, else: route_reader_data(state.reader, input, state)
   end
-
-  def handle_info({:theme_probe_timeout, _key, _ref}, state), do: {:noreply, state}
-
-  def handle_info(
-        {:theme_probe_drain_timeout, key, ref},
-        %{theme_probe: %{key: key, ref: ref, status: :draining} = probe} = state
-      ) do
-    unless Map.get(probe, :finished?, false) do
-      ThemeProbe.finish_runtime_palette_probe(state.terminal, probe.palette)
-    end
-
-    {:noreply, %{state | theme_probe: nil}}
-  end
-
-  def handle_info({:theme_probe_drain_timeout, _key, _ref}, state), do: {:noreply, state}
 
   def handle_info({:DOWN, _ref, :process, pid, reason}, %{server_pid: pid} = state) do
     {:stop, session_exit_reason(reason), state}
@@ -264,19 +251,10 @@ defmodule Breeze.InputRouter do
     {:noreply, state}
   end
 
-  defp theme_probe_reply?(state, data) do
-    is_map(state.theme_probe) and
-      theme_probe_data?(state.theme_probe.buffer, data)
-  end
-
-  defp route_terminal_data(_reader, "", state), do: {:noreply, state}
-
   defp route_terminal_data(reader, data, state) do
-    if theme_probe_reply?(state, data) do
-      {:noreply, consume_theme_probe_reply(state, data)}
-    else
-      route_reader_data(reader, data, state)
-    end
+    {probe, input} = PaletteSession.feed(state.theme_probe, data)
+    state = %{state | theme_probe: probe}
+    if input == "", do: {:noreply, state}, else: route_reader_data(reader, input, state)
   end
 
   defp consume_clipboard_reply(%{clipboard_probe: nil} = state, data), do: {state, data}
@@ -299,8 +277,6 @@ defmodule Breeze.InputRouter do
   defp theme_probe_data?(buffer, data) when is_binary(data) do
     String.starts_with?(data, "\e]") or incomplete_theme_probe_reply?(buffer)
   end
-
-  defp theme_probe_data?(_buffer, _data), do: false
 
   defp incomplete_theme_probe_reply?(buffer) when is_binary(buffer) do
     :binary.match(buffer, "\e]") != :nomatch
@@ -334,41 +310,14 @@ defmodule Breeze.InputRouter do
     :exit, _reason -> false
   end
 
-  defp maybe_start_theme_probe(%{theme_probe: %{status: :active}} = state, _theme),
+  defp maybe_start_theme_probe(%{theme_probe: probe} = state, _theme) when is_map(probe),
     do: state
 
   defp maybe_start_theme_probe(state, theme) do
     if requested_system_theme?(theme) do
-      case ThemeProbe.start_runtime_palette_probe(state.terminal) do
-        {:start, key, query} ->
-          cancel_theme_probe_timer(state.theme_probe)
-
-          ref = make_ref()
-          terminal = Termite.Terminal.write(state.terminal, query)
-
-          timer =
-            Process.send_after(
-              self(),
-              {:theme_probe_timeout, key, ref},
-              ThemeProbe.runtime_palette_probe_timeout_ms()
-            )
-
-          %{
-            state
-            | terminal: terminal,
-              theme_probe: %{
-                key: key,
-                ref: ref,
-                buffer: "",
-                palette: %{},
-                timer: timer,
-                status: :active,
-                finished?: false
-              }
-          }
-
-        _ ->
-          state
+      case PaletteSession.start_probe(state.terminal) do
+        nil -> state
+        probe -> %{state | terminal: probe.terminal, theme_probe: probe}
       end
     else
       state
@@ -376,45 +325,6 @@ defmodule Breeze.InputRouter do
   end
 
   defp requested_system_theme?(theme), do: Breeze.Theme.requested_system?(theme)
-
-  defp consume_theme_probe_reply(%{theme_probe: probe} = state, data) do
-    {palette, buffer} = ThemeProbe.merge_runtime_palette_data(probe.buffer, probe.palette, data)
-
-    probe = %{probe | palette: palette, buffer: buffer}
-
-    cond do
-      ThemeProbe.runtime_palette_probe_complete?(palette) and
-          not Map.get(probe, :finished?, false) ->
-        ThemeProbe.finish_runtime_palette_probe(state.terminal, palette)
-        start_theme_probe_drain(state, %{probe | finished?: true})
-
-      true ->
-        %{state | theme_probe: probe}
-    end
-  end
-
-  defp start_theme_probe_drain(state, probe) do
-    cancel_theme_probe_timer(probe)
-
-    # Keep consuming straggling OSC replies for one more response window. This
-    # prevents terminal replies becoming keyboard input without leaving an
-    # unsupported runtime probe pending for a full extra second.
-    timer =
-      Process.send_after(
-        self(),
-        {:theme_probe_drain_timeout, probe.key, probe.ref},
-        ThemeProbe.runtime_palette_probe_timeout_ms()
-      )
-
-    %{state | theme_probe: %{probe | status: :draining, timer: timer}}
-  end
-
-  defp cancel_theme_probe_timer(%{timer: timer}) when is_reference(timer) do
-    Process.cancel_timer(timer)
-    :ok
-  end
-
-  defp cancel_theme_probe_timer(_probe), do: :ok
 
   defp maybe_complete_initial_theme_probe(terminal, theme) do
     if requested_system_theme?(theme) do
