@@ -56,7 +56,8 @@ defmodule Breeze.Server do
       of starting one.
     * `:render_errors` - crash rendering options. Pass
       `view: MyErrorView` to override the crash screen view. Defaults
-      to the built-in crash view. Pass `keybindings: [...]` to configure
+      to the built-in crash view. See `Breeze.ErrorView` for the custom view
+      behaviour and its optional callbacks. Pass `keybindings: [...]` to configure
       custom crash screen actions as `{key, label, action}` tuples.
       Supported actions are `:restart`, `:hard_restart`, `:stop`,
       `:copy_details`, and `:print_details`. A restart restores surviving

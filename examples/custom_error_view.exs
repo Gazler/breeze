@@ -27,7 +27,7 @@ defmodule CrashView do
 end
 
 defmodule ExampleErrorView do
-  use Breeze.View
+  use Breeze.ErrorView
   import Breeze.Blocks
 
   def render(assigns) do

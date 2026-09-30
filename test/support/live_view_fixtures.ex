@@ -729,7 +729,7 @@ defmodule Breeze.LiveViewTest do
   end
 
   defmodule CustomErrorView do
-    use Breeze.View
+    use Breeze.ErrorView
 
     def render(assigns) do
       ~H"""
@@ -745,7 +745,7 @@ defmodule Breeze.LiveViewTest do
   end
 
   defmodule KeybindingErrorView do
-    use Breeze.View
+    use Breeze.ErrorView
     import Breeze.Blocks
 
     def render(assigns) do

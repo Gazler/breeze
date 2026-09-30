@@ -1,5 +1,88 @@
 defmodule Breeze.ErrorView do
-  @moduledoc false
+  @moduledoc """
+  The built-in crash screen and behaviour for custom error views.
+
+  Use `Breeze.ErrorView` and implement `c:Breeze.View.render/1` to provide a
+  custom crash screen:
+
+      defmodule MyErrorView do
+        use Breeze.ErrorView
+
+        @impl Breeze.View
+        def render(assigns) do
+          ~H"<box>Something went wrong: {inspect(@reason)}</box>"
+        end
+
+        @impl Breeze.ErrorView
+        def prepare_crash(_view, crash, _size) do
+          Map.put(crash, :focused, nil)
+        end
+      end
+
+  Configure it with `render_errors: [view: MyErrorView]` when starting Breeze.
+  `use Breeze.ErrorView` includes `use Breeze.View` and declares this behaviour.
+  Existing views can instead add `@behaviour Breeze.ErrorView` alongside
+  `use Breeze.View`.
+
+  All callbacks in this behaviour are optional. Omitted callbacks fall back
+  to the functions in this module. The default rendering assigns include
+  `:view`, `:crash`, `:kind`, `:reason`, and `:stacktrace`. The runtime adds
+  `:breeze` metadata, including configured keybindings and clipboard support.
+
+  Error views are rendered directly, without mounting a view process. Custom
+  crash screen actions are configured through `render_errors[:keybindings]`,
+  rather than `handle_event/3` or the built-in screen's `handle_input/4`.
+  """
+
+  @type crash :: %{
+          required(:kind) => :error | :exit | :throw,
+          required(:reason) => term(),
+          required(:stacktrace) => list(),
+          required(:focused) => String.t() | nil,
+          required(:implicit_state) => map(),
+          optional(atom()) => term()
+        }
+  @type size :: %{width: non_neg_integer(), height: non_neg_integer()}
+
+  @doc """
+  Prepares crash state before rendering, including after terminal resizes.
+
+  Receives the root view module, crash map, and terminal size. Preserve the
+  crash details and return a map containing `:focused` and `:implicit_state`,
+  which the runtime uses when rendering. This may be called repeatedly for
+  the same crash.
+
+  Defaults to `prepare_crash/3`, which initializes the built-in screen's
+  focus, selection, and scrolling state.
+  """
+  @callback prepare_crash(module(), crash(), size()) :: crash()
+
+  @doc """
+  Builds the assigns passed to the error view's `render/1` callback.
+
+  Receives the root view module, prepared crash map, and terminal size.
+  Defaults to `render_assigns/3`. Implementations may delegate to that
+  function and extend its assigns, or return their own map. The runtime adds
+  its `:breeze` metadata afterwards.
+  """
+  @callback render_assigns(module(), crash(), size()) :: map()
+
+  @doc """
+  Formats crash details for copying or printing to the terminal scrollback.
+
+  Receives the root view module and crash map. Defaults to `details_text/2`.
+  """
+  @callback details_text(module(), crash()) :: String.t()
+
+  @optional_callbacks prepare_crash: 3, render_assigns: 3, details_text: 2
+
+  @doc false
+  defmacro __using__(_opts) do
+    quote do
+      use Breeze.View
+      @behaviour Breeze.ErrorView
+    end
+  end
 
   use Breeze.View
 
