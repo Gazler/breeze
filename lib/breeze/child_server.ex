@@ -119,6 +119,7 @@ defmodule Breeze.ChildServer do
 
     term = %Breeze.Term{
       view: view,
+      reload: Keyword.get(opts, :reload),
       server: Keyword.get(opts, :server),
       terminal: terminal,
       clipboard: Keyword.get(opts, :clipboard, %{osc52: :unknown, supported: false}),
@@ -1496,6 +1497,7 @@ defmodule Breeze.ChildServer do
         start_opts: start_opts,
         assigns: assigns,
         server: term.server,
+        reload: Map.get(term, :reload),
         terminal: term.terminal,
         clipboard: term.clipboard,
         theme: term.theme,
@@ -1561,6 +1563,7 @@ defmodule Breeze.ChildServer do
         runtime_state: runtime_state,
         restore_state_theme?: restore_state_theme?,
         server: term.server,
+        reload: Map.get(term, :reload),
         terminal: term.terminal,
         clipboard: term.clipboard,
         theme: term.theme,

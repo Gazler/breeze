@@ -13,6 +13,7 @@ defmodule Breeze.Term do
 
   defstruct [
     :view,
+    :reload,
     :child_view_supervisor,
     :server,
     :terminal,

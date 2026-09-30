@@ -241,7 +241,10 @@ defmodule Breeze.RenderState do
           {mod, implicit} ->
             payload = Map.put(payload, "element", Map.get(term.elements, id))
 
-            case mod.handle_event(:input, payload, implicit) do
+            case Breeze.CodeReloader.call(
+                   fn -> mod.handle_event(:input, payload, implicit) end,
+                   Map.get(term, :reload)
+                 ) do
               {{:change, event}, val, opts} when is_list(opts) ->
                 term = put_implicit_state(term, id, mod, val)
                 term = apply_implicit_term_options(term, opts)

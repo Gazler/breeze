@@ -407,6 +407,13 @@ defmodule Breeze.Server do
       Breeze.ChildViewSupervisor.start_child(
         child_view_supervisor,
         view: view,
+        reload:
+          Keyword.get(
+            normalize_reload_opts(
+              Keyword.get(opts, :reload, Application.get_env(:breeze, :reload, false))
+            ) || [],
+            :sync
+          ),
         start_opts: start_opts,
         terminal: terminal,
         theme: theme,
@@ -3150,6 +3157,7 @@ defmodule Breeze.Server do
     child_opts =
       [
         view: state.view,
+        reload: Keyword.get(state.reload_opts || [], :sync),
         start_opts: state.start_opts || [],
         terminal: state.terminal_state.terminal,
         clipboard: state.terminal_state.clipboard.capabilities,
@@ -3508,6 +3516,7 @@ defmodule Breeze.Server do
         view: view,
         start_opts: start_opts,
         assigns: assigns,
+        reload: Keyword.get(state.reload_opts || [], :sync),
         server: self(),
         terminal: terminal,
         clipboard: state.terminal_state.clipboard.capabilities,
