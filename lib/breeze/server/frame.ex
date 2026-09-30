@@ -13,11 +13,14 @@ defmodule Breeze.Server.Frame do
     |> Enum.take(screen_height)
   end
 
-  def build_payload(nil, lines, _prev_overlays, overlays, screen_width) do
-    full_redraw_payload(lines, overlays, screen_width)
+  def build_payload(prev_lines, lines, prev_overlays, overlays, screen_width, opts \\ [])
+
+  def build_payload(nil, lines, _prev_overlays, overlays, screen_width, opts) do
+    full_redraw_payload(lines, overlays, screen_width, opts)
   end
 
-  def build_payload(prev_lines, lines, prev_overlays, overlays, screen_width) do
+  def build_payload(prev_lines, lines, prev_overlays, overlays, screen_width, opts) do
+    row_offset = Keyword.get(opts, :row_offset, 0)
     changed_base_rows = changed_base_rows(prev_lines, lines)
     changed_overlay_rows = changed_overlay_rows(prev_overlays, overlays)
 
@@ -34,9 +37,10 @@ defmodule Breeze.Server.Frame do
         row_patch_payload(
           lines,
           MapSet.union(changed_base_rows, repaired_overlay_rows),
-          screen_width
+          screen_width,
+          row_offset
         ),
-        overlay_patch_payload(overlays, changed_rows)
+        overlay_patch_payload(overlays, changed_rows, row_offset)
       ])
     end
   end
@@ -111,12 +115,12 @@ defmodule Breeze.Server.Frame do
 
   def fit_line(_line, _width), do: ""
 
-  def child_patch_payload(fragment, viewport) do
+  def child_patch_payload(fragment, viewport, screen_row_offset \\ 0) do
     fragment
     |> child_patch_lines(viewport.height)
     |> Enum.with_index()
     |> Enum.map(fn {line, row_offset} ->
-      row = Integer.to_string(viewport.top + row_offset + 1)
+      row = Integer.to_string(screen_row_offset + viewport.top + row_offset + 1)
       col = Integer.to_string(viewport.left + 1)
 
       [
@@ -131,17 +135,20 @@ defmodule Breeze.Server.Frame do
     |> IO.iodata_to_binary()
   end
 
-  defp full_redraw_payload(lines, overlays, screen_width) do
+  defp full_redraw_payload(lines, overlays, screen_width, opts) do
+    row_offset = Keyword.get(opts, :row_offset, 0)
+
     output =
       lines
       |> Enum.with_index()
       |> Enum.map(fn {line, row} ->
-        write_row_payload(row, line, screen_width)
+        write_row_payload(row + row_offset, line, screen_width)
       end)
       |> IO.iodata_to_binary()
 
-    overlay_output = Breeze.TerminalOverlay.render_overlays(overlays)
-    IO.iodata_to_binary(["\e[2J\e[H", output, overlay_output])
+    overlay_output = Breeze.TerminalOverlay.render_overlays(overlays, row_offset)
+    clear = if Keyword.get(opts, :clear, true), do: "\e[2J\e[H", else: ""
+    IO.iodata_to_binary([clear, output, overlay_output])
   end
 
   defp patch_line(line, fragment, left, width, screen_width) do
@@ -253,7 +260,7 @@ defmodule Breeze.Server.Frame do
     end)
   end
 
-  defp row_patch_payload(lines, changed_rows, screen_width) do
+  defp row_patch_payload(lines, changed_rows, screen_width, row_offset) do
     lines = List.to_tuple(lines)
     line_count = tuple_size(lines)
 
@@ -262,7 +269,7 @@ defmodule Breeze.Server.Frame do
     |> Enum.sort()
     |> Enum.map(fn row ->
       line = line_at(lines, row, line_count)
-      write_row_payload(row, line, screen_width)
+      write_row_payload(row + row_offset, line, screen_width)
     end)
     |> IO.iodata_to_binary()
   end
@@ -342,10 +349,10 @@ defmodule Breeze.Server.Frame do
     do_wide_background_line(rest, [String.duplicate(" ", width) | acc])
   end
 
-  defp overlay_patch_payload(overlays, changed_rows) do
+  defp overlay_patch_payload(overlays, changed_rows, row_offset) do
     overlays
     |> Enum.filter(&overlay_intersects_rows?(&1, changed_rows))
-    |> Breeze.TerminalOverlay.render_overlays()
+    |> Breeze.TerminalOverlay.render_overlays(row_offset)
   end
 
   defp overlay_intersects_rows?(overlay, rows) do

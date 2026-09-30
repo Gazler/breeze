@@ -5,6 +5,7 @@ defmodule Breeze.Server.State.Terminal do
     :terminal,
     :reader,
     :terminal_cleanup,
+    :inline,
     :alt_screen?,
     :alt_screen_active?,
     :hide_cursor?,

@@ -157,6 +157,69 @@ restores the terminal and ends only that session; it never halts the host VM.
 Use `Breeze.Server.run/1` when a caller should block until an interactive
 session exits.
 
+## Inline mode
+
+Use `screen: :inline` to draw below existing terminal output and leave the final
+frame visible when the session exits:
+
+```elixir
+Breeze.Server.run(view: Demo, screen: :inline)
+```
+
+The live region grows and shrinks with the view, up to the terminal height.
+Set `inline_height: 5` to reserve five rows for an input or status area. This
+also sets the view's available height, so `h-screen` fills those five rows.
+Resizing the terminal caps the region at the available height.
+
+The live region uses the OSC 133 redraw hint so supporting terminals, including
+Kitty and Ghostty, can discard its old contents before resize reflow. Other
+terminals still redraw from the region's origin, but may leave old frame fragments
+in scrollback if reflow moves them offscreen before Breeze can clear them.
+
+To build a transcript, append completed text above the live region:
+
+```elixir
+# Inside a view callback:
+term
+|> append_scrollback("Request completed.")
+|> assign(status: :ready)
+
+# From another process, using the session PID:
+Breeze.Server.append_scrollback(session, "Request completed.")
+
+# ANSI colors and text styles are supported:
+append_scrollback(term, IO.ANSI.format([:green, "Request completed."], true))
+
+# RGB tuples, #RGB and #RRGGBB colors work through Termite:
+output =
+  Termite.Style.foreground("#ff5511")
+  |> Termite.Style.render_to_string("Retrying the request.")
+
+append_scrollback(term, output)
+
+# OSC 8 hyperlinks are supported too:
+append_scrollback(term, "\e]8;;https://hexdocs.pm/breeze/\e\\Breeze docs\e]8;;\e\\")
+```
+
+History is wrapped to the terminal width and ends with a newline. ANSI colors
+and text styles (SGR) and OSC 8 hyperlinks are preserved. Styles are reset and
+hyperlinks are closed before redrawing the live region.
+Other terminal controls, including cursor movement, screen clearing and clipboard
+access, are removed. Untrusted text can still affect its own appearance through
+styles such as conceal and supply its own link destinations.
+
+History enters the terminal's normal scrollback as the screen fills. Only the
+live region remains interactive. Write through these helpers while the session
+is running so Breeze can keep track of its position. Direct `IO.puts` or
+uncaptured logger output can disrupt the display.
+
+Keep `mouse: false` (the default) for normal mouse-wheel scrollback and text
+selection. Enabling `mouse: true` or a mouse-tracking mode sends mouse events,
+including wheel events, to Breeze, so ordinary wheel scrolling generally stops
+browsing the terminal's history. The scrollback itself is still retained.
+
+Run `mix run examples/inline.exs` for an interactive transcript example.
+
 ## Storybook
 
 Place stories in `storybook/*.story.exs`, then launch the interactive browser
