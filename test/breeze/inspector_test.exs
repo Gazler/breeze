@@ -40,7 +40,21 @@ defmodule Breeze.InspectorTest do
 
     def render(assigns) do
       ~H"""
-      <box id="root" style={%{foreground_color: {235, 219, 178}, background_color: {40, 40, 40}}}>
+      <box
+        id="root"
+        style={%{
+        foreground_color: {235, 219, 178},
+        background_color: {40, 40, 40},
+        border: %BackBreeze.Border{
+          bottom: "▔",
+          left: "▕",
+          right: "▏",
+          bottom_left: " ",
+          bottom_right: " ",
+          style: :custom
+        }
+      }}
+      >
         Styled
       </box>
       """
@@ -169,7 +183,7 @@ defmodule Breeze.InspectorTest do
     assert is_map(acc.render_tree)
   end
 
-  test "render tree handles style maps with tuple colors" do
+  test "render tree handles style maps with tuple colors and custom border structs" do
     terminal = %Termite.Terminal{size: %{width: 80, height: 24}}
     theme = Breeze.Theme.default(terminal: terminal)
 

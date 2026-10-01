@@ -438,6 +438,9 @@ defmodule Breeze.Server.Inspector do
   defp class_segments(value) when is_integer(value), do: [Integer.to_string(value)]
   defp class_segments(value) when is_float(value), do: [Float.to_string(value)]
 
+  # Style values such as custom borders are opaque structs, not class maps.
+  defp class_segments(value) when is_struct(value), do: []
+
   defp class_segments(value) when is_map(value) do
     value
     |> Enum.flat_map(fn
