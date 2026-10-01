@@ -13,6 +13,7 @@ defmodule Breeze.Implicit.List do
     * `list-scroll-padding` - keep N rows of breathing room around selection
     * `list-selected` - initial selected value
     * `list-initial-index` - initial selected index
+    * `list-notify-scroll` - emit `br-change` with `action: :scroll`, offset and viewport height on wheel input
 
   Child boxes should define a `value` attribute.
   """
@@ -37,7 +38,7 @@ defmodule Breeze.Implicit.List do
 
     width = Common.int_option(root_attrs, :"list-width", Map.get(last_state, :width, 0))
 
-    cache = build_cache(values, width)
+    cache = build_cache(values, width, root_attrs)
 
     selected_index =
       values
@@ -55,7 +56,8 @@ defmodule Breeze.Implicit.List do
         viewport_height: list_viewport_height(last_state),
         loop: loop,
         scroll_padding: scroll_padding,
-        width: width
+        width: width,
+        notify_scroll: Common.bool_option(root_attrs, :"list-notify-scroll", false)
       })
 
     viewport_changed? =
@@ -112,7 +114,7 @@ defmodule Breeze.Implicit.List do
   end
 
   def handle_event(_, %{"key" => "End", "element" => element}, state) do
-    index = max(length(state.values) - 1, 0)
+    index = max(state.count - 1, 0)
 
     state
     |> set_selection(index, element)
@@ -173,7 +175,7 @@ defmodule Breeze.Implicit.List do
       ) do
     viewport = Viewport.from_dimensions(element)
     offset = Viewport.clamp_scroll_y(state.offset + Common.wheel_repeat(mouse), viewport)
-    {:noreply, %{state | offset: offset}}
+    scroll_reply(%{state | offset: offset}, viewport)
   end
 
   def handle_event(
@@ -183,7 +185,7 @@ defmodule Breeze.Implicit.List do
       ) do
     viewport = Viewport.from_dimensions(element)
     offset = Viewport.clamp_scroll_y(state.offset - Common.wheel_repeat(mouse), viewport)
-    {:noreply, %{state | offset: offset}}
+    scroll_reply(%{state | offset: offset}, viewport)
   end
 
   def handle_event(_, _, state), do: {:noreply, state}
@@ -192,7 +194,7 @@ defmodule Breeze.Implicit.List do
 
   def handle_modifiers(:child, flags, state), do: Common.selected_modifier(flags, state)
 
-  defp move_selection(%{values: []} = state, _delta, _element), do: state
+  defp move_selection(%{count: 0} = state, _delta, _element), do: state
 
   defp move_selection(state, delta, element) do
     state = ensure_cache(state)
@@ -205,7 +207,7 @@ defmodule Breeze.Implicit.List do
     set_selection(state, index, element)
   end
 
-  defp set_selection(%{values: []} = state, _index, _element), do: state
+  defp set_selection(%{count: 0} = state, _index, _element), do: state
 
   defp set_selection(state, index, element) do
     state = ensure_cache(state)
@@ -229,6 +231,13 @@ defmodule Breeze.Implicit.List do
 
     %{state | selected_index: index, selected: selected, offset: offset}
   end
+
+  defp scroll_reply(%{notify_scroll: true} = state, viewport) do
+    {{:change,
+      %{action: :scroll, offset: state.offset, viewport_height: viewport.viewport_height}}, state}
+  end
+
+  defp scroll_reply(state, _viewport), do: {:noreply, state}
 
   defp maybe_change(state), do: Common.change_reply(state)
 
@@ -261,7 +270,8 @@ defmodule Breeze.Implicit.List do
         previous_offset
       end
 
-    min(offset, max(cache.total_rows - 1, 0))
+    visible = list_viewport_height(last_state) || 1
+    min(offset, max(cache.total_rows - visible, 0))
   end
 
   defp controlled_selection_offset(
@@ -302,6 +312,11 @@ defmodule Breeze.Implicit.List do
        ),
        do: 0
 
+  defp controlled_selection_changed?(%{:"list-selected-index" => index}, %{
+         selected_index: previous
+       })
+       when is_integer(index), do: index != previous
+
   defp controlled_selection_changed?(
          %{:"list-selected" => selected},
          %{selected: previous_selected}
@@ -315,7 +330,12 @@ defmodule Breeze.Implicit.List do
     selected = Map.get(last_state, :selected)
     controlled_selected = Map.get(root_attrs, :"list-selected")
 
+    controlled_index = Map.get(root_attrs, :"list-selected-index")
+
     cond do
+      is_integer(controlled_index) ->
+        controlled_index
+
       not is_nil(controlled_selected) && Map.has_key?(cache.value_index, controlled_selected) ->
         Map.fetch!(cache.value_index, controlled_selected)
 
@@ -333,6 +353,8 @@ defmodule Breeze.Implicit.List do
     end
   end
 
+  defp ensure_cache(%{sparse: true} = state), do: state
+
   defp ensure_cache(%{count: count, value_tuple: value_tuple, row_starts: row_starts} = state)
        when is_integer(count) and is_tuple(value_tuple) and is_tuple(row_starts) do
     state
@@ -341,6 +363,22 @@ defmodule Breeze.Implicit.List do
   defp ensure_cache(%{values: values} = state) do
     Map.merge(build_cache(values, Map.get(state, :width, 0)), state)
   end
+
+  defp build_cache(values, _width, %{:"list-total" => total} = attrs)
+       when is_integer(total) and total >= 0 do
+    first = Common.int_option(attrs, :"list-start-index", 0)
+    indexed = values |> Enum.with_index(first)
+
+    %{
+      sparse: true,
+      count: total,
+      total_rows: total,
+      value_index: Map.new(indexed),
+      index_values: Map.new(indexed, fn {value, index} -> {index, value} end)
+    }
+  end
+
+  defp build_cache(values, width, _attrs), do: build_cache(values, width)
 
   defp build_cache(values, width) do
     {row_starts, row_heights, total_rows} =
@@ -378,6 +416,8 @@ defmodule Breeze.Implicit.List do
   defp selected_value(_state, nil), do: nil
   defp selected_value(%{count: 0}, _index), do: nil
 
+  defp selected_value(%{sparse: true, index_values: values}, index), do: Map.get(values, index)
+
   defp selected_value(%{value_tuple: value_tuple}, index) when is_integer(index) do
     elem(value_tuple, index)
   end
@@ -398,7 +438,9 @@ defmodule Breeze.Implicit.List do
     end
   end
 
+  defp row_start(%{sparse: true}, index), do: index
   defp row_start(%{row_starts: row_starts}, index), do: elem(row_starts, index)
+  defp row_height(%{sparse: true}, _index), do: 1
   defp row_height(%{row_heights: row_heights}, index), do: elem(row_heights, index)
 
   defp item_rows(_value, 0), do: 1
@@ -407,6 +449,8 @@ defmodule Breeze.Implicit.List do
     do: max(1, div(String.length(to_string(value)) + width - 1, width))
 
   defp item_index_at_row(%{count: 0}, _row), do: nil
+
+  defp item_index_at_row(%{sparse: true, count: count}, row), do: min(max(row, 0), count - 1)
 
   defp item_index_at_row(state, row) do
     row = max(row, 0)

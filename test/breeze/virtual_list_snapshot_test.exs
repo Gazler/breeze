@@ -46,6 +46,8 @@ defmodule Breeze.VirtualListSnapshotTest do
     assert Breeze.Test.render_text!(session) =~ "Item 20000"
     session = Breeze.Test.resize(session, {80, 50})
     output = Breeze.Test.render_text!(session)
+    visible = Breeze.Test.element!(session, "items").viewport_height
+    assert output =~ "Item #{20_000 - visible + 1}"
     assert output =~ "Item 20000"
 
     {:ok, acc, box, _} =

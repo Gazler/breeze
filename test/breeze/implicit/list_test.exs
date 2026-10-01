@@ -4,6 +4,61 @@ defmodule Breeze.Implicit.ListTest do
   alias Breeze.Implicit
   alias Breeze.Viewport
 
+  test "opt-in scroll notifications report the visible range without changing selection" do
+    children = Enum.map(1..100, &%{value: "item-#{&1}"})
+
+    {:ok, state, _} =
+      Implicit.List.init(
+        children,
+        %{:"list-notify-scroll" => true, :"list-selected" => "item-1"},
+        %{}
+      )
+
+    element = %Viewport{height: 10, viewport_height: 10, content_height: 100}
+
+    assert {{:change, %{action: :scroll, offset: 5, viewport_height: 10}}, next} =
+             Implicit.List.handle_event(
+               :input,
+               %{"mouse" => %{"button" => "wheel_down", "repeat" => 5}, "element" => element},
+               state
+             )
+
+    assert next.selected == "item-1"
+  end
+
+  test "sparse lists navigate the total extent without allocating missing values" do
+    children = Enum.map(0..99, &%{value: "item-#{&1}"})
+
+    {:ok, state, _} =
+      Implicit.List.init(
+        children,
+        %{:"list-total" => 5_000, :"list-start-index" => 0, :"list-selected-index" => 0},
+        %{}
+      )
+
+    assert state.count == 5_000
+    assert length(state.values) == 100
+    element = %Viewport{height: 20, viewport_height: 20, content_height: 5_000}
+
+    assert {{:change, %{index: 4_999, value: nil}}, last} =
+             Implicit.List.handle_event(:input, %{"key" => "End", "element" => element}, state)
+
+    assert last.offset == 4_980
+    children = Enum.map(4_900..4_999, &%{value: "item-#{&1}"})
+
+    {:ok, loaded, _} =
+      Implicit.List.init(
+        children,
+        %{:"list-total" => 5_000, :"list-start-index" => 4_900, :"list-selected-index" => 4_999},
+        last
+      )
+
+    assert loaded.selected == "item-4999"
+
+    assert {{:change, %{index: 0, value: nil}}, _} =
+             Implicit.List.handle_event(:input, %{"key" => "Home", "element" => element}, loaded)
+  end
+
   describe "init/3" do
     test "keeps prior selection when still present" do
       children = [%{value: "one"}, %{value: "two"}, %{value: "three"}]

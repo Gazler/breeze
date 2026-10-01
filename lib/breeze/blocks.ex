@@ -69,6 +69,16 @@ defmodule Breeze.Blocks do
   attr :offset, :integer, default: nil
   attr :virtual_window, :integer, default: nil
 
+  attr :total, :integer,
+    default: nil,
+    doc: "Full row count for a partially loaded, fixed-height list."
+
+  attr :start_index, :integer, default: 0, doc: "Absolute index of the first supplied item."
+
+  attr :selected_index, :integer,
+    default: nil,
+    doc: "Controlled absolute selection for a partial list."
+
   attr :selected_indicator, :string,
     default: nil,
     doc: "Selected row marker; defaults to >. Takes precedence over selected-indicator."
@@ -93,6 +103,19 @@ defmodule Breeze.Blocks do
     attr :value, :string, required: true
   end
 
+  @doc """
+  Renders a navigable list, optionally virtualized.
+
+  For partially loaded data, supply `total`, `start_index`, and
+  `selected_index`, plus only the contiguous loaded `:item` slots. Each item
+  must occupy one row in this mode. The scrollbar represents `total` rows,
+  and navigation emits an absolute `index` through `br-change`; `value` may be
+  nil when the destination has not been loaded yet. Load the destination's
+  window and update the slots, `start_index`, and `selected_index` together.
+
+  Set `list-notify-scroll` to receive wheel events with `action: :scroll`,
+  `offset`, and `viewport_height` without changing the selected item.
+  """
   def list(assigns) do
     items = Map.get(assigns, :item, [])
     selected_indicator = assigns[:selected_indicator] || assigns[:"selected-indicator"] || ">"
@@ -116,7 +139,13 @@ defmodule Breeze.Blocks do
 
     {render_items, top_spacer, bottom_spacer, windowed?} = list_render_window(items, assigns)
     list_selected = explicit_or_implicit_list_selected(assigns)
-    virtual_text? = virtual_text_list?(items, assigns, windowed?)
+
+    list_selected =
+      if is_integer(assigns.total) and not Enum.any?(items, &(&1.value == list_selected)),
+        do: nil,
+        else: list_selected
+
+    virtual_text? = is_nil(assigns.total) and virtual_text_list?(items, assigns, windowed?)
 
     render_theme =
       get_in(assigns, [:__breeze_caller_assigns__, :breeze, :__render_theme__])
@@ -180,6 +209,9 @@ defmodule Breeze.Blocks do
       list-rendered-offset={@list_offset || 0}
       list-rendered-selected={@list_selected}
       list-values={@list_values}
+      list-total={@total}
+      list-start-index={@start_index}
+      list-selected-index={@selected_index}
       list-virtual={@virtual}
       list-windowed={@windowed?}
       focusable
@@ -347,6 +379,17 @@ defmodule Breeze.Blocks do
     padding = max(width - BackBreeze.Utils.string_length(line), 0)
 
     line <> String.duplicate(" ", padding)
+  end
+
+  defp list_render_window(items, %{total: total} = assigns) when is_integer(total) do
+    window = list_window_size(assigns) || length(items)
+    offset = explicit_or_implicit_list_offset(assigns) || assigns.selected_index || 0
+    offset = min(max(offset, 0), max(total - 1, 0))
+    first = max(assigns.start_index, offset)
+    last = min(assigns.start_index + length(items), offset + window)
+    render_items = Enum.slice(items, first - assigns.start_index, max(last - first, 0))
+    top = min(first, total)
+    {render_items, top, max(total - top - length(render_items), 0), true}
   end
 
   defp list_render_window(items, assigns) do

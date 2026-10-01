@@ -42,8 +42,8 @@ defmodule Breeze.VirtualListResizeTest do
     {:ok, _, settled} = Breeze.ChildServer.render(pid, terminal: terminal)
 
     # The same state and terminal size should not need further renders to
-    # fill the newly exposed rows. The offset is 180, leaving 70 items.
-    assert item_count(settled) == 70
+    # fill the newly exposed rows. Clamp the offset to fill all 73 visible rows.
+    assert item_count(settled) == 73
     assert item_count(resized) == item_count(settled)
     assert resized.content == settled.content
   end
@@ -75,7 +75,7 @@ defmodule Breeze.VirtualListResizeTest do
     send(runtime, {terminal.reader, {:signal, :winch}})
     resized = :sys.get_state(runtime)
 
-    assert item_count(%{content: resized.frame.base_output}) == 70
+    assert item_count(%{content: resized.frame.base_output}) == 73
     assert resized.crash == nil
   end
 
