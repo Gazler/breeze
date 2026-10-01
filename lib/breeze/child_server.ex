@@ -368,8 +368,22 @@ defmodule Breeze.ChildServer do
     if Keyword.get(opts, :compact_snapshot, false) do
       %{box | children: [], layer_map: %{}, fixed_layer_map: %{}}
     else
-      box
+      snapshot_box(box)
     end
+  end
+
+  # Grid layout can retain unrendered children beneath the rendered root. Their
+  # lazy sources capture slot contexts with extensive sharing, which a process
+  # message copy expands. The snapshot already has its rendered ANSI content;
+  # retain diagnostic structure and geometry, but never transport those sources.
+  defp snapshot_box(%BackBreeze.Box{} = box) do
+    content =
+      case box.content do
+        %BackBreeze.VirtualText{content: nil} -> ""
+        content -> content
+      end
+
+    %{box | content: content, children: Enum.map(box.children, &snapshot_box/1)}
   end
 
   @impl true
