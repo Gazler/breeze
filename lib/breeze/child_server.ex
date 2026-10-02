@@ -1989,7 +1989,8 @@ defmodule Breeze.ChildServer do
         box = Map.get(term.rendered_boxes, id)
         layout = Map.get(term.elements, id)
 
-        if is_integer(every_ms) and every_ms > 0 and match?(%BackBreeze.Box{}, box) and
+        if (every_ms == :change or (is_integer(every_ms) and every_ms > 0)) and
+             match?(%BackBreeze.Box{}, box) and
              function_exported?(mod, :animate, 5) do
           [
             %{

@@ -20,7 +20,8 @@ defmodule Breeze.Implicit do
   An initializer returns `{:ok, state}` or `{:ok, state, options}`. The options are:
 
     * `:rerender_every` - a positive interval in milliseconds for asynchronous
-      `animate/5` calls. It has no effect unless `animate/5` is implemented.
+      `animate/5` calls, or `:change` to collect overlays on renders without
+      scheduling animation ticks. It has no effect unless `animate/5` is implemented.
     * `:active_when_pending` - run periodic animation only while an input event
       is pending. If this and `:active_when_focused` are both true, pending state
       takes precedence.
@@ -101,12 +102,16 @@ defmodule Breeze.Implicit do
   `animate/5` receives the element type, its rendered `BackBreeze.Box`, the
   element flags, implicit state, and a context map. It may return a box directly,
   `{:ok, box}`, or `{:ok, box, options}`. The only animation option is
-  `overlays: overlays`; overlays are applied during asynchronous animation
-  passes.
+  `overlays: overlays`; overlays are collected when `:rerender_every` is a
+  positive interval or `:change`. If omitted, only the returned box is used;
+  returned overlays are ignored.
 
   Breeze calls `animate/5` for roots and children during a normal render.
   `:rerender_every` additionally schedules lightweight asynchronous calls for
-  the root. The context contains `:phase`, `:frame`, `:now`, `:pending?`,
+  the root when set to a positive interval. Use `:change` to update overlays
+  without scheduling animation ticks. Other components' animation ticks may
+  still cause these overlays to be recomputed.
+  The context contains `:phase`, `:frame`, `:now`, `:pending?`,
   `:focused?`, `:last_render_at`, `:last_interaction_at`, `:theme`, `:id`, and
   `:layout`.
   """
@@ -137,7 +142,7 @@ defmodule Breeze.Implicit do
 
   @typedoc "An option returned while initializing implicit state."
   @type init_option ::
-          {:rerender_every, pos_integer()}
+          {:rerender_every, pos_integer() | :change}
           | {:active_when_pending, boolean()}
           | {:active_when_focused, boolean()}
           | {:captures_keys, boolean() | [key_name()]}

@@ -1694,9 +1694,18 @@ defmodule Breeze.Blocks do
 
   defp normalize_checkbox_disabled(value), do: value in [true, "true", "1", ""]
 
+  defp cursor_blink_attr(assigns) do
+    if assigns[:"cursor-blink"] in [false, "false"], do: "false", else: "true"
+  end
+
   attr :id, :string, required: true
   attr :class, :string, default: nil
   attr :style, :any, default: nil
+
+  attr :"cursor-blink", :boolean,
+    default: true,
+    doc: "Set false for a static cursor without blink ticks"
+
   attr :"input-value", :string, default: ""
 
   attr :"input-cursor", :any,
@@ -1709,6 +1718,8 @@ defmodule Breeze.Blocks do
   slot :inner_block
 
   def input(assigns) do
+    assigns = assign(assigns, cursor_blink: cursor_blink_attr(assigns))
+
     assigns =
       assign(assigns,
         class:
@@ -1723,6 +1734,7 @@ defmodule Breeze.Blocks do
       id={@id}
       focusable
       implicit={Breeze.Implicit.Input}
+      cursor-blink={@cursor_blink}
       class={@class}
       style={Breeze.Blocks.inline_style(assigns)}
       input-value={assigns[:"input-value"]}
@@ -1738,6 +1750,11 @@ defmodule Breeze.Blocks do
   attr :id, :string, required: true
   attr :class, :string, default: nil
   attr :style, :any, default: nil
+
+  attr :"cursor-blink", :boolean,
+    default: true,
+    doc: "Set false for a static cursor without blink ticks"
+
   attr :"textarea-value", :string, default: ""
 
   attr :"textarea-cursor", :any,
@@ -1751,6 +1768,7 @@ defmodule Breeze.Blocks do
   attr :rest, :global
 
   def textarea(assigns) do
+    assigns = assign(assigns, cursor_blink: cursor_blink_attr(assigns))
     prefix = normalize_textarea_prefix(assigns[:"textarea-prefix"])
     disabled? = normalize_textarea_disabled(assigns[:disabled])
     layout_prefix = if disabled?, do: nil, else: prefix
@@ -1778,6 +1796,7 @@ defmodule Breeze.Blocks do
         id={@id}
         focusable={@focusable}
         implicit={Breeze.Implicit.Textarea}
+        cursor-blink={@cursor_blink}
         class={@class}
         style={Breeze.Blocks.inline_style(assigns)}
         textarea-value={assigns[:"textarea-value"]}

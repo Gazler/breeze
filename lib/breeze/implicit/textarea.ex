@@ -14,6 +14,7 @@ defmodule Breeze.Implicit.Textarea do
       TextEditor.initial_cursor(value, Map.get(root_attrs, :"textarea-cursor"), last_state)
 
     attrs_state = %{
+      cursor_blink?: Map.get(root_attrs, :"cursor-blink", true) not in [false, "false"],
       value: value,
       cursor: cursor,
       placeholder: Map.get(root_attrs, :"textarea-placeholder"),
@@ -25,7 +26,7 @@ defmodule Breeze.Implicit.Textarea do
     state = TextEditor.normalize_state(state)
 
     {:ok, state,
-     rerender_every: 500,
+     rerender_every: if(state.cursor_blink?, do: 500, else: :change),
      active_when_focused: true,
      captures_printable_keys: true,
      batch_printable_keys: true,
@@ -134,7 +135,9 @@ defmodule Breeze.Implicit.Textarea do
       char: cursor_char(content, cursor_y, cursor_x),
       foreground_color: Map.get(defaults, :background_color),
       background_color: Theme.color(theme, :cursor) || Theme.color(theme, :accent),
-      visible?: Breeze.TerminalOverlay.visible?(now, last_interaction_at)
+      visible?:
+        not Map.get(state, :cursor_blink?, true) or
+          Breeze.TerminalOverlay.visible?(now, last_interaction_at)
     }
 
     {:ok, %{box | content: content}, overlays: [overlay]}
@@ -163,7 +166,9 @@ defmodule Breeze.Implicit.Textarea do
           char: cursor_char(content, cursor_y, cursor_x),
           foreground_color: Map.get(defaults, :background_color),
           background_color: Theme.color(theme, :cursor) || Theme.color(theme, :accent),
-          visible?: Breeze.TerminalOverlay.visible?(now, last_interaction_at)
+          visible?:
+            not Map.get(state, :cursor_blink?, true) or
+              Breeze.TerminalOverlay.visible?(now, last_interaction_at)
         }
 
         {:ok, %{box | content: content}, overlays: [overlay]}

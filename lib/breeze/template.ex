@@ -704,6 +704,7 @@ defmodule Breeze.Template do
       {:dynamic, name, expr} ->
         case eval_expr(expr, ctx) do
           nil -> []
+          false when name == "cursor-blink" -> [{:"cursor-blink", false}]
           false -> []
           true -> [{String.to_atom(name), true}]
           value -> [{String.to_atom(name), value}]
@@ -724,14 +725,18 @@ defmodule Breeze.Template do
   defp spread_pairs(value, mode) when is_map(value) do
     value
     |> Enum.map(fn {key, val} -> {convert_key(key, mode), val} end)
-    |> Enum.reject(fn {_key, val} -> val in [nil, false] end)
+    |> Enum.reject(fn {key, val} ->
+      is_nil(val) or (val == false and not (mode == :atom and key == :"cursor-blink"))
+    end)
   end
 
   defp spread_pairs(value, mode) when is_list(value) do
     if Keyword.keyword?(value) do
       value
       |> Enum.map(fn {key, val} -> {convert_key(key, mode), val} end)
-      |> Enum.reject(fn {_key, val} -> val in [nil, false] end)
+      |> Enum.reject(fn {key, val} ->
+        is_nil(val) or (val == false and not (mode == :atom and key == :"cursor-blink"))
+      end)
     else
       []
     end

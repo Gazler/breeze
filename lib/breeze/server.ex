@@ -2516,12 +2516,11 @@ defmodule Breeze.Server do
   defp schedule_animation(%{frame: %{display: display}} = state) when not is_nil(display),
     do: state
 
-  defp schedule_animation(%{frame: %{decorations: []}} = state), do: state
-
   defp schedule_animation(state) do
     case next_tick_delay(state) do
       nil ->
-        update_frame(state, next_tick_at: nil)
+        cancel_timer(state.frame.animation_timer)
+        update_frame(state, animation_timer: nil, animation_generation: nil, next_tick_at: nil)
 
       delay ->
         schedule_animation_tick(state, delay)
@@ -2616,6 +2615,8 @@ defmodule Breeze.Server do
   end
 
   defp pending_active?(_state), do: false
+
+  defp decoration_delay(%{every_ms: :change}, _state), do: nil
 
   defp decoration_delay(decoration, state) do
     cond do

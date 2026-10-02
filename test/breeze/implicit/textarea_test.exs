@@ -1,6 +1,29 @@
 defmodule Breeze.Implicit.TextareaTest do
   use ExUnit.Case, async: true
 
+  test "cursor blinking defaults on and can be disabled" do
+    mod = Breeze.Implicit.Textarea
+    {:ok, _, meta} = mod.init([], %{}, %{})
+    assert meta[:rerender_every] == 500
+
+    for value <- [false, "false"] do
+      {:ok, state, meta} = mod.init([], %{:"cursor-blink" => value}, %{})
+      assert meta[:rerender_every] == :change
+      box = %BackBreeze.Box{content: "", style: %BackBreeze.Style{}}
+
+      for now <- [0, 500, 1500] do
+        {:ok, _, overlays: [overlay]} =
+          mod.animate(:root, box, [], state, %{
+            layout: %{left: 0, top: 0, width: 10, height: 3},
+            now: now,
+            last_interaction_at: now - 10_000
+          })
+
+        assert overlay.visible?
+      end
+    end
+  end
+
   import Breeze.TestSupport.ProcessHelpers, only: [start_child_server: 1]
 
   alias BackBreeze.Box
