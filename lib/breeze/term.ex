@@ -43,6 +43,7 @@ defmodule Breeze.Term do
     rendered_boxes: %{},
     input_routing_signature: nil,
     mouse_targets: %{},
+    mouse_capture: nil,
     children: %{},
     frame_delay_ms: 16,
     render_timer: nil,

@@ -250,7 +250,7 @@ defmodule Breeze.RenderState do
                  ) do
               {{:change, event}, val, opts} when is_list(opts) ->
                 term = put_implicit_state(term, id, mod, val)
-                term = apply_implicit_term_options(term, opts)
+                term = apply_implicit_term_options(term, id, opts)
 
                 {view_state, term} = route_change(term, id, :change, event, route_change_fun)
 
@@ -282,12 +282,17 @@ defmodule Breeze.RenderState do
                 )
 
               {:noreply, val, opts} when is_list(opts) ->
-                term = put_implicit_state(term, id, mod, val)
+                previous_term = term
+
+                term =
+                  term
+                  |> put_implicit_state(id, mod, val)
+                  |> apply_mouse_capture(id, opts)
 
                 case Keyword.fetch(opts, :consumed) do
                   {:ok, false} -> delegate_event(term, id, payload, route_change_fun, visited)
                   {:ok, true} -> {:noreply, true, term}
-                  :error -> {:noreply, val != implicit, term}
+                  :error -> {:noreply, term != previous_term, term}
                 end
 
               {:noreply, val} ->
@@ -330,14 +335,31 @@ defmodule Breeze.RenderState do
     end
   end
 
-  defp apply_implicit_term_options(term, opts) do
-    Enum.reduce(opts, term, fn
+  defp apply_implicit_term_options(term, id, opts) do
+    opts
+    |> Enum.reduce(term, fn
       {:focus, focused}, acc ->
         %{acc | focused: focused, allow_unfocused?: is_nil(focused)}
 
       _, acc ->
         acc
     end)
+    |> apply_mouse_capture(id, opts)
+  end
+
+  defp apply_mouse_capture(term, id, opts) do
+    case Keyword.fetch(opts, :capture_mouse) do
+      {:ok, true} ->
+        if term.focused == id or get_in(term.focus_meta, [term.focused, :implicit_owner]) == id,
+          do: %{term | mouse_capture: id},
+          else: term
+
+      {:ok, false} when term.mouse_capture == id ->
+        %{term | mouse_capture: nil}
+
+      _ ->
+        term
+    end
   end
 
   defp route_change(term, id, type, event, route_change_fun) do

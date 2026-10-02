@@ -987,7 +987,7 @@ defmodule Breeze.ChildServer do
         allow_unfocused?: term.allow_unfocused? and is_nil(focused)
     }
 
-    {term, acc, box}
+    {clear_inactive_mouse_capture(term), acc, box}
   end
 
   defp input_routing_signature(term, opts) do
@@ -1091,7 +1091,7 @@ defmodule Breeze.ChildServer do
   end
 
   defp process_input(%{"mouse" => mouse} = event, term, opts) do
-    case mouse_target(term, mouse) do
+    case captured_mouse_target(term) || mouse_target(term, mouse) do
       nil ->
         handle_view_event(term.view, :input, event, term)
 
@@ -1489,6 +1489,7 @@ defmodule Breeze.ChildServer do
 
   defp cascade_info_theme_change(next_term, previous_term) do
     next_term
+    |> clear_inactive_mouse_capture()
     |> sync_theme_assigns()
     |> cascade_theme_if_changed(previous_term)
   end
@@ -2065,6 +2066,7 @@ defmodule Breeze.ChildServer do
 
   defp reply_from_input_result({:noreply, focused, consumed}, term, opts) do
     next_term = %{term | focused: focused, allow_unfocused?: is_nil(focused)}
+    next_term = clear_inactive_mouse_capture(next_term)
     maybe_notify_invalidate(next_term, opts)
     {:reply, {:noreply, next_term.focused, consumed}, next_term}
   end
@@ -2095,6 +2097,7 @@ defmodule Breeze.ChildServer do
 
   defp reply_from_input_result({:stop, focused, consumed}, term, opts) do
     next_term = %{term | focused: focused, allow_unfocused?: is_nil(focused)}
+    next_term = clear_inactive_mouse_capture(next_term)
     maybe_notify_invalidate(next_term, opts)
     {:stop, :normal, {:stop, next_term.focused, consumed}, next_term}
   end
@@ -2125,7 +2128,7 @@ defmodule Breeze.ChildServer do
         next_term
       end
 
-    next_term
+    clear_inactive_mouse_capture(next_term)
   end
 
   defp focused_implicit_id(_term, nil), do: nil
@@ -2172,6 +2175,17 @@ defmodule Breeze.ChildServer do
       Keyword.put(result_opts, :invalidate, false)
     end
   end
+
+  defp clear_inactive_mouse_capture(term),
+    do: %{term | mouse_capture: captured_mouse_target(term)}
+
+  defp captured_mouse_target(%{mouse_capture: id} = term) when is_binary(id) do
+    if id == focused_implicit_id(term, term.focused) and
+         Map.has_key?(term.implicit_state, id) and Map.has_key?(term.mouse_targets, id),
+       do: id
+  end
+
+  defp captured_mouse_target(_term), do: nil
 
   defp mouse_target(term, %{"x" => x, "y" => y}) do
     term.mouse_targets

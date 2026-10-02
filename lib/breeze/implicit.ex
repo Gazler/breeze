@@ -49,8 +49,8 @@ defmodule Breeze.Implicit do
   available.
 
   Every reply stores the returned state. Without an explicit `consumed` option,
-  a `:noreply` reply consumes the event when its state changes; otherwise the event
-  continues to the view. This preserves existing handler behavior.
+  a `:noreply` reply consumes the event when its implicit or routing state changes;
+  otherwise the event continues to the view.
   `consumed: true` explicitly stops routing. `consumed: false` opts into fallback
   delegation or view handling, regardless of whether the returned state changes.
 
@@ -67,6 +67,19 @@ defmodule Breeze.Implicit do
   change reply may also contain `focus: id` (or `focus: nil`) as its third
   element. Finally, `{{:delegate, id}, state}` sends the original input event to
   another implicit.
+
+  Noreply and change replies may include `capture_mouse: true` to route subsequent
+  mouse events to the focused implicit even outside its bounds. Omit the option
+  to keep capture unchanged, and return `capture_mouse: false` on release or
+  cancellation. Capture also ends when the implicit loses focus or is removed.
+  `"row"` and `"col"` remain relative to the element's content origin and are
+  clamped at zero; `"mouse"` retains the original screen coordinates.
+
+      def handle_event(_, %{"mouse" => %{"button" => "left", "action" => "press"}}, state),
+        do: {:noreply, state, capture_mouse: true}
+
+      def handle_event(_, %{"mouse" => %{"button" => "left", "action" => "release"}}, state),
+        do: {:noreply, state, capture_mouse: false}
 
   Use `br-delegate-events="target-id"` on an element to forward events its implicit
   does not consume to another element, without moving focus. Change and submit
@@ -156,12 +169,12 @@ defmodule Breeze.Implicit do
   @type init_result :: {:ok, state()} | {:ok, state(), [init_option()]}
 
   @typedoc "An option returned with an implicit event action."
-  @type event_option :: {:focus, String.t() | nil}
+  @type event_option :: {:focus, String.t() | nil} | {:capture_mouse, boolean()}
 
   @typedoc "A valid return value from `c:handle_event/3`."
   @type event_reply ::
           {:noreply, state()}
-          | {:noreply, state(), [{:consumed, boolean()}]}
+          | {:noreply, state(), [{:consumed, boolean()} | {:capture_mouse, boolean()}]}
           | {{:change, event_payload()}, state()}
           | {{:change, event_payload()}, state(), [event_option()]}
           | {{:submit, event_payload()}, state()}
