@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="150 -273 800 800" width="48" height="48" role="img" aria-label="Breeze logo">
+  <defs>
+    <linearGradient id="logoGradient" x1="176" y1="128" x2="848" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00F5FF"/>
+      <stop offset="58%" stop-color="#16B8FF"/>
+      <stop offset="100%" stop-color="#1689FF"/>
+    </linearGradient>
+  </defs>
+
+  <g fill="none" stroke="url(#logoGradient)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 188 102 A 92 92 0 0 1 372 102"/>
+    <path d="M 280 152 A 92 92 0 0 0 464 152"/>
+
+    <path d="M 412 102 A 92 92 0 0 1 596 102"/>
+    <path d="M 504 152 A 92 92 0 0 0 688 152"/>
+
+    <path d="M 636 102 A 92 92 0 0 1 820 102"/>
+    <path d="M 728 152 A 92 92 0 0 0 912 152"/>
+  </g>
+</svg>

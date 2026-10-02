@@ -1,4 +1,24 @@
 
+## [0.5.5] - 2026-10-02
+
+### Features
+
+- *(Breeze.ErrorView)* Make ErrorView a behaviour ([3f5c172](https://github.com/gazler/breeze/commit/3f5c172971d23c0ae6a60afadb5b79a65cdb0255))
+- *(Breeze.Theme)* Allow theme probing outside of InputRouter ([5c314e0](https://github.com/gazler/breeze/commit/5c314e02d600489ef829569e59eec9adaf2e47bb))
+- *(Breeze.Blocks)* Add lazy loading to the list component ([d2dc0bd](https://github.com/gazler/breeze/commit/d2dc0bda10d09bed24c8d8d75b80e55114e31d2c))
+- *(Breeze.Blocks)* Allow disabling cursor blinking ([92c7295](https://github.com/gazler/breeze/commit/92c729574ef31a200c87f6e9a55a709592ad5c20))
+- *(Breeze.Implicit)* Support mouse capture in event replies ([d72194b](https://github.com/gazler/breeze/commit/d72194bcafff889b60d4f59a462f6f57e470a8d9))
+
+### Bug Fixes
+
+- *(Breeze.RenderState)* Protect implicit events during code reload ([5d0276a](https://github.com/gazler/breeze/commit/5d0276ade11ac3fbded6782b15db52a292185b3c))
+- *(Breeze.Implicit.List)* Ensure height resizes on virtual list ([27655ac](https://github.com/gazler/breeze/commit/27655aca147656b891f8510e605eba117dc85719))
+- *(Breeze.ChildServer)* Remove closures from lazy list snapshotes ([dd07c37](https://github.com/gazler/breeze/commit/dd07c37b1635121a50a9a8135786ec3c33c0f417))
+- *(Breeze.Server.Inspector)* Ignore structs for class parsing ([563c237](https://github.com/gazler/breeze/commit/563c2379d690ab0c452cdaa5a83ddc22a26e54ef))
+
+### Performance
+
+- *(Breeze.Renderer)* Reduce work performed on each frame ([6b78c26](https://github.com/gazler/breeze/commit/6b78c26a09ec74779075a7744a18579bfbcfea0d))
 ## [0.5.4] - 2026-09-29
 
 ### Features

@@ -1,7 +1,7 @@
 defmodule Breeze.MixProject do
   use Mix.Project
 
-  @version "0.5.4"
+  @version "0.5.5"
 
   def project do
     [
@@ -42,7 +42,7 @@ defmodule Breeze.MixProject do
   defp deps do
     [
       {:termite, "~> 0.4.5 or ~> 0.5"},
-      {:back_breeze, "~> 0.4.4"},
+      {:back_breeze, "~> 0.4.5"},
       {:file_system, "~> 1.1", optional: true, runtime: Mix.env() == :dev},
       {:telemetry, "~> 1.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
@@ -60,7 +60,8 @@ defmodule Breeze.MixProject do
   defp docs do
     [
       main: "readme",
-      assets: %{"doc_src/assets" => "assets"},
+      logo: "doc_src/images/logo-48.svg",
+      assets: %{"doc_src/assets" => "assets", "doc_src/images" => "doc_src/images"},
       extras: [
         "README.md",
         "CHANGELOG.md",

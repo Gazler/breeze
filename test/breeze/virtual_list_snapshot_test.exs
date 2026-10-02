@@ -30,10 +30,12 @@ defmodule Breeze.VirtualListSnapshotTest do
       Breeze.ChildServer.render_snapshot(session.pid, terminal: session.terminal)
 
     assert box.content =~ "Item 1"
-    assert box.children != []
+    # BackBreeze may flatten grid children; the snapshot must still contain no closures.
+    refute contains_function?({acc, box})
     bytes = :erts_debug.flat_size({acc, box}) * :erlang.system_info(:wordsize)
     assert bytes < 200_000
     assert {:ok, _, rendered} = Breeze.ChildServer.render(session.pid, terminal: session.terminal)
+    refute contains_function?(rendered)
     assert :erts_debug.flat_size(rendered) * :erlang.system_info(:wordsize) < 200_000
   end
 
@@ -57,4 +59,15 @@ defmodule Breeze.VirtualListSnapshotTest do
     Breeze.Test.input(session, "Home")
     assert Breeze.Test.render_text!(session) =~ "Item 1"
   end
+
+  defp contains_function?(term) when is_function(term), do: true
+
+  defp contains_function?(term) when is_map(term),
+    do: term |> :maps.to_list() |> Enum.any?(&contains_function?/1)
+
+  defp contains_function?(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.any?(&contains_function?/1)
+
+  defp contains_function?(term) when is_list(term), do: Enum.any?(term, &contains_function?/1)
+  defp contains_function?(_term), do: false
 end

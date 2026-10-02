@@ -1,15 +1,16 @@
 # Breeze
 
-Breeze is a TUI library with a LiveView-inspired API, built
-without third-party NIFs.
+<picture>
+  <img src="./doc_src/images/logo.svg" alt="Breeze logo" width="128" />
+</picture>
+
+Breeze ([defbreeze.com](https://defbreeze.com)) is a TUI library with a
+LiveView-inspired API, built without third-party NIFs.
+
 
 Breeze is built on top of [Termite](https://github.com/Gazler/termite) and
 [BackBreeze](https://github.com/Gazler/back_breeze).
 
-## Project status
-
-**Breeze is still evolving.** It provides a practical foundation for building
-terminal interfaces with familiar LiveView-style patterns.
 
 ## Features
 
@@ -40,7 +41,7 @@ Add `breeze` to the dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:breeze, "~> 0.5.1"}
+    {:breeze, "~> 0.5.5"}
   ]
 end
 ```
@@ -94,7 +95,7 @@ Breeze includes a `mix format` plugin for `~H` templates:
 ## Examples
 
 ```elixir
-Mix.install([{:breeze, "~> 0.5.0"}])
+Mix.install([{:breeze, "~> 0.5.5"}])
 
 defmodule Demo do
   use Breeze.View
