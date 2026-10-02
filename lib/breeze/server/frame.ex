@@ -21,11 +21,13 @@ defmodule Breeze.Server.Frame do
     |> Enum.take(screen_height)
   end
 
-  def build_payload(nil, lines, _prev_overlays, overlays, screen_width) do
+  def build_payload(prev_lines, lines, prev_overlays, overlays, screen_width, opts \\ [])
+
+  def build_payload(nil, lines, _prev_overlays, overlays, screen_width, _opts) do
     full_redraw_payload(lines, overlays, screen_width)
   end
 
-  def build_payload(prev_lines, lines, prev_overlays, overlays, screen_width) do
+  def build_payload(prev_lines, lines, prev_overlays, overlays, screen_width, opts) do
     changed_base_rows = changed_base_rows(prev_lines, lines)
     changed_overlay_rows = changed_overlay_rows(prev_overlays, overlays)
 
@@ -44,7 +46,8 @@ defmodule Breeze.Server.Frame do
           lines,
           MapSet.union(changed_base_rows, repaired_overlay_rows),
           repaired_overlay_rows,
-          screen_width
+          screen_width,
+          Keyword.get(opts, :cell_patch, false)
         ),
         overlay_patch_payload(overlays, changed_rows)
       ])
@@ -263,7 +266,14 @@ defmodule Breeze.Server.Frame do
     end)
   end
 
-  defp row_patch_payload(previous_lines, lines, changed_rows, repaired_rows, screen_width) do
+  defp row_patch_payload(
+         previous_lines,
+         lines,
+         changed_rows,
+         repaired_rows,
+         screen_width,
+         cell_patch?
+       ) do
     previous_lines = List.to_tuple(previous_lines)
     lines = List.to_tuple(lines)
     line_count = tuple_size(lines)
@@ -271,7 +281,7 @@ defmodule Breeze.Server.Frame do
     changed_rows
     |> Enum.filter(&(&1 >= 0 and &1 < line_count))
     |> Enum.sort()
-    |> Enum.map(fn row ->
+    |> Enum.map_reduce(nil, fn row, cache ->
       line = line_at(lines, row, line_count)
       previous = line_at(previous_lines, row, tuple_size(previous_lines))
 
@@ -279,13 +289,36 @@ defmodule Breeze.Server.Frame do
         if not MapSet.member?(repaired_rows, row),
           do: changed_prefix(previous, line, screen_width)
 
-      if is_binary(prefix) do
-        position = ["\e[", Integer.to_string(row + 1), ";1H"]
-        [position, row_line_payload(prefix, position)]
-      else
-        write_row_payload(row, line, screen_width)
-      end
+      {patch, cache} =
+        if cell_patch? and not MapSet.member?(repaired_rows, row) do
+          Breeze.Server.CellPatch.build(previous, line, row, screen_width, cache)
+        else
+          {nil, cache}
+        end
+
+      position = ["\e[", Integer.to_string(row + 1), ";1H"]
+      content = if is_binary(prefix), do: prefix, else: line
+      minimum_row_bytes = IO.iodata_length(position) + byte_size(content)
+
+      payload =
+        if is_binary(patch) and byte_size(patch) < minimum_row_bytes do
+          # Even the cheapest row redraw is larger. Avoid calculating its
+          # display width and wide-glyph prepaint only to discard the result.
+          patch
+        else
+          baseline =
+            if is_binary(prefix),
+              do: [position, row_line_payload(prefix, position)],
+              else: write_row_payload(row, line, screen_width)
+
+          if is_binary(patch) and byte_size(patch) < IO.iodata_length(baseline),
+            do: patch,
+            else: baseline
+        end
+
+      {payload, cache}
     end)
+    |> elem(0)
     |> IO.iodata_to_binary()
   end
 

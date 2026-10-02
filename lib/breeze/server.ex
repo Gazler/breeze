@@ -1606,6 +1606,7 @@ defmodule Breeze.Server do
       |> update_frame(base_output: base_output)
       |> update_rendered(
         elements: viewports_from_acc(result.acc),
+        scroll_regions: Breeze.Server.ScrollFrame.regions(result.acc),
         boxes: result.acc.boxes,
         screen_dim?: screen_dim_in_acc?(result.acc)
       )
@@ -2234,10 +2235,16 @@ defmodule Breeze.Server do
   end
 
   defp validate_child_patch_render(%{child_acc: child_acc} = ctx) do
-    if screen_dim_in_acc?(child_acc) do
-      {:error, :screen_dim_added}
-    else
-      ctx |> Map.delete(:child_acc) |> validate_child_patch_render()
+    cond do
+      screen_dim_in_acc?(child_acc) ->
+        {:error, :screen_dim_added}
+
+      Map.get(ctx.state.rendered, :scroll_regions, []) != [] or
+          Breeze.Server.ScrollFrame.regions(child_acc) != [] ->
+        {:error, :scroll_container}
+
+      true ->
+        ctx |> Map.delete(:child_acc) |> validate_child_patch_render()
     end
   end
 
@@ -2309,6 +2316,7 @@ defmodule Breeze.Server do
     payload = Frame.child_patch_payload(fragment, ctx.viewport)
     terminal = Termite.Terminal.write(ctx.state.terminal_state.terminal, payload)
     written_at = System.monotonic_time(:microsecond)
+    report_frame_write(ctx.state, byte_size(payload), byte_size(payload), :default, :child_patch)
     screen_width = ctx.state.terminal_state.terminal.size.width
 
     last_lines =
@@ -2331,6 +2339,7 @@ defmodule Breeze.Server do
         last_lines: last_lines
       )
       |> Debug.put_child_patch_stats(ctx, fragment, composed_at, written_at)
+      |> Debug.put_stat(:last_frame_bytes, byte_size(payload))
 
     notify_runtime_hooks(state, :rendered, %{
       cause: :child_patch,
@@ -2363,25 +2372,50 @@ defmodule Breeze.Server do
 
     {lines, overlays} = FrameDisplay.resolve(state, live_lines, live_overlays)
 
-    frame_payload =
+    regions =
+      if state.frame.display == nil, do: Map.get(state.rendered, :scroll_regions, []), else: []
+
+    baseline =
       Frame.build_payload(
         state.frame.last_lines,
         lines,
         state.frame.last_overlays || [],
         overlays,
-        state.terminal_state.terminal.size.width
+        state.terminal_state.terminal.size.width,
+        cell_patch: regions != []
       )
+
+    result =
+      Breeze.Server.ScrollFrame.build(
+        state.frame.last_lines,
+        lines,
+        state.frame.last_overlays || [],
+        overlays,
+        state.terminal_state.terminal.size.width,
+        regions,
+        baseline
+      )
+
+    frame_payload = result.payload
 
     composed_at = System.monotonic_time(:microsecond)
 
     {terminal, write_duration} =
-      if frame_payload == state.frame.last_payload do
+      if frame_payload == "" do
         {state.terminal_state.terminal, 0}
       else
         terminal = Termite.Terminal.write(state.terminal_state.terminal, frame_payload)
         written_at = System.monotonic_time(:microsecond)
         {terminal, written_at - composed_at}
       end
+
+    report_frame_write(
+      state,
+      byte_size(frame_payload),
+      result.baseline_bytes,
+      result.mode,
+      :frame
+    )
 
     state
     |> put_in([Access.key(:terminal_state), Access.key(:terminal)], terminal)
@@ -2397,6 +2431,14 @@ defmodule Breeze.Server do
     |> Debug.put_stat(:last_frame_bytes, byte_size(frame_payload))
     |> Debug.put_stat(:overlay_count, length(overlays))
     |> Inspector.push_snapshot_now()
+  end
+
+  defp report_frame_write(state, bytes, baseline_bytes, mode, path) do
+    Breeze.Telemetry.execute(
+      [:breeze, :frame, :written],
+      %{bytes: bytes, baseline_bytes: baseline_bytes, saved_bytes: baseline_bytes - bytes},
+      %{server: self(), view: state.view, mode: mode, path: path}
+    )
   end
 
   defp initialize_decorations(decorations) do
