@@ -2084,6 +2084,45 @@ defmodule Breeze.InputRouterThemeSyncTest do
     stop_gen_server(pid)
   end
 
+  for outcome <- [:timeout, :complete] do
+    @outcome outcome
+
+    test "late runtime palette replies stay out of input after #{@outcome} drain expiry" do
+      {:ok, pid} =
+        start_input_router(
+          view: ThemeProbeLeakView,
+          start_opts: [parent: self()],
+          hide_cursor: false,
+          terminal_opts: [adapter: DelayedPaletteAdapter, owner: self()]
+        )
+
+      reader = :sys.get_state(pid).reader
+      send(pid, {reader, {:data, "t"}})
+      assert_receive :theme_switch
+      assert_receive {:palette_probe_partial_sent, ^pid}
+      probe = :sys.get_state(pid).theme_probe
+
+      case @outcome do
+        :timeout -> send(pid, {:theme_probe_timeout, probe.key, probe.ref})
+        :complete -> send(pid, DelayedPaletteAdapter.late_reply(reader))
+      end
+
+      send(pid, {reader, {:data, "\e]10;rgb:1111/"}})
+      send(pid, {:theme_probe_drain_timeout, probe.key, probe.ref})
+      send(pid, {reader, {:data, "2222/3333\a"}})
+      send(pid, DelayedPaletteAdapter.late_reply(reader))
+      send(pid, {reader, {:data, "/"}})
+      assert_receive {:leaked_input, %{"key" => "/"}}
+      refute_receive {:leaked_input, _}, 0
+
+      send(pid, {reader, {:data, "\e"}})
+      assert_receive {:leaked_input, %{"key" => "Escape"}}, 500
+      refute_receive {:leaked_input, _}, 0
+
+      stop_gen_server(pid)
+    end
+  end
+
   test "late runtime palette replies are drained instead of forwarded as input" do
     parent = self()
 

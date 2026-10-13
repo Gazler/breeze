@@ -188,7 +188,7 @@ defmodule Breeze.InputRouter do
   end
 
   def handle_info({kind, _key, _ref} = message, state)
-      when kind in [:theme_probe_timeout, :theme_probe_drain_timeout] do
+      when kind in [:theme_probe_timeout, :theme_probe_drain_timeout, :theme_probe_escape_timeout] do
     {probe, input} = PaletteSession.handle_timeout(state.theme_probe, message)
     state = %{state | theme_probe: probe}
     if input == "", do: {:noreply, state}, else: route_reader_data(state.reader, input, state)
@@ -310,14 +310,21 @@ defmodule Breeze.InputRouter do
     :exit, _reason -> false
   end
 
-  defp maybe_start_theme_probe(%{theme_probe: probe} = state, _theme) when is_map(probe),
-    do: state
+  defp maybe_start_theme_probe(%{theme_probe: %{status: status}} = state, _theme)
+       when status in [:active, :draining],
+       do: state
 
   defp maybe_start_theme_probe(state, theme) do
     if requested_system_theme?(theme) do
       case PaletteSession.start_probe(state.terminal) do
-        nil -> state
-        probe -> %{state | terminal: probe.terminal, theme_probe: probe}
+        nil ->
+          state
+
+        probe ->
+          # Reprobing after a fallback must not lose a delayed reply prefix.
+          buffer = if state.theme_probe, do: state.theme_probe.buffer, else: ""
+          {probe, ""} = PaletteSession.feed(probe, buffer)
+          %{state | terminal: probe.terminal, theme_probe: probe}
       end
     else
       state
