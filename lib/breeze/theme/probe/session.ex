@@ -17,12 +17,20 @@ defmodule Breeze.Theme.Probe.Session do
   Call `start_probe/2` in the transport owner before starting a system-themed view.
   Pass raw terminal bytes through `feed/2` before decoding keyboard input and
   forward only the returned input. Store the returned session, including `nil`.
-  Forward `{:theme_probe_timeout, key, ref}` and
-  `{:theme_probe_drain_timeout, key, ref}` messages to `handle_timeout/2`, routing
+  Forward `{:theme_probe_timeout, key, ref}`, `{:theme_probe_drain_timeout, key, ref}`,
+  and `{:theme_probe_escape_timeout, key, ref}` messages to `handle_timeout/2`, routing
   any returned input normally. Results populate Breeze's terminal palette cache
   and notify waiting views automatically.
+
+  Keep feeding the session after its status becomes `:closed`: late replies are
+  still consumed, including replies split across the drain deadline. Closing
+  freezes the palette; `finished?` indicates whether a complete palette arrived.
+  A standalone Escape is released after 50 ms so it cannot remain buffered
+  indefinitely while waiting to distinguish it from an OSC reply prefix.
   """
   alias Breeze.Theme.Probe
+
+  @escape_timeout_ms 50
 
   @doc "Starts a probe, writing queries and scheduling timeouts in the calling process."
   def start_probe(terminal, opts \\ []) do
@@ -41,6 +49,8 @@ defmodule Breeze.Theme.Probe.Session do
           palette: %{},
           timeout: timeout,
           timer: timer,
+          escape_ref: nil,
+          escape_timer: nil,
           status: :active,
           finished?: false
         }
@@ -53,9 +63,14 @@ defmodule Breeze.Theme.Probe.Session do
   @doc "Consumes palette replies, retaining fragmented replies and returning ordinary input."
   def feed(nil, data), do: {nil, data}
 
+  def feed(%{status: :closed} = probe, data) do
+    {nil, buffer, input} = consume(probe.buffer <> data, nil, "")
+    {put_buffer(probe, buffer), input}
+  end
+
   def feed(probe, data) do
     {palette, buffer, input} = consume(probe.buffer <> data, probe.palette, "")
-    probe = %{probe | buffer: buffer, palette: palette}
+    probe = put_buffer(%{probe | palette: palette}, buffer)
 
     if Probe.runtime_palette_probe_complete?(palette) and not probe.finished? do
       Probe.finish_runtime_palette_probe(probe.terminal, palette)
@@ -78,11 +93,41 @@ defmodule Breeze.Theme.Probe.Session do
       ) do
     Process.cancel_timer(probe.timer)
     unless probe.finished?, do: Probe.finish_runtime_palette_probe(probe.terminal, probe.palette)
-    input = if String.starts_with?(probe.buffer, "\e]"), do: "", else: probe.buffer
-    {nil, input}
+    # Retain the prefix even when the rest of a reply arrives after the deadline.
+    {put_buffer(%{probe | status: :closed, timer: nil}, probe.buffer), ""}
+  end
+
+  def handle_timeout(
+        %{key: key, escape_ref: ref, buffer: "\e"} = probe,
+        {:theme_probe_escape_timeout, key, ref}
+      )
+      when is_reference(ref) do
+    {put_buffer(probe, ""), "\e"}
   end
 
   def handle_timeout(probe, _message), do: {probe, ""}
+
+  defp put_buffer(probe, buffer) do
+    if timer = Map.get(probe, :escape_timer), do: Process.cancel_timer(timer)
+
+    {ref, timer} =
+      if buffer == "\e" do
+        ref = make_ref()
+
+        timer =
+          Process.send_after(
+            self(),
+            {:theme_probe_escape_timeout, probe.key, ref},
+            @escape_timeout_ms
+          )
+
+        {ref, timer}
+      else
+        {nil, nil}
+      end
+
+    Map.merge(probe, %{buffer: buffer, escape_ref: ref, escape_timer: timer})
+  end
 
   defp drain(%{status: :draining} = probe), do: probe
 
@@ -109,7 +154,12 @@ defmodule Breeze.Theme.Probe.Session do
         <<sequence::binary-size(^size), rest::binary>> = data
 
         if Regex.match?(~r/^\e\](?:10;|11;|4;\d+;)rgb:/, sequence) do
-          {palette, _} = Probe.merge_runtime_palette_data("", palette, sequence)
+          palette =
+            if is_map(palette) do
+              {palette, _} = Probe.merge_runtime_palette_data("", palette, sequence)
+              palette
+            end
+
           consume(rest, palette, input)
         else
           consume(rest, palette, input <> sequence)
