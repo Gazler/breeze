@@ -257,6 +257,7 @@ defmodule Breeze.ChildServer do
         acc
       end
 
+    {acc, decorations} = maybe_compact_snapshot_metadata(acc, decorations, opts)
     {:reply, {:ok, acc, box, decorations}, term}
   rescue
     exception ->
@@ -363,6 +364,43 @@ defmodule Breeze.ChildServer do
     notify_invalidate(next_term)
     {:reply, :ok, next_term}
   end
+
+  defp maybe_compact_snapshot_metadata(acc, decorations, opts) do
+    if Keyword.get(opts, :compact_snapshot, false) and not Keyword.get(opts, :render_tree?, false) do
+      # Input routing belongs to this child; the compositor needs dimensions,
+      # flags and animation state, not another copy of the routing signature.
+      acc =
+        acc
+        |> Map.delete(:input_routing_signature)
+        |> Map.update!(:flags, &compositor_flags/1)
+        |> Map.update!(:elements, fn elements ->
+          Map.new(elements, fn {id, flags} -> {id, compositor_flags(flags)} end)
+        end)
+
+      decorations =
+        Enum.map(decorations, fn decoration ->
+          if function_exported?(decoration.mod, :animation_state, 2) do
+            %{
+              decoration
+              | state: decoration.mod.animation_state(decoration.state, decoration.layout)
+            }
+          else
+            decoration
+          end
+        end)
+
+      {acc, decorations}
+    else
+      {acc, decorations}
+    end
+  end
+
+  # Root composition only uses IDs to associate dimensions, the live marker
+  # to skip dimensions already supplied by child views, and screen dimming.
+  # Input routing and custom attributes stay in the owning view. Inspector
+  # snapshots bypass this projection and retain all flags.
+  defp compositor_flags(flags),
+    do: Keyword.take(flags, [:id, :__live_dimension__, :"screen-dim"])
 
   defp maybe_compact_snapshot_box(box, opts) do
     if Keyword.get(opts, :compact_snapshot, false) do

@@ -234,5 +234,19 @@ defmodule Breeze.Implicit do
               animation_context()
             ) :: animation_reply()
 
-  @optional_callbacks handle_event: 3, animate: 5
+  @doc """
+  Projects read-only state passed to `animate/5` in a compact snapshot.
+
+  Event handling and local rendering retain the original state in the view
+  process. The compositor receives the projected state for painting and
+  asynchronous animation, so `animate/5` must accept both representations.
+  Use this to exclude buffers or precompute visible data before crossing a
+  process boundary. The callback must not schedule work or mutate view state.
+
+  Without this callback, animation receives the original state as before.
+  Inspector snapshots also retain the original state.
+  """
+  @callback animation_state(state(), Breeze.Viewport.t() | map() | nil) :: state()
+
+  @optional_callbacks handle_event: 3, animate: 5, animation_state: 2
 end
