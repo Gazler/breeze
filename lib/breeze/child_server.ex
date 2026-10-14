@@ -461,22 +461,22 @@ defmodule Breeze.ChildServer do
 
     case handle_view_info(term.view, message, term) do
       {:noreply, next_term} ->
-        next_term = cascade_info_theme_change(next_term, term)
+        next_term = prepare_info_reply(next_term, term)
         notify_invalidate(next_term)
         {:noreply, next_term}
 
       {:noreply, next_term, opts} ->
-        next_term = cascade_info_theme_change(next_term, term)
+        next_term = prepare_info_reply(next_term, term)
         maybe_notify_invalidate(next_term, opts)
         {:noreply, next_term}
 
       {:stop, next_term} ->
-        next_term = cascade_info_theme_change(next_term, term)
+        next_term = prepare_info_reply(next_term, term)
         notify_invalidate(next_term)
         {:stop, :normal, next_term}
 
       {:stop, next_term, opts} ->
-        next_term = cascade_info_theme_change(next_term, term)
+        next_term = prepare_info_reply(next_term, term)
         maybe_notify_invalidate(next_term, opts)
         {:stop, :normal, next_term}
     end
@@ -1525,9 +1525,9 @@ defmodule Breeze.ChildServer do
       next_term.apply_theme_defaults? != previous_term.apply_theme_defaults?
   end
 
-  defp cascade_info_theme_change(next_term, previous_term) do
-    next_term
-    |> clear_inactive_mouse_capture()
+  defp prepare_info_reply(next_term, previous_term) do
+    previous_term
+    |> apply_focus_transitions(next_term)
     |> sync_theme_assigns()
     |> cascade_theme_if_changed(previous_term)
   end
