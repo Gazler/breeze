@@ -44,6 +44,7 @@ defmodule Breeze.Server.State.Frame do
     :display_owner,
     :display_owner_ref,
     :display_sys_timeout,
+    renderer: Breeze.Server.Frame,
     base_output: "",
     last_overlays: [],
     display_suspended_pids: [],
