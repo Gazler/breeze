@@ -15,6 +15,13 @@ defmodule Breeze.TestSupport.ProcessHelpersTest do
     def terminate(_reason, _state), do: exit(:shutdown)
   end
 
+  test "stop_gen_server tolerates an already stopped process" do
+    {:ok, pid} = Agent.start(fn -> nil end)
+    :ok = GenServer.stop(pid)
+
+    assert :ok = stop_gen_server(pid)
+  end
+
   @tag capture_log: true
   test "stop_gen_server tolerates shutdown nested through sys terminate" do
     {:ok, pid} = ShutdownOnTerminate.start()

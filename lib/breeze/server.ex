@@ -54,6 +54,9 @@ defmodule Breeze.Server do
       when Breeze starts the terminal.
     * `:terminal` - an existing `%Termite.Terminal{}` to use instead
       of starting one.
+    * `:frame_renderer` - module implementing `build_payload/5` with the same
+      arguments as `Breeze.Server.Frame`. Defaults to `Breeze.Server.Frame`.
+      Receives complete base rows and overlays before terminal/SSH output.
     * `:render_errors` - crash rendering options. Pass
       `view: MyErrorView` to override the crash screen view. Defaults
       to the built-in crash view. See `Breeze.ErrorView` for the custom view
@@ -132,6 +135,7 @@ defmodule Breeze.Server do
           | {:mouse, boolean() | keyword()}
           | {:terminal_opts, keyword()}
           | {:terminal, %Termite.Terminal{}}
+          | {:frame_renderer, module()}
           | {:reload, boolean() | keyword() | {module(), atom(), list()}}
           | {:theme, Breeze.Theme.t() | map() | keyword() | atom()}
           | {:global_keybindings, list()}
@@ -347,6 +351,13 @@ defmodule Breeze.Server do
   @impl true
   def init(opts) do
     view = Keyword.fetch!(opts, :view)
+    frame_renderer = Keyword.get(opts, :frame_renderer, Frame)
+
+    unless Code.ensure_loaded?(frame_renderer) and
+             function_exported?(frame_renderer, :build_payload, 5) do
+      raise ArgumentError, "frame_renderer must implement build_payload/5"
+    end
+
     start_opts = Keyword.get(opts, :start_opts, [])
     internal_opts = internal_opts(opts)
     child_process_flags = Keyword.get(internal_opts, :child_process_flags, [])
@@ -490,6 +501,7 @@ defmodule Breeze.Server do
           global_keybindings: Keyword.get(opts, :global_keybindings, [])
         },
         frame: %State.Frame{
+          renderer: frame_renderer,
           last_render_at: System.monotonic_time(:millisecond),
           display_sys_timeout: Keyword.get(internal_opts, :frame_display_sys_timeout)
         },
@@ -2305,10 +2317,6 @@ defmodule Breeze.Server do
 
   defp write_invalidated_child_patch(ctx) do
     fragment = invalidated_child_fragment(ctx)
-    composed_at = System.monotonic_time(:microsecond)
-    payload = Frame.child_patch_payload(fragment, ctx.viewport)
-    terminal = Termite.Terminal.write(ctx.state.terminal_state.terminal, payload)
-    written_at = System.monotonic_time(:microsecond)
     screen_width = ctx.state.terminal_state.terminal.size.width
 
     last_lines =
@@ -2318,6 +2326,25 @@ defmodule Breeze.Server do
            ctx.state.terminal_state.terminal.size.height
          ))
       |> Frame.patch_lines(fragment, ctx.viewport, screen_width)
+
+    renderer = Map.get(ctx.state.frame, :renderer, Frame)
+
+    payload =
+      if renderer == Frame do
+        Frame.child_patch_payload(fragment, ctx.viewport)
+      else
+        renderer.build_payload(
+          ctx.state.frame.last_lines,
+          last_lines,
+          ctx.state.frame.last_overlays,
+          ctx.state.frame.last_overlays,
+          screen_width
+        )
+      end
+
+    composed_at = System.monotonic_time(:microsecond)
+    terminal = Termite.Terminal.write(ctx.state.terminal_state.terminal, payload)
+    written_at = System.monotonic_time(:microsecond)
 
     base_output =
       Frame.patch_output(ctx.state.frame.base_output, fragment, ctx.viewport, screen_width)
@@ -2331,6 +2358,7 @@ defmodule Breeze.Server do
         last_lines: last_lines
       )
       |> Debug.put_child_patch_stats(ctx, fragment, composed_at, written_at)
+      |> Debug.put_stat(:last_frame_bytes, byte_size(payload))
 
     notify_runtime_hooks(state, :rendered, %{
       cause: :child_patch,
@@ -2363,8 +2391,10 @@ defmodule Breeze.Server do
 
     {lines, overlays} = FrameDisplay.resolve(state, live_lines, live_overlays)
 
+    renderer = Map.get(state.frame, :renderer, Frame)
+
     frame_payload =
-      Frame.build_payload(
+      renderer.build_payload(
         state.frame.last_lines,
         lines,
         state.frame.last_overlays || [],
@@ -2375,7 +2405,7 @@ defmodule Breeze.Server do
     composed_at = System.monotonic_time(:microsecond)
 
     {terminal, write_duration} =
-      if frame_payload == state.frame.last_payload do
+      if frame_payload == "" do
         {state.terminal_state.terminal, 0}
       else
         terminal = Termite.Terminal.write(state.terminal_state.terminal, frame_payload)

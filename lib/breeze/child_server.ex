@@ -257,6 +257,7 @@ defmodule Breeze.ChildServer do
         acc
       end
 
+    {acc, decorations} = maybe_compact_snapshot_metadata(acc, decorations, opts)
     {:reply, {:ok, acc, box, decorations}, term}
   rescue
     exception ->
@@ -364,6 +365,43 @@ defmodule Breeze.ChildServer do
     {:reply, :ok, next_term}
   end
 
+  defp maybe_compact_snapshot_metadata(acc, decorations, opts) do
+    if Keyword.get(opts, :compact_snapshot, false) and not Keyword.get(opts, :render_tree?, false) do
+      # Input routing belongs to this child; the compositor needs dimensions,
+      # flags and animation state, not another copy of the routing signature.
+      acc =
+        acc
+        |> Map.delete(:input_routing_signature)
+        |> Map.update!(:flags, &compositor_flags/1)
+        |> Map.update!(:elements, fn elements ->
+          Map.new(elements, fn {id, flags} -> {id, compositor_flags(flags)} end)
+        end)
+
+      decorations =
+        Enum.map(decorations, fn decoration ->
+          if function_exported?(decoration.mod, :animation_state, 2) do
+            %{
+              decoration
+              | state: decoration.mod.animation_state(decoration.state, decoration.layout)
+            }
+          else
+            decoration
+          end
+        end)
+
+      {acc, decorations}
+    else
+      {acc, decorations}
+    end
+  end
+
+  # Root composition only uses IDs to associate dimensions, the live marker
+  # to skip dimensions already supplied by child views, and screen dimming.
+  # Input routing and custom attributes stay in the owning view. Inspector
+  # snapshots bypass this projection and retain all flags.
+  defp compositor_flags(flags),
+    do: Keyword.take(flags, [:id, :__live_dimension__, :"screen-dim"])
+
   defp maybe_compact_snapshot_box(box, opts) do
     if Keyword.get(opts, :compact_snapshot, false) do
       %{box | children: [], layer_map: %{}, fixed_layer_map: %{}}
@@ -423,22 +461,22 @@ defmodule Breeze.ChildServer do
 
     case handle_view_info(term.view, message, term) do
       {:noreply, next_term} ->
-        next_term = cascade_info_theme_change(next_term, term)
+        next_term = prepare_info_reply(next_term, term)
         notify_invalidate(next_term)
         {:noreply, next_term}
 
       {:noreply, next_term, opts} ->
-        next_term = cascade_info_theme_change(next_term, term)
+        next_term = prepare_info_reply(next_term, term)
         maybe_notify_invalidate(next_term, opts)
         {:noreply, next_term}
 
       {:stop, next_term} ->
-        next_term = cascade_info_theme_change(next_term, term)
+        next_term = prepare_info_reply(next_term, term)
         notify_invalidate(next_term)
         {:stop, :normal, next_term}
 
       {:stop, next_term, opts} ->
-        next_term = cascade_info_theme_change(next_term, term)
+        next_term = prepare_info_reply(next_term, term)
         maybe_notify_invalidate(next_term, opts)
         {:stop, :normal, next_term}
     end
@@ -1487,9 +1525,9 @@ defmodule Breeze.ChildServer do
       next_term.apply_theme_defaults? != previous_term.apply_theme_defaults?
   end
 
-  defp cascade_info_theme_change(next_term, previous_term) do
-    next_term
-    |> clear_inactive_mouse_capture()
+  defp prepare_info_reply(next_term, previous_term) do
+    previous_term
+    |> apply_focus_transitions(next_term)
     |> sync_theme_assigns()
     |> cascade_theme_if_changed(previous_term)
   end
