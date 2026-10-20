@@ -1,6 +1,8 @@
 defmodule Breeze.ImplicitReloadSafetyTest do
   use ExUnit.Case, async: false
 
+  import Breeze.TestSupport.ProcessHelpers, only: [stop_gen_server: 1]
+
   defmodule View do
     use Breeze.View
 
@@ -34,7 +36,7 @@ defmodule Breeze.ImplicitReloadSafetyTest do
       pid = start_view(@owner, terminal, reload)
 
       on_exit(fn ->
-        if Process.alive?(pid), do: GenServer.stop(pid)
+        stop_gen_server(pid)
         :code.purge(module)
         :code.delete(module)
       end)
